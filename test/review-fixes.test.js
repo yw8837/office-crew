@@ -319,7 +319,9 @@ test('최종 재검증 A·B MAX_BOT_TOKEN 같은 비밀값은 가리고, AUTH0_D
 
 test('최종 재검증 3차 실제 설정(Aider·Dify·tiktoken, 중간에 AUTH·COOKIE 가 낀 이름)은 그대로, BASIC_AUTH·TS_AUTHKEY·SESSION_TOKENS 는 가린다', async () => {
   const plain = { AIDER_MAX_CHAT_HISTORY_TOKENS: '4096', INDEXING_MAX_SEGMENTATION_TOKENS_LENGTH: '1000', AIDER_MAP_TOKENS: '1024', TIKTOKEN_CACHE_DIR: '/tmp/tk', SSH_AUTH_SOCK: '/tmp/agent.sock', AUTH_TRUST_HOST: 'true', COOKIE_DOMAIN: '.example.com', SESSION_COOKIE_NAME: 'sid',
-    AUTH_GITHUB_ID: 'Iv1.abc', GF_AUTH_DISABLE_LOGIN_FORM: 'true', REMEMBER_COOKIE_DURATION: '3600' };
+    AUTH_GITHUB_ID: 'Iv1.abc', GF_AUTH_DISABLE_LOGIN_FORM: 'true', REMEMBER_COOKIE_DURATION: '3600',
+    // 1.1: 설정을 뜻하는 끝 단어(관문 검증 N2) — Grafana·Laravel·Spring 의 실제 설정 이름
+    GF_AUTH_GENERIC_OAUTH_AUTO_LOGIN: 'false', GF_AUTH_GENERIC_OAUTH_USE_PKCE: 'true', AUTH_GUARD: 'web', AUTH_MODEL: 'App\\User', CSRF_COOKIE_MASKED: 'true', SERVER_SERVLET_SESSION_COOKIE_HTTP_ONLY: 'true' };
   // 이름 가운데 AUTH 가 있어도 끝 단어가 설정이 아니면 비밀값(GitLab CI·yarn·워드프레스 도커가 실제로 쓰는 이름)
   const secret = { BASIC_AUTH: 'user:pass-abcdefgh', NPM_CONFIG__AUTH: 'dXNlcjpwYXNz-abcd', TS_AUTHKEY: 'tskey-abcdefgh-1111', SESSION_TOKENS: 'st-abcdefgh-2222', BEARER2: 'b2-abcdefgh-3333', AUTH_HEADER: 'Bearer abcdefgh-4444',
     DOCKER_AUTH_CONFIG: '{"auths":{"r":{"auth":"abcdefgh"}}}', YARN_NPM_AUTH_IDENT: 'user:pass-abcdefgh', WORDPRESS_AUTH_SALT: 'salt-abcdefgh-5555' };

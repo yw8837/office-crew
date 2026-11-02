@@ -48,7 +48,11 @@ const PLAIN_TAIL = new Set(['trust', 'sock', 'socket', 'domain', 'domains', 'nam
   'enabled', 'enable', 'disabled', 'disable', 'active', 'required', 'type', 'method', 'methods', 'provider', 'version', 'mode', 'user', 'username', 'id', 'issuer',
   'email', 'timeout', 'ttl', 'age', 'expiry', 'expires', 'expire', 'duration', 'scope', 'scopes', 'audience', 'realm', 'endpoint', 'callback', 'redirect', 'server',
   'port', 'level', 'strategy', 'flow', 'dir', 'file', 'role', 'roles', 'group', 'groups', 'form', 'dn', 'providers', 'driver', 'default', 'attempts', 'creation',
-  'database', 'db', 'hook', 'once', 'logging', 'preflight', 'routes', 'route', 'protect', 'site']);
+  'database', 'db', 'hook', 'once', 'logging', 'preflight', 'routes', 'route', 'protect', 'site',
+  // 설정을 뜻하는 끝 단어(비밀값일 수 있는 account·request·headers·session·config·ident·salt·hash·json 은 넣지 않는다)
+  'login', 'up', 'menu', 'icon', 'label', 'list', 'claim', 'ids', 'organizations', 'whitelist', 'allowlist', 'strict', 'insecure', 'sync', 'pkce',
+  'regex', 'format', 'guard', 'model', 'time', 'registration', 'metadata', 'endpoints', 'schedule', 'only', 'partitioned', 'masked', 'persistent',
+  'minimal', 'prefix', 'timestamp', 'limit']);
 const COUNT_WORDS = new Set(['max', 'min', 'n', 'num', 'new', 'context', 'window', 'session', 'thinking', 'reasoning', 'output', 'input', 'completion', 'prompt', 'response', 'budget', 'total', 'reserved', 'limit', 'map', 'chunk', 'size', 'overlap']);
 const WEAK_COUNT = new Set(['new', 'window', 'session']);
 const SECRETISH = new Set(['bot', 'api', 'access', 'auth', 'oauth', 'refresh', 'user', 'id', 'client', 'app', 'bearer', 'personal', 'service']);

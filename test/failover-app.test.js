@@ -86,3 +86,18 @@ test('Codex 도 한도면 다시 Claude 로, 둘 다 막히면 멈추고 알린�
   assert.equal(m3.provider, 'claude');
   assert.ok(m3.blocks.some((b) => b.kind === 'notice' && /자동 이어받기가 꺼져 있어서/.test(b.text)));
 });
+
+test('R-a 도구를 쓰다 한도에 걸리면 이어받는 AI가 서버가 기록한 인계서(쓴 도구·손댄 파일·마지막 명령)를 받는다', async () => {
+  const { s } = await runOnce({ name: '빌더T', role: '빌드', provider: 'claude', model: 'opus', effort: 'high' }, 'QUOTATOOLS 앱 고쳐줘');
+  const m = s.messages.filter((x) => x.role === 'agent').at(-1);
+  assert.equal(m.status, 'done', m.error);
+  assert.equal(m.provider, 'codex');
+  const sent = t.fakeLog().filter((l) => l.cli === 'codex').at(-1).prompt;
+  const at = sent.indexOf('[인계서');
+  assert.ok(at > sent.indexOf('QUOTATOOLS 앱 고쳐줘'), '원래 요청 뒤에 인계서');
+  const card = sent.slice(at);
+  assert.match(card, /Bash 2번 \(실패 1, 안 끝남 1\)/, '실패한 명령과 끝나기 전에 멈춘 명령');
+  assert.match(card, /손댄 파일: src\/app\.js/);
+  assert.match(card, /npm test \(실패\)/);
+  assert.match(card, /npm run build \(안 끝남\)/);
+});

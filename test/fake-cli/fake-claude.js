@@ -58,6 +58,17 @@ async function pump() {
     // 실측 형식: 한도 초과 시 rate_limit_event(rejected) 뒤 오류 결과
     out({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', unifiedWindows: { five_hour: { utilization: 1, resetsAt: Math.floor(Date.now() / 1000) + 3600 } } } });
     out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Claude AI usage limit reached', session_id: sid, usage: {} });
+  } else if (req.includes('QUOTATOOLS') && !text.includes('[이어받기]')) {
+    // 도구를 쓰다가 한도에 걸림: 파일을 쓰고, 명령 하나는 실패, 마지막 명령은 끝나기 전에 멈춤
+    const use = (id, name, input) => out({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } });
+    const result = (id, content, isError = false) => out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content, is_error: isError }] } });
+    use('tw1', 'Write', { file_path: 'src/app.js', content: 'x' });
+    result('tw1', '썼어');
+    use('tb1', 'Bash', { command: 'npm test' });
+    result('tb1', '테스트 1개 실패', true);
+    use('tb2', 'Bash', { command: 'npm run build' });
+    out({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', unifiedWindows: { five_hour: { utilization: 1, resetsAt: Math.floor(Date.now() / 1000) + 3600 } } } });
+    out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Claude AI usage limit reached', session_id: sid, usage: {} });
   } else if (text.includes('QUOTANOPCT') && !text.includes('[이어받기]')) {
     // 사용률 없이 한도 종류와 초기화 시각(4시간 뒤)만 오는 거절 이벤트
     out({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour', resetsAt: Math.floor(Date.now() / 1000) + 4 * 3600 } });

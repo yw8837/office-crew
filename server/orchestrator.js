@@ -5,7 +5,7 @@ import { newId } from './store.js';
 import { PROVIDERS } from './providers/index.js';
 import { toolCategory } from './providers/util.js';
 import { resolveRoute, roleKind } from './routing.js';
-import { Cooldown, isQuotaError, nearLimit, avoidUntil, resetTime, availableCatalog, pickFallback, continuationPrompt } from './failover.js';
+import { Cooldown, isQuotaError, nearLimit, avoidUntil, resetTime, availableCatalog, pickFallback, continuationPrompt, handoffFacts } from './failover.js';
 import { tr } from './i18n.js';
 
 const ACTIVE = new Set(['running', 'paused', 'waiting']);
@@ -394,6 +394,7 @@ export class Orchestrator {
         tried.push(next.provider);
         const from = PROVIDERS[cur.agent.provider]?.label || cur.agent.provider;
         const partial = msg.text;
+        const facts = handoffFacts(msg.blocks, cwd); // 서버가 본 도구 기록(쓴 도구·손댄 파일·마지막 명령)
         const nextProv = PROVIDERS[next.provider];
         // 이어받는 AI 기준으로 프롬프트를 다시 만든다(이미지 지원 여부 등). 이어가는 대화가 없으니 앞 대화도 넣는다
         const basePrompt = this.#prompt(ctx, stageIdx, next, feedback, nextProv);
@@ -406,7 +407,7 @@ export class Orchestrator {
           this.bus.emit('delta', { sessionId: s.id, messageId: msg.id, text: '\n\n' });
         }
         this.#state(s.id, agentId, 'thinking', tr('{to}가 이어받는 중…', { to: PROVIDERS[next.provider]?.label || next.provider }));
-        res = await cur.start(continuationPrompt(nextPrompt, partial, from, tr), null).done;
+        res = await cur.start(continuationPrompt(nextPrompt, partial, from, tr, facts), null).done;
       }
       // 실행 중 주입 못 한 추가 지시는 이어서 처리
       while (!ctx.stopped && !res.stopped && !res.error && (ctx.pendingSteer.get(agentId) || []).length) {

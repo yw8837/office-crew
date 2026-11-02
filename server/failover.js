@@ -1,4 +1,5 @@
 // 자동 이어받기: 한 AI의 사용량·한도가 바닥나면 작업을 멈추지 않고, 여유 있는 다른 AI가 이어받게 한다
+import path from 'node:path';
 import { resolveRoute, roleKind } from './routing.js';
 
 // 각 CLI·API 가 한도 초과 때 내는 문구(실측·공식 오류 코드 기준). 일반 오류와 구분해야 엉뚱하게 넘기지 않는다
@@ -108,11 +109,83 @@ export function pickFallback(agent, catalog, opts = {}) {
   return r;
 }
 
-// 이어받는 AI에게 줄 지시: 원래 요청 + 지금까지 쓴 내용
-export function continuationPrompt(prompt, partial, fromLabel, tr = (s, v) => s.replace(/\{(\w+)\}/g, (_, k) => v?.[k] ?? '')) {
+// ── 이어받기 인계서 ──
+// 앞 담당의 말이 아니라 서버가 본 도구 기록에서 사실만 뽑는다: 쓴 도구(횟수·실패·안 끝남), 손댄 파일, 마지막 명령
+const EDIT_TOOL = /writ|edit|replace|patch|create|delete|remove|move|rename|notebook|편집|쓰기|수정|삭제|编辑|写入|修改|删除|編集|書き込み|削除/i;
+const READ_TOOL = /read|view|search|find|list|읽기|读取|読み/i;
+const PATH_KEYS = ['file_path', 'notebook_path', 'absolute_path', 'filePath', 'target_file', 'path'];
+const MAX_TOOLS = 10, MAX_FILES = 20, MAX_CMDS = 3;
+const oneLine = (s) => String(s).replace(/\s+/g, ' ').trim();
+
+// 명령에 섞인 비밀값만 가린다: Bearer·Basic 값, 주소 속 계정, 비밀 이름 뒤 값(--password x, API_KEY=x), 잘 알려진 키 모양
+const SECRET_KEY = '[\\w-]{0,40}(?:token|secret|password|passwd|pwd|api[_-]?key|access[_-]?key|private[_-]?key|credential)[\\w-]{0,40}';
+const SECRET_FLAG = new RegExp(`((?:^|[\\s"'])-{1,2}${SECRET_KEY}\\s+)("[^"]*"|'[^']*'|[^\\s'"]+)`, 'gi');
+const SECRET_PAIR = new RegExp(`((?:${SECRET_KEY}|auth|authorization)\\s*[=:]\\s*)("[^"]*"|'[^']*'|[^\\s'"]+)`, 'gi');
+function redactCommand(cmd) {
+  return cmd.slice(0, 2000) // 아주 긴 명령(heredoc 등)에서 정규식이 느려지지 않게. 보여주는 건 앞 160자뿐
+    .replace(/\b(bearer|basic)\s+[\w.~+/=-]{8,}/gi, '$1 ***')
+    .replace(/(:\/\/)[^\s/@:]+:[^\s/@]+@/g, '$1***@')
+    .replace(SECRET_FLAG, '$1***')
+    .replace(SECRET_PAIR, '$1***')
+    .replace(/\b(?:sk-[\w-]{12,}|gh[pousr]_\w{20,}|github_pat_\w{20,}|xox[abpr]-[\w-]{10,}|AKIA[0-9A-Z]{16}|AIza[\w-]{30,})/g, '***');
+}
+
+// 작업 폴더 안 파일은 상대 경로로(짧고, 이어받는 AI도 같은 폴더에서 일한다)
+function relPath(cwd, p) {
+  const s = oneLine(p);
+  if (!cwd || !path.isAbsolute(s)) return s;
+  const r = path.relative(cwd, s);
+  return r && r.split(path.sep)[0] !== '..' && !path.isAbsolute(r) ? r.split(path.sep).join('/') : s;
+}
+
+/**
+ * 메시지의 도구 블록에서 인계 사실을 뽑는다(AI마다 input 모양이 달라 흔한 모양을 다 본다:
+ * Claude·Gemini file_path, Codex changes "종류 경로", ACP path, 명령은 command 문자열·배열)
+ * @returns {{ tools: {name,n,fail,open}[], files: string[], cmds: {cmd,fail,open}[] } | null} 도구를 안 썼으면 null
+ */
+export function handoffFacts(blocks = [], cwd = '') {
+  const tools = new Map(), files = [], cmds = [];
+  for (const b of blocks || []) {
+    if (b?.kind !== 'tool') continue;
+    const name = oneLine(b.name || '?').slice(0, 60);
+    const t = tools.get(name) || { name, n: 0, fail: 0, open: 0 };
+    t.n++;
+    if (b.status === 'error') t.fail++;
+    else if (b.status === 'running') t.open++;
+    tools.set(name, t);
+    const inp = b.input && typeof b.input === 'object' ? b.input : {};
+    const touched = Array.isArray(inp.changes) ? inp.changes.map((c) => (typeof c === 'string' ? c.replace(/^\S*\s+/, '') : c?.path))
+      : EDIT_TOOL.test(name) && !READ_TOOL.test(name) ? [PATH_KEYS.map((k) => inp[k]).find((v) => typeof v === 'string' && v.trim())] : [];
+    for (const f of touched) {
+      if (typeof f !== 'string' || !f.trim()) continue;
+      const r = relPath(cwd, f);
+      if (!files.includes(r)) files.push(r);
+    }
+    const c = Array.isArray(inp.command) ? inp.command.join(' ') : inp.command;
+    if (typeof c === 'string' && c.trim()) cmds.push({ cmd: redactCommand(oneLine(c)).slice(0, 160), fail: b.status === 'error', open: b.status === 'running' });
+  }
+  return tools.size ? { tools: [...tools.values()].sort((a, b) => b.n - a.n), files, cmds: cmds.slice(-MAX_CMDS) } : null;
+}
+
+function handoffCard(facts, tr) {
+  const more = (list, max) => (list.length > max ? [...list.slice(0, max), tr('외 {n}개', { n: list.length - max })] : list);
+  const used = facts.tools.map((t) => {
+    const why = [t.fail && tr('실패 {n}', { n: t.fail }), t.open && tr('안 끝남 {n}', { n: t.open })].filter(Boolean);
+    return `${tr('{name} {n}번', { name: t.name, n: t.n })}${why.length ? ` (${why.join(', ')})` : ''}`;
+  });
+  const lines = [tr('[인계서 — 앞 담당의 말이 아니라 서버가 기록한 사실]'), `- ${tr('쓴 도구: {list}', { list: more(used, MAX_TOOLS).join(', ') })}`];
+  if (facts.files.length) lines.push(`- ${tr('손댄 파일: {list}', { list: more(facts.files, MAX_FILES).join(', ') })}`);
+  if (facts.cmds.length) lines.push(`- ${tr('마지막 명령:')}`, ...facts.cmds.map((c) => `  · ${c.cmd}${c.fail ? ` (${tr('실패')})` : c.open ? ` (${tr('안 끝남')})` : ''}`));
+  lines.push(`- ${tr('먼저 할 일: 위 파일과 작업 폴더의 지금 상태부터 확인해. 일부는 이미 반영됐을 수 있으니 한 일을 되풀이하지 말고 남은 부분만 이어서 해.')}`);
+  return lines.join('\n');
+}
+
+// 이어받는 AI에게 줄 지시: 원래 요청 + (도구를 썼으면) 인계서 + 지금까지 쓴 내용
+export function continuationPrompt(prompt, partial, fromLabel, tr = (s, v) => s.replace(/\{(\w+)\}/g, (_, k) => v?.[k] ?? ''), facts = null) {
   const head = tr('[이어받기] {from}이(가) 사용량 한도에 걸려 중단됐어. 아래 원래 요청을 네가 이어서 끝까지 완성해.', { from: fromLabel });
+  const card = facts?.tools?.length ? `\n\n${handoffCard(facts, tr)}` : '';
   const done = partial?.trim() ? `\n\n${tr('[앞 담당이 지금까지 쓴 내용 — 중복 없이 이어서 써]')}\n${partial.slice(-12000)}` : '';
-  return `${head}\n\n${prompt}${done}`;
+  return `${head}\n\n${prompt}${card}${done}`;
 }
 
 export { roleKind };

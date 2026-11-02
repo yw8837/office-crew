@@ -1,7 +1,8 @@
 // 자동 이어받기: 한도 초과 판별, 쉬는 시간, 한도 임박, 이어받을 AI 선택
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isQuotaError, nearLimit, avoidUntil, Cooldown, availableCatalog, pickFallback, continuationPrompt, resetTime } from '../server/failover.js';
+import path from 'node:path';
+import { isQuotaError, nearLimit, avoidUntil, Cooldown, availableCatalog, pickFallback, continuationPrompt, resetTime, handoffFacts } from '../server/failover.js';
 
 const providers = [
   { id: 'claude', loggedIn: true, efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
@@ -115,4 +116,74 @@ test('최종 재검증 3 분당 토큰 한도(OTPM·TPM)는 "출력 토큰" 말�
     '분당 출력 토큰 한도 초과',
   ]) assert.ok(isQuotaError(s), s);
   for (const s of ['출력 토큰 한도 초과', 'context window exceeded: rate limit', 'upload quota exceeded for files', 'context window exceeded; see rate limit notes in /home/min/logs']) assert.ok(!isQuotaError(s), s);
+});
+
+// R-a 인계서: 앞 담당의 말이 아니라 서버가 본 도구 기록에서 사실만 뽑아 넘긴다
+const CWD = path.resolve('/work/proj');
+const OUTSIDE = path.resolve('/elsewhere/notes.txt');
+const tool = (id, name, input, status = 'done') => ({ id, kind: 'tool', name, input, status, output: '' });
+
+test('R-a 인계서에 쓴 도구(횟수·실패·안 끝남), 손댄 파일(작업 폴더 기준, 중복 없이), 마지막 명령, 먼저 할 일이 들어간다', () => {
+  const blocks = [
+    { id: 'n1', kind: 'notice', text: '알림' },
+    { id: 'h1', kind: 'thinking', text: '생각' },
+    tool('t1', 'Read', { file_path: path.join(CWD, 'docs', 'spec.md') }),
+    tool('t1b', 'NotebookRead', { notebook_path: path.join(CWD, 'nb.ipynb') }),
+    tool('t2', 'Write', { file_path: path.join(CWD, 'src', 'app.js'), content: 'x' }),
+    tool('t3', 'Edit', { file_path: path.join(CWD, 'src', 'app.js'), old_string: 'a', new_string: 'b' }),
+    tool('t4', '파일 편집', { changes: [`update ${path.join(CWD, 'src', 'util.js')}`, `add ${path.join(CWD, 'README.md')}`] }),
+    tool('t5', 'write_file', { file_path: OUTSIDE, content: 'y' }),
+    tool('t6', 'Bash', { command: 'npm test' }, 'error'),
+    tool('t7', 'Bash', { command: 'npm run build' }, 'running'),
+    tool('t8', 'Run', { command: ['bash', '-lc', 'make lint'] }),
+  ];
+  const p = continuationPrompt('[사용자 요청]\n앱 만들어', '## 1장\n앞부분', 'Claude', undefined, handoffFacts(blocks, CWD));
+  assert.ok(p.indexOf('[사용자 요청]') < p.indexOf('[인계서') && p.indexOf('[인계서') < p.indexOf('앞부분'), '원래 요청 → 인계서 → 앞 담당이 쓴 글 순서');
+  assert.match(p, /Bash 2번 \(실패 1, 안 끝남 1\)/);
+  assert.match(p, /Write 1번/);
+  assert.match(p, /손댄 파일: src\/app\.js, src\/util\.js, README\.md, /, 'Claude·Codex 모양 모두, 같은 파일은 한 번만');
+  assert.ok(p.includes(OUTSIDE), '작업 폴더 밖 파일은 경로 그대로');
+  assert.ok(!p.includes('spec.md') && !p.includes('nb.ipynb'), '읽기만 한 파일은 손댄 파일이 아니다(이름에 notebook 이 있어도)');
+  assert.match(p, /bash -lc make lint/, '배열로 온 명령(ACP)도 한 줄로');
+  assert.match(p, /npm test \(실패\)/);
+  assert.match(p, /npm run build \(안 끝남\)/);
+  assert.match(p, /먼저 할 일: .*상태.*확인/);
+});
+
+test('R-a 도구를 안 썼으면 인계서 없이 예전처럼 원래 요청과 쓴 글만 넘긴다', () => {
+  assert.equal(handoffFacts([{ id: 'n1', kind: 'notice', text: '알림' }, { id: 'h1', kind: 'thinking', text: '생각' }], CWD), null);
+  const p = continuationPrompt('[사용자 요청]\n보고서', '앞부분', 'Claude', undefined, handoffFacts([], CWD));
+  assert.ok(!p.includes('[인계서'));
+  assert.match(p, /\[사용자 요청\]\n보고서\n\n\[앞 담당이 지금까지 쓴 내용/);
+});
+
+test('R-a 인계서의 명령에 섞인 비밀값은 가리고, 평범한 인자는 그대로 둔다', () => {
+  // [명령, 가려야 할 값, 남아야 할 부분] — 명령마다 따로 넘겨서 "안 보여서 통과"를 막는다
+  const cases = [
+    ['curl -H "Authorization: Bearer abc123def456ghi" https://api.example.com/v1', 'abc123def456ghi', 'https://api.example.com/v1'],
+    ['git clone https://me:hunter2pass@github.com/x/y.git', 'hunter2pass', 'github.com/x/y.git'],
+    ['API_KEY=sk-live-1234567890abcdef node app.js --verbose', '1234567890abcdef', 'node app.js --verbose'],
+    ['mytool --password s3cr3tvalue --dry-run', 's3cr3tvalue', 'mytool --password'],
+    ['gh auth login --with-token ghp_abcdefghijklmnopqrstuvwxyz0123', 'ghp_abcdefghijklmnopqrstuvwxyz0123', 'gh auth login --with-token'],
+    ['curl -H "Authorization: Basic dXNlcjpwYXNzd29yZA==" https://x.example', 'dXNlcjpwYXNzd29yZA', 'https://x.example'],
+  ];
+  for (const [cmd, secret, keep] of cases) {
+    const p = continuationPrompt('요청', '', 'Claude', undefined, handoffFacts([tool('c', 'Bash', { command: cmd })], CWD));
+    assert.ok(!p.includes(secret), `가려야 함: ${cmd}`);
+    assert.ok(p.includes(keep), `남아야 함: ${keep}`);
+  }
+  // 비밀값이 없는 평범한 명령은 한 글자도 안 바뀐다
+  const plain = 'npm test -- --grep "token refresh" && git log --oneline -3';
+  assert.ok(continuationPrompt('요청', '', 'Claude', undefined, handoffFacts([tool('c', 'Bash', { command: plain })], CWD)).includes(plain));
+});
+
+test('R-a 인계서는 짧게: 파일은 20개까지(외 N개), 명령은 마지막 3개, 여러 줄 명령은 한 줄로', () => {
+  const blocks = [];
+  for (let i = 0; i < 25; i++) blocks.push(tool(`w${i}`, 'Write', { file_path: path.join(CWD, `f${i}.txt`) }));
+  for (let i = 1; i <= 5; i++) blocks.push(tool(`b${i}`, 'Bash', { command: i === 5 ? "cat <<'EOF' > a.txt\nline1\nEOF" : `step${i}` }));
+  const p = continuationPrompt('요청', '', 'Claude', undefined, handoffFacts(blocks, CWD));
+  assert.ok(p.includes('f19.txt') && !p.includes('f20.txt'), '파일 20개까지');
+  assert.match(p, /외 5개/);
+  assert.ok(!p.includes('step1') && !p.includes('step2') && p.includes('step3') && p.includes('step4'), '마지막 명령 3개만');
+  assert.match(p, /cat <<'EOF' > a\.txt line1 EOF/, '줄바꿈은 공백으로');
 });

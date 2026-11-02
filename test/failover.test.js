@@ -198,6 +198,10 @@ test('R-a 인계서의 명령은 프로그램과 하위 명령만 넣고 인자�
     ['./set_password.sh Admin.2024', 'set_password.sh …', 'Admin.2024'],
     ['python reset_pw.py NewPass.2024', 'python reset_pw.py …', 'NewPass.2024'],
     ['wget files.example.com/s/k3j4h5g6f7/report.pdf', 'wget …', 'k3j4h5g6f7'],
+    // 4차 검증: 값을 그대로 내보내는 다른 명령, .exe 가 붙은 echo
+    ['yes Summer.Pass | passwd deploy', 'yes … | passwd deploy', 'Summer.Pass'],
+    ['Set-Content pw.txt Summer.Pass', 'Set-Content …', 'Summer.Pass'],
+    ['echo.exe Summer.Pass', 'echo.exe …', 'Summer.Pass'],
   ];
   for (const [cmd, want, secret] of secrets) {
     assert.equal(summary(cmd), want, cmd);

@@ -244,7 +244,8 @@ const VERBS = new Set(['test', 'tests', 'build', 'run', 'start', 'stop', 'restar
   'upload', 'download', 'verify', 'validate', 'inspect', 'plan', 'destroy', 'cache', 'env', 'why', 'clippy', 'vet', 'tidy', 'fix']);
 const STOP_AFTER = new Set(['auth', 'login', 'logout', 'set', 'config', 'env']); // 이 낱말 뒤는 비밀값 자리
 const DIR_PROGS = new Set(['cd', 'pushd', 'ls', 'dir', 'mkdir', 'rmdir', 'tree']); // 뒤에 오는 평범한 폴더 이름은 남긴다
-const ECHO_PROGS = new Set(['echo', 'printf', 'print', 'write-output', 'write-host']); // 인자가 곧 출력할 값(비밀값을 파이프로 넘기는 자리)
+// 인자가 곧 내보낼 값인 명령(비밀값을 파이프·파일로 넘기는 자리). 비교는 소문자·.exe 뗀 이름으로
+const ECHO_PROGS = new Set(['echo', 'printf', 'print', 'yes', 'write-output', 'write-host', 'set-content', 'add-content', 'out-file']);
 const RUNNERS = new Set(['npx', 'pnpx', 'bunx', 'uvx', 'pipx']); // 바로 뒤 이름 하나(실행할 도구)는 남긴다
 const isPython = (p) => /^(?:python[\d.]*|py)(?:\.exe)?$/i.test(p);
 const KNOWN_TOKEN = /^(?:sk-|sk_(?:live|test)_|rk_(?:live|test)_|gh[pousr]_|github_pat_|glpat-|xox[abposr]-|xapp-|npm_|pypi-|hvs\.|AKIA|ASIA|AIza|ya29\.|eyJ)/;
@@ -285,7 +286,7 @@ function summarizeCommand(cmd) {
     if (!prog || !/^[A-Za-z0-9][\w.+-]{0,39}$/.test(prog) || tokenLike(prog)) { dropped ||= Boolean(first || lost); continue; }
     const kept = [prog];
     let next = RUNNERS.has(prog); // 실행기 바로 뒤, run·exec·python -m 바로 뒤 이름 하나는 남긴다
-    while (kept.length < 3 && words.length && !ECHO_PROGS.has(prog.toLowerCase())) {
+    while (kept.length < 3 && words.length && !ECHO_PROGS.has(prog.toLowerCase().replace(/\.exe$/, ''))) {
       const w = words[0];
       if (isPython(prog) && kept.length === 1 && w === '-m') { kept.push(words.shift()); next = true; continue; }
       if (!keepWord(prog, w) && !(next && plainName(w))) break;

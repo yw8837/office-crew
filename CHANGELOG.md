@@ -8,16 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Waiting on you: the top of the sidebar collects sessions that need you (approvals, decisions after an error, paused runs, failures and results you haven't opened yet). Opening a session clears it from the list.
-- Handoff note: when another AI takes over after a usage limit, it also gets a note the server recorded from the tool log: tools used (with failed and unfinished counts), files changed (relative to the work folder) and the last three commands with secrets masked, plus an instruction to check the current state before continuing.
-- Evidence-based review: review agents are told to judge only by evidence they checked themselves and to list anything they couldn't check. A review done by the same AI that built the result, including one that took the review over after a usage limit, is flagged as weaker than a cross-check.
+- Needs you: the top of the sidebar collects sessions that need you (approvals, decisions after an error, paused runs, failures and results you haven't opened yet). Results and failures leave the list once you open them; approvals, decisions and paused runs stay until they're handled.
+- Handoff note: when another AI takes over after a usage limit, it also gets a note the server pulled from the tool log: tools used (with failed and unfinished counts), files changed (relative to the work folder) and the last three commands, plus an instruction to check the current state before continuing. Commands keep only the program and subcommand (`npm test`, `git commit …`); their arguments are left out so tokens and passwords aren't passed to another AI. Names, paths and commands are quoted and marked as values, not instructions.
+- Evidence-based review: review agents are told to judge only by evidence they checked themselves and to list anything they couldn't check. A review done by the same AI that built the result, including one that took the review over after a usage limit, is flagged as weaker than a cross-check. The same AI means the same CLI (Claude Code, Codex, Gemini CLI, Hermes), or the same API profile and model, ACP agent or local model.
 
 ### Changed
-- When there is no usage-window data, an AI that hit its limit now rests until the reset time stated in the error message (`Retry-After`, "try again in …", "try again at …", "resets 3pm", an epoch suffix) instead of a flat 30 minutes.
-- Connector environment variables: fewer non-secret names are masked. Names whose last word is a setting, such as `LOGIN`, `LABEL`, `GUARD`, `MODEL`, `PKCE` or `ONLY`, are shown as normal values.
+- Claude Code, Codex, Gemini CLI and Hermes now rest until the reset time stated in the limit error when their usage data has no full window, instead of a flat 30 minutes. Recognized forms: `Retry-After`, "try again in …", "try again at …", "resets 3pm" and an epoch suffix; a time zone after the time (UTC or a name such as `(America/Los_Angeles)`) is honored. A time that passed less than two hours ago falls back to 30 minutes, and waits shorter than a minute become a minute.
+- Auto-routed review agents avoid the AIs that built the result (every earlier build stage, or the previous stage when there was no build). Before, only the nearest stage with output was avoided.
+- Environment variables and headers of connectors, and environment variables of ACP agents: names that contain `AUTH` or `COOKIE` but end in a setting word, such as `LOGIN`, `LABEL`, `GUARD`, `MODEL`, `PKCE` or `ONLY`, are shown as normal values instead of being masked.
 
 ### Fixed
-- ACP file requests that used a Windows short (8.3) path for a file inside the work folder were refused.
+- ACP file requests that used a Windows short (8.3) path for a file inside the work folder were refused. Other paths outside the work folder are still refused before the file system is touched; only paths that may be short names (containing `~`, on the same drive) are resolved first.
 
 ## [1.0.0] - 2026-11-02
 

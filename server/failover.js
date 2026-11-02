@@ -85,6 +85,60 @@ export function resetTime(limit, threshold = 95) {
   return full.length ? Math.max(...full.map((w) => w.resetsAt * 1000)) : 0;
 }
 
+// 오류 문구에 적힌 초기화 시각(ms). 사용량 창 정보가 없을 때 쓴다. 못 찾거나 이상하면 0(= 쉬는 시간 기본 30분).
+// 읽는 모양: "limit reached|1730480400"(옛 Claude, 초), "Retry-After: 120", "try again in 2 days 3 hours"·"retry in 41.5s"·"1h30m",
+// "reset at 2026-11-03T00:00:00Z", "try again at Nov 4th, 2026 5:30 PM"·"resets Nov 9, 10am", "try again at 3:07 PM"·"resets 3pm"(지난 시각이면 다음 날)
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const UNIT_MS = { d: 86400e3, h: 3600e3, m: 60e3, s: 1e3 };
+const DUR = '(\\d+(?:\\.\\d+)?)\\s*(days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)(?![a-z])';
+const WHEN = '\\b(?:try again|retry|resets?|available again)\\s+';
+const IN_RE = new RegExp(`${WHEN}(?:in|after)\\s+((?:${DUR}[\\s,]*(?:and\\s+)?)+)`, 'i');
+const ISO_RE = new RegExp(`${WHEN}(?:at\\s+|on\\s+)?(\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d+)?)?(?:Z|[+-]\\d{2}:?\\d{2})?)`, 'i');
+const DATE_RE = new RegExp(`${WHEN}(?:at\\s+|on\\s+)?([a-z]{3,9})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?,?\\s+(?:at\\s+)?(\\d{1,2})(?::(\\d{2}))?\\s*([ap])\\.?m\\b`, 'i');
+const AT_RE = new RegExp(`${WHEN}(?:at\\s+)?(\\d{1,2})(?::(\\d{2}))?\\s*(?:([ap])\\.?m\\b)?`, 'i');
+const MAX_WAIT = 8 * 86400e3; // 주간 한도보다 먼 시각은 잘못 읽은 걸로 본다
+
+// 12시간제(am/pm)·24시간제 시를 0~23으로. 말이 안 되면 null
+function hour24(h, min, ap) {
+  let hour = Number(h);
+  if (ap) {
+    if (hour < 1 || hour > 12) return null;
+    hour = (hour % 12) + (/p/i.test(ap) ? 12 : 0);
+  }
+  return hour > 23 || Number(min) > 59 ? null : hour;
+}
+
+export function resetFromText(text = '', now = Date.now()) {
+  const s = String(text);
+  const ok = (t) => (Number.isFinite(t) && t > now && t - now <= MAX_WAIT ? Math.round(t) : 0);
+  let m = s.match(/limit reached\|(\d{9,11})\b/i);
+  if (m) return ok(Number(m[1]) * 1000);
+  m = s.match(/retry[-_ ]after(?:[-_ ]seconds)?["']?\s*[:=]\s*["']?(\d+(?:\.\d+)?)/i);
+  if (m) return ok(now + Number(m[1]) * 1000);
+  m = s.match(IN_RE);
+  if (m) return ok(now + [...m[1].matchAll(new RegExp(DUR, 'gi'))].reduce((sum, [, n, u]) => sum + Number(n) * UNIT_MS[u[0].toLowerCase()], 0));
+  m = s.match(ISO_RE);
+  if (m) return ok(Date.parse(m[1].replace(' ', 'T')));
+  m = s.match(DATE_RE);
+  const mon = m ? MONTHS.indexOf(m[1].slice(0, 3).toLowerCase()) : -1;
+  if (mon >= 0) {
+    const hour = hour24(m[4], m[5] || 0, m[6]);
+    if (hour === null) return 0;
+    const year = m[3] ? Number(m[3]) : new Date(now).getFullYear();
+    const at = (y) => new Date(y, mon, Number(m[2]), hour, Number(m[5] || 0)).getTime();
+    return ok(!m[3] && at(year) <= now ? at(year + 1) : at(year)); // 연도가 없고 지났으면 내년(12월 → 1월)
+  }
+  m = s.match(AT_RE);
+  if (m && (m[2] !== undefined || m[3])) { // 시만 있고 분·am/pm 이 없으면("retry 3 times") 시각이 아니다
+    const hour = hour24(m[1], m[2] || 0, m[3]);
+    if (hour === null) return 0;
+    const d = new Date(now);
+    const at = (plus) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + plus, hour, Number(m[2] || 0)).getTime();
+    return ok(at(0) > now ? at(0) : at(1)); // 이미 지난 시각이면 다음 날
+  }
+  return 0;
+}
+
 // 쓸 수 없는 AI(쉬는 중·한도 임박)를 빼고 라우팅 카탈로그를 만든다
 export function availableCatalog(catalog, { cooldown, limits = {}, threshold = 95, exclude = [] } = {}) {
   const blocked = new Set(exclude);

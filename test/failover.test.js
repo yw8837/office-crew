@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { isQuotaError, nearLimit, avoidUntil, Cooldown, availableCatalog, pickFallback, continuationPrompt, resetTime, handoffFacts } from '../server/failover.js';
+import { isQuotaError, nearLimit, avoidUntil, Cooldown, availableCatalog, pickFallback, continuationPrompt, resetTime, handoffFacts, resetFromText } from '../server/failover.js';
 
 const providers = [
   { id: 'claude', loggedIn: true, efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
@@ -186,4 +186,32 @@ test('R-a 인계서는 짧게: 파일은 20개까지(외 N개), 명령은 마지
   assert.match(p, /외 5개/);
   assert.ok(!p.includes('step1') && !p.includes('step2') && p.includes('step3') && p.includes('step4'), '마지막 명령 3개만');
   assert.match(p, /cat <<'EOF' > a\.txt line1 EOF/, '줄바꿈은 공백으로');
+});
+
+// R-d 사용량 창 정보가 없을 때 오류 문구에 적힌 초기화 시각을 읽는다(기준: 2026-11-02 14:00 현지 시각)
+test('R-d 오류 문구의 초기화 시각: 초·기간·시각·날짜 모양을 읽는다', () => {
+  const now = new Date(2026, 10, 2, 14, 0, 0).getTime();
+  const H = 3600e3, M = 60e3;
+  const cases = [
+    [`Claude AI usage limit reached|${Math.floor((now + 3 * H) / 1000)}`, now + 3 * H],
+    ['HTTP 429 Too Many Requests; Retry-After: 120', now + 120e3],
+    ['Quota exceeded for quota metric. Please retry in 41.5s.', now + 41500],
+    ["You've hit your usage limit. Upgrade to Pro or try again in 2 days 3 hours 5 minutes.", now + 2 * 24 * H + 3 * H + 5 * M],
+    ['rate limited, try again in 1h30m', now + 90 * M],
+    ['Usage limit reached. Try again at 3:07 PM.', new Date(2026, 10, 2, 15, 7).getTime()],
+    ['5-hour limit reached ∙ resets 3pm (Asia/Seoul)', new Date(2026, 10, 2, 15, 0).getTime()],
+    ['Session limit reached ∙ resets 1pm', new Date(2026, 10, 3, 13, 0).getTime()], // 이미 지난 시각이면 다음 날
+    ['usage limit. Or try again at Nov 4th, 2026 5:30 PM.', new Date(2026, 10, 4, 17, 30).getTime()],
+    ['Weekly limit reached ∙ resets Nov 9, 10am', new Date(2026, 10, 9, 10, 0).getTime()],
+    ['Quota will reset at 2026-11-03T00:00:00Z', Date.UTC(2026, 10, 3, 0, 0, 0)],
+    ['Too many requests, retry after 5 minutes', now + 5 * M],
+  ];
+  for (const [text, want] of cases) assert.equal(resetFromText(text, now), want, text);
+});
+
+test('R-d 시각이 없거나, 지났거나, 8일을 넘거나, 말이 안 되는 값은 0(기본 30분 쉬기)', () => {
+  const now = new Date(2026, 10, 2, 14, 0, 0).getTime();
+  for (const text of ['Usage limit reached. Try again later.', 'retry 3 times', 'resets in 30 days', 'Retry-After: 0', 'resets 25:00', 'timeout after 500ms', `limit reached|${Math.floor((now - 60e3) / 1000)}`, '']) {
+    assert.equal(resetFromText(text, now), 0, text);
+  }
 });

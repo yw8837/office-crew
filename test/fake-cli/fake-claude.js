@@ -69,6 +69,9 @@ async function pump() {
     use('tb2', 'Bash', { command: 'npm run build' });
     out({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', unifiedWindows: { five_hour: { utilization: 1, resetsAt: Math.floor(Date.now() / 1000) + 3600 } } } });
     out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Claude AI usage limit reached', session_id: sid, usage: {} });
+  } else if (req.includes('QUOTAIN') && !text.includes('[이어받기]')) {
+    // 사용량 창 정보(rate_limit_event) 없이 오류 문구에만 초기화 시각이 있는 경우(2시간 뒤)
+    out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Usage limit reached. Try again in 2 hours.', session_id: sid, usage: {} });
   } else if (text.includes('QUOTANOPCT') && !text.includes('[이어받기]')) {
     // 사용률 없이 한도 종류와 초기화 시각(4시간 뒤)만 오는 거절 이벤트
     out({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour', resetsAt: Math.floor(Date.now() / 1000) + 4 * 3600 } });

@@ -5,7 +5,7 @@ import { newId } from './store.js';
 import { PROVIDERS } from './providers/index.js';
 import { toolCategory } from './providers/util.js';
 import { resolveRoute, roleKind } from './routing.js';
-import { Cooldown, isQuotaError, nearLimit, avoidUntil, resetTime, availableCatalog, pickFallback, continuationPrompt, handoffFacts } from './failover.js';
+import { Cooldown, isQuotaError, nearLimit, avoidUntil, resetTime, resetFromText, availableCatalog, pickFallback, continuationPrompt, handoffFacts } from './failover.js';
 import { tr } from './i18n.js';
 
 const ACTIVE = new Set(['running', 'paused', 'waiting']);
@@ -247,7 +247,8 @@ export class Orchestrator {
     const opts = this.#foOpts({ exclude: tried });
     // 계정 단위 한도가 있는 CLI만 쉬게 표시(API 프로필·ACP 에이전트는 서로 다른 계정일 수 있어 통째로 막지 않는다)
     if (ACCOUNT_LIMITED.has(ag.provider)) {
-      this.cooldown.mark(ag.provider, { until: resetTime(opts.limits[ag.provider], opts.threshold), reason: error });
+      // 쉬는 시간: 사용량 창의 초기화 시각 → 없으면 오류 문구에 적힌 시각 → 없으면 기본 30분
+      this.cooldown.mark(ag.provider, { until: resetTime(opts.limits[ag.provider], opts.threshold) || resetFromText(error), reason: error });
       this.bus.emit('cooldown', this.restingList());
     }
     const from = PROVIDERS[ag.provider]?.label || ag.provider;

@@ -101,3 +101,13 @@ test('R-a 도구를 쓰다 한도에 걸리면 이어받는 AI가 서버가 기�
   assert.match(card, /npm test \(실패\)/);
   assert.match(card, /npm run build \(안 끝남\)/);
 });
+
+test('R-d 사용량 창 정보가 없으면 오류 문구의 "Try again in 2 hours"로 쉬는 시간을 정한다(기본 30분 대신)', async () => {
+  const t0 = Date.now();
+  const { s } = await runOnce({ name: '빌더Q', role: '빌드', provider: 'claude', model: 'opus', effort: 'high' }, 'QUOTAIN 만들어줘');
+  const m = s.messages.filter((x) => x.role === 'agent').at(-1);
+  assert.equal(m.status, 'done', m.error);
+  assert.equal(m.provider, 'codex', '다른 AI가 이어받음');
+  const until = (await t.api('GET', '/api/cooldown')).json.claude?.until || 0;
+  assert.ok(until >= t0 + 2 * 3600e3 - 5000 && until <= Date.now() + 2 * 3600e3 + 5000, `쉬는 시간이 2시간 뒤여야 함: ${new Date(until).toISOString()}`);
+});

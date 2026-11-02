@@ -101,12 +101,20 @@ const AT_RE = new RegExp(`${WHEN}(?:at\\s+)?(\\d{1,2})(?::(\\d{2}))?\\s*(?:([ap]
 const MAX_WAIT = 8 * 86400e3; // 주간 한도보다 먼 시각은 잘못 읽은 걸로 본다
 const MIN_WAIT = 60e3;
 const JUST_PASSED = 2 * 3600e3;
-const ZONE_RE = /^\s*\(?\s*(?:(utc|gmt|z)\b|([a-z]+(?:\/[a-z0-9_+-]+)+))\s*\)?/i;
+const ZONE_RE = /^\s*\(?\s*(?:(utc|gmt|z)(?:\s*([+-])(\d{1,2})(?::?(\d{2}))?)?\b|([a-z]+(?:\/[a-z0-9_+-]+)+))\s*\)?/i;
 
-// 시각 바로 뒤에 적힌 시간대: 'UTC' 또는 IANA 이름, 없으면 ''(이 PC 시간대)
+// 시각 바로 뒤에 적힌 시간대: 'UTC', 'UTC+09:00'(UTC+9·GMT+2 같은 오프셋) 또는 IANA 이름, 없으면 ''(이 PC 시간대)
 function zoneAfter(s, m) {
   const z = s.slice(m.index + m[0].length).match(ZONE_RE);
-  return z ? (z[1] ? 'UTC' : z[2]) : '';
+  if (!z) return '';
+  if (z[5]) return z[5];
+  return z[2] ? `UTC${z[2]}${z[3].padStart(2, '0')}:${z[4] || '00'}` : 'UTC';
+}
+
+// 'UTC±hh:mm' 의 오프셋(분), 오프셋 표기가 아니면 null
+function offsetMin(tz) {
+  const m = /^UTC([+-])(\d{2}):(\d{2})$/.exec(tz);
+  return m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : null;
 }
 
 // 시간대 tz 의 날짜를 [년, 월(0~11), 일]로. 모르는 시간대면 null
@@ -114,6 +122,8 @@ function dayIn(tz, t) {
   const d = new Date(t);
   if (!tz) return [d.getFullYear(), d.getMonth(), d.getDate()];
   if (tz === 'UTC') return [d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()];
+  const off = offsetMin(tz);
+  if (off !== null) { const o = new Date(t + off * 60e3); return [o.getUTCFullYear(), o.getUTCMonth(), o.getUTCDate()]; }
   try {
     const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(d).map((x) => [x.type, Number(x.value)]));
     return [p.year, p.month - 1, p.day];
@@ -124,6 +134,8 @@ function dayIn(tz, t) {
 function wallTime(tz, y, mo, d, h, mi) {
   if (!tz) return new Date(y, mo, d, h, mi).getTime();
   if (tz === 'UTC') return Date.UTC(y, mo, d, h, mi);
+  const off = offsetMin(tz);
+  if (off !== null) return Date.UTC(y, mo, d, h, mi) - off * 60e3;
   try {
     const fmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' });
     const offset = (t) => {
@@ -212,14 +224,28 @@ const READ_TOOL = /read|view|search|find|list|읽기|读取|読み/i;
 const PATH_KEYS = ['file_path', 'notebook_path', 'absolute_path', 'filePath', 'target_file', 'path'];
 const MAX_TOOLS = 10, MAX_FILES = 20, MAX_CMDS = 3;
 const oneLine = (s) => String(s).replace(/\s+/g, ' ').trim();
-// 도구 이름에서 경로 조각을 뺀 동작 이름(ACP 는 "Edit README.md"처럼 제목에 경로가 붙어 와서, README·ListView 를 읽기로 오인하지 않게)
-const verbOf = (name) => name.split(' ').filter((w) => !/[\\/]|\.\w{1,6}$/.test(w)).join(' ');
+// 도구 이름에서 경로 조각을 뺀 동작 이름(ACP 는 "Edit README.md"처럼 제목에 경로가 붙어 와서, README·ListView 를 읽기로 오인하지 않게).
+// 첫 낱말은 동작 이름이라 경로처럼 보여도 남긴다(mcp:files.write)
+const verbOf = (name) => name.split(' ').filter((w, i) => i === 0 || !/[\\/]|\.\w{1,6}$/.test(w)).join(' ');
 
-// 명령 요약: 프로그램과 하위 명령(소문자 낱말·파일 경로)까지만 남기고 인자는 뺀다.
-// 토큰·비밀번호·키는 거의 늘 인자 자리에 있어서, 가리려고 쫓아가는 대신 아예 넘기지 않는다(다른 회사 AI로 가는 프롬프트라서)
-const SUB_WORD = /^[a-z][a-z-]{0,19}$/;
-const FILE_WORD = /^(?:\.{1,2}\/)?[\w-]+(?:\/[\w.-]+)*\.[a-z0-9]{1,6}$|^(?:\.{1,2}\/)?[\w-]+(?:\/[\w-]+)+\/?$/i;
-const STOP_AFTER = new Set(['auth', 'login', 'logout', 'set', 'config', 'secret', 'secrets', 'token', 'password', 'passwd', 'key', 'keys', 'credential', 'credentials', 'user']);
+// 명령 요약: 프로그램 + 잘 알려진 하위 명령·평범한 파일 경로(최대 2개)만 남기고 나머지 인자는 뺀다.
+// 토큰·비밀번호·키는 거의 늘 인자 자리에 있어서, 가리려고 쫓아가는 대신 넘기지 않는다(다른 회사 AI로 가는 프롬프트라서).
+// 남기는 낱말도 목록에 있는 하위 명령이거나 토큰 모양이 아닌 경로뿐이라, 비밀값이 그 자리로 새기 어렵다
+const VERBS = new Set(['test', 'tests', 'build', 'run', 'start', 'stop', 'restart', 'dev', 'serve', 'lint', 'format', 'fmt', 'check', 'typecheck',
+  'compile', 'install', 'ci', 'add', 'remove', 'rm', 'update', 'upgrade', 'uninstall', 'init', 'new', 'create', 'clean', 'deploy', 'publish',
+  'release', 'pack', 'audit', 'exec', 'list', 'ls', 'show', 'status', 'diff', 'log', 'logs', 'commit', 'push', 'pull', 'fetch', 'clone', 'checkout',
+  'switch', 'merge', 'rebase', 'reset', 'restore', 'stash', 'tag', 'branch', 'revert', 'remote', 'submodule', 'worktree', 'apply', 'get', 'describe',
+  'delete', 'rollout', 'scale', 'up', 'down', 'ps', 'images', 'compose', 'version', 'help', 'info', 'migrate', 'makemigrations', 'shell', 'generate',
+  'watch', 'bench', 'doc', 'docs', 'preview', 'login', 'logout', 'auth', 'config', 'configure', 'set', 'view', 'search', 'outdated', 'prune', 'sync',
+  'upload', 'download', 'verify', 'validate', 'inspect', 'plan', 'destroy', 'cache', 'env', 'why']);
+const STOP_AFTER = new Set(['auth', 'login', 'logout', 'set', 'config', 'env']); // 이 낱말 뒤는 비밀값 자리
+const DIR_PROGS = new Set(['cd', 'pushd', 'ls', 'dir', 'mkdir', 'rmdir', 'tree']); // 뒤에 오는 평범한 폴더 이름은 남긴다
+const KNOWN_TOKEN = /^(?:sk-|sk_(?:live|test)_|rk_(?:live|test)_|gh[pousr]_|github_pat_|glpat-|xox[abposr]-|xapp-|npm_|pypi-|hvs\.|AKIA|ASIA|AIza|ya29\.|eyJ)/;
+// 토큰 모양: 잘 알려진 접두어, 또는 길고 글자·숫자가 섞인 낱말
+const tokenLike = (w) => KNOWN_TOKEN.test(w) || (w.length >= 16 && /\d/.test(w) && /[A-Za-z]/.test(w)) || (w.length >= 24 && /[A-Z]/.test(w) && /[a-z]/.test(w));
+const plainParts = (w) => !/[:@=]/.test(w) && w.replace(/^\.{1,2}\//, '').replace(/\/$/, '').split('/').every((c) => /^[\w.-]{1,40}$/.test(c) && !tokenLike(c));
+const safeFile = (w) => plainParts(w) && /\.[a-z0-9]{1,6}$/i.test(w); // 확장자가 있는 파일 경로
+const keepWord = (prog, w) => VERBS.has(w) || safeFile(w) || (DIR_PROGS.has(prog) && plainParts(w));
 const UNWRAP = [ // bash -lc '…'·pwsh -Command "…"·cmd /c … 는 안쪽 명령으로
   /^(?:\S*[\\/])?(?:ba|z|da|k)?sh(?:\.exe)?\s+(?:-\w+\s+)*-\w*c\s+(["']?)(.+)\1$/,
   /^(?:\S*[\\/])?(?:powershell|pwsh)(?:\.exe)?\s+(?:-\w+\s+)*-(?:c|command)\s+(["']?)(.+)\1$/i,
@@ -239,10 +265,12 @@ function summarizeCommand(cmd) {
     const words = parts[i].split(' ').filter(Boolean);
     let lost = false;
     while (/^[A-Za-z_]\w*=/.test(words[0] || '')) { words.shift(); lost = true; } // 앞에 붙은 환경변수 지정(KEY=값)
-    const prog = words.shift();
-    if (!prog || !/^(?:[A-Za-z]:)?[\w.~+\\/-]+$/.test(prog)) { dropped ||= Boolean(prog || lost); continue; } // $env:X = … 같은 대입은 통째로 뺀다
-    const kept = [prog.split(/[\\/]/).pop()];
-    while (kept.length < 3 && words.length && (SUB_WORD.test(words[0]) || FILE_WORD.test(words[0]))) {
+    const first = words.shift();
+    const prog = first && /^(?:[A-Za-z]:)?[\w.~+\\/-]+$/.test(first) ? first.split(/[\\/]/).pop() : '';
+    // $env:X = … 같은 대입, 토큰 모양 낱말이 프로그램 자리에 오면 그 부분은 통째로 뺀다
+    if (!prog || !/^[A-Za-z0-9][\w.+-]{0,39}$/.test(prog) || tokenLike(prog)) { dropped ||= Boolean(first || lost); continue; }
+    const kept = [prog];
+    while (kept.length < 3 && words.length && keepWord(prog, words[0])) {
       const w = words.shift();
       kept.push(w);
       if (STOP_AFTER.has(w)) break; // auth·login·set 뒤는 비밀값 자리

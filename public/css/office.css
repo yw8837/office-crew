@@ -1,0 +1,437 @@
+/* 오피스 크루 — 사무실 렌더러 스타일. 모든 규칙은 .office-root 범위 안에서만 적용 */
+
+.office-root, .oc-editor {
+  --oc-font: 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+}
+.office-root:lang(en), .oc-editor:lang(en) { --oc-font: system-ui, 'Segoe UI', 'Pretendard', sans-serif; }
+.office-root:lang(zh), .oc-editor:lang(zh) { --oc-font: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', system-ui, sans-serif; }
+.office-root:lang(ja), .oc-editor:lang(ja) { --oc-font: 'Hiragino Sans', 'Yu Gothic UI', 'Meiryo', 'Noto Sans JP', system-ui, sans-serif; }
+.office-root {
+  --oc-bg1: #eef2f7;
+  --oc-bg2: #dfe6ef;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 260px;
+  overflow: hidden;
+  background: var(--oc-bg, radial-gradient(ellipse at 50% 38%, var(--oc-bg1) 0%, var(--oc-bg2) 100%));
+  font-family: var(--oc-font);
+  user-select: none;
+  -webkit-user-select: none;
+  outline: none;
+  contain: layout paint;
+}
+.office-root:focus-visible { box-shadow: inset 0 0 0 2px rgba(76, 141, 255, .55); }
+.office-root .oc-viewport { position: absolute; inset: 0; cursor: grab; touch-action: none; }
+.office-root.oc-grabbing .oc-viewport { cursor: grabbing; }
+.office-root .oc-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.office-root .oc-svg { display: block; overflow: visible; }
+.office-root .oc-ovl { position: absolute; left: 0; top: 0; width: 0; height: 0; }
+
+/* 확대/축소 버튼 */
+.office-root .oc-ctl { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 4px; z-index: 5; }
+.office-root .oc-ctl button {
+  width: 28px; height: 28px; border-radius: 8px; border: 1px solid rgba(0,0,0,.1);
+  background: rgba(255,255,255,.88); color: #2b3240; font: 600 15px/1 system-ui, sans-serif;
+  cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.12); padding: 0;
+}
+.office-root .oc-ctl button:hover { background: #fff; }
+.office-root.oc-skin-night .oc-ctl button { background: rgba(20,27,51,.9); color: #d9f6ff; border-color: rgba(61,245,255,.35); }
+
+/* ── 캐릭터: 기본 가시성 ───────────────────────────────────────── */
+.office-root .oc-char { cursor: pointer; }
+.office-root .oc-char .oc-headb,
+.office-root .oc-char .oc-torso-b,
+.office-root .oc-char .oc-ring,
+.office-root .oc-char .oc-pulse,
+.office-root .oc-char .oc-cup,
+.office-root .oc-char .oc-mag,
+.office-root .oc-char .oc-pen,
+.office-root .oc-char .oc-book,
+.office-root .oc-char .oc-papers,
+.office-root .oc-char .oc-carry,
+.office-root .oc-char .oc-chin,
+.office-root .oc-char .oc-sweat,
+.office-root .oc-char .oc-z,
+.office-root .oc-char .oc-brow,
+.office-root .oc-char .oc-ex,
+.office-root .oc-char .oc-mo { display: none; }
+.office-root .oc-char .ex-open,
+.office-root .oc-char .mo-smile { display: inline; }
+
+.office-root .oc-char.face-back .oc-headf,
+.office-root .oc-char.face-back .oc-torso-f,
+.office-root .oc-char.face-back .oc-hairback,
+.office-root .oc-char.face-back .oc-posed { display: none; }
+.office-root .oc-char.face-back .oc-headb,
+.office-root .oc-char.face-back .oc-torso-b { display: inline; }
+.office-root .oc-char.pose-sit .oc-cshadow { display: none; }
+
+.office-root .oc-char .oc-armr { transition: transform .28s ease; }
+.office-root .oc-char .oc-arm-l .oc-armr { transform: rotate(10deg); }
+.office-root .oc-char .oc-arm-r .oc-armr { transform: rotate(-10deg); }
+.office-root .oc-char .oc-head { transition: transform .3s ease; }
+.office-root .oc-char .oc-look { transition: transform .3s ease; }
+.office-root .oc-char .oc-sel { transition: transform .2s ease; }
+.office-root .oc-char .oc-flip { transition: opacity .4s ease; }
+
+/* 숨쉬기·깜빡임(캐릭터마다 다른 지연값 --oc-d) */
+.office-root .oc-char.pose-sit .oc-body,
+.office-root .oc-char.pose-stand .oc-body { animation: oc-breath 3.6s steps(8) infinite alternate; animation-delay: var(--oc-d, 0s); }
+.office-root .oc-char .ex-open { animation: oc-blink 4.8s linear infinite; animation-delay: var(--oc-d, 0s); }
+@keyframes oc-breath { from { transform: scaleY(1); } to { transform: scaleY(1.022); } }
+@keyframes oc-blink { 0%, 94%, 100% { transform: scaleY(1); } 96.5% { transform: scaleY(.12); } }
+
+/* 선택 */
+.office-root .oc-char.sel .oc-sel { transform: scale(1.09); }
+.office-root .oc-char.sel .oc-ring {
+  display: inline; fill: none; stroke: var(--oc-c, #4c8dff); stroke-width: 2.6;
+  stroke-dasharray: 7 5; animation: oc-dash 1.4s linear infinite;
+}
+@keyframes oc-dash { to { stroke-dashoffset: -24; } }
+.office-root .oc-desk-hl { display: none; }
+.office-root .oc-desk.sel .oc-desk-hl { display: inline; fill: none; stroke: #4c8dff; stroke-width: 2.4; stroke-dasharray: 8 5; }
+
+/* ── 상태별 ────────────────────────────────────────────────── */
+/* idle: 커피 들고 쉬다가 가끔 한 모금 */
+.office-root .oc-char.st-idle.face-front .oc-cup,
+.office-root .oc-char.st-done.at-lounge .oc-cup { display: inline; }
+.office-root .oc-char.st-idle.face-front .oc-arm-r .oc-armr,
+.office-root .oc-char.st-done.at-lounge .oc-arm-r .oc-armr { transform: rotate(40deg); animation: oc-sip 9s ease-in-out infinite; animation-delay: var(--oc-d, 0s); }
+@keyframes oc-sip { 0%, 74%, 100% { transform: rotate(40deg); } 80%, 90% { transform: rotate(124deg); } }
+
+/* thinking: 손을 턱에, 시선 위로 */
+.office-root .oc-char.st-thinking.face-front .oc-chin { display: inline; }
+.office-root .oc-char.st-thinking.face-front .oc-arm-r { display: none; }
+.office-root .oc-char.st-thinking .mo-smile { display: none; }
+.office-root .oc-char.st-thinking .mo-flat { display: inline; }
+.office-root .oc-char.st-thinking .oc-look { transform: translate(-1.2px, -1.8px); }
+.office-root .oc-char.st-thinking.face-front .oc-head { transform: rotate(-6deg); }
+
+/* typing: 뒷모습, 양팔 빠르게 */
+.office-root .oc-char.st-typing.face-back .oc-arm-l .oc-armr { animation: oc-type-l .15s steps(1) infinite alternate; }
+.office-root .oc-char.st-typing.face-back .oc-arm-r .oc-armr { animation: oc-type-r .15s steps(1) infinite alternate-reverse; }
+.office-root .oc-char.st-typing.face-back .oc-head { animation: oc-nod 2.4s ease-in-out infinite; }
+@keyframes oc-type-l { from { transform: rotate(40deg); } to { transform: rotate(54deg); } }
+@keyframes oc-type-r { from { transform: rotate(-40deg); } to { transform: rotate(-54deg); } }
+@keyframes oc-nod { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(3deg); } }
+
+/* tool: 뒷모습, 마우스 손 */
+.office-root .oc-char.st-tool.face-back .oc-arm-l .oc-armr { transform: rotate(38deg); }
+.office-root .oc-char.st-tool.face-back .oc-arm-r .oc-armr { animation: oc-mouse 1.1s steps(1) infinite; }
+@keyframes oc-mouse { 0% { transform: rotate(-40deg); } 30% { transform: rotate(-50deg); } 60% { transform: rotate(-44deg); } 80% { transform: rotate(-54deg); } }
+
+/* running(서버실): 태블릿 두드리기 */
+.office-root .oc-char.st-running.face-back .oc-arm-l .oc-armr { animation: oc-type-l .32s steps(1) infinite alternate; }
+.office-root .oc-char.st-running.face-back .oc-arm-r .oc-armr { animation: oc-type-r .32s steps(1) infinite alternate-reverse; }
+
+/* 회의실 화이트보드에 쓰기(뒷모습) */
+.office-root .oc-char.at-meeting.face-back .oc-pen { display: inline; }
+.office-root .oc-char.at-meeting.face-back .oc-arm-r .oc-armr { animation: oc-write .45s ease-in-out infinite alternate; }
+@keyframes oc-write { from { transform: rotate(-128deg); } to { transform: rotate(-146deg); } }
+
+/* searching(정보검색실): 돋보기 */
+.office-root .oc-char.at-search.pose-stand.face-front .oc-mag { display: inline; }
+.office-root .oc-char.at-search.pose-stand.face-front .oc-arm-r .oc-armr { animation: oc-peer 2.2s ease-in-out infinite alternate; }
+.office-root .oc-char.at-search .oc-look { transform: translate(1.4px, -.6px); }
+@keyframes oc-peer { from { transform: rotate(-130deg); } to { transform: rotate(-142deg); } }
+
+/* reading(자료실): 책 펼치기 */
+.office-root .oc-char.at-shelf.pose-stand.face-front .oc-book,
+.office-root .oc-char.at-shelf.pose-stand.face-front .oc-carry { display: inline; }
+.office-root .oc-char.at-shelf.pose-stand.face-front .oc-arm { display: none; }
+.office-root .oc-char.at-shelf .oc-look { transform: translate(0, 1.8px); }
+.office-root .oc-char.at-shelf.face-front .oc-head { transform: rotate(4deg); }
+.office-root .oc-char .oc-page { transform-origin: 0 -26px; animation: oc-page 3.2s ease-in-out infinite; }
+@keyframes oc-page { 0%, 60% { transform: scaleX(1); } 80%, 100% { transform: scaleX(-1); } }
+
+/* waiting: 손 들기 + 펄스 테두리 */
+.office-root .oc-char.st-waiting .ex-open { display: none; }
+.office-root .oc-char.st-waiting .ex-wide { display: inline; }
+.office-root .oc-char.st-waiting .mo-smile { display: none; }
+.office-root .oc-char.st-waiting .mo-o { display: inline; }
+.office-root .oc-char.st-waiting.face-front .oc-arm-l .oc-armr { animation: oc-wave .8s ease-in-out infinite alternate; }
+.office-root .oc-char.st-waiting .oc-pulse { display: inline; fill: rgba(250, 204, 21, .18); stroke: #f5b301; stroke-width: 3.6; animation: oc-pulse 1.4s ease-out infinite; }
+@keyframes oc-wave { from { transform: rotate(148deg); } to { transform: rotate(172deg); } }
+@keyframes oc-pulse { from { transform: scale(.55); opacity: .95; } to { transform: scale(1.7); opacity: 0; } }
+
+/* error: 땀방울, 머리 감싸기, 흔들림 */
+.office-root .oc-char.st-error .ex-open { display: none; }
+.office-root .oc-char.st-error .ex-wide { display: inline; }
+.office-root .oc-char.st-error .mo-smile { display: none; }
+.office-root .oc-char.st-error .mo-wavy,
+.office-root .oc-char.st-error .oc-brow { display: inline; }
+.office-root .oc-char.st-error .oc-sweat { display: inline; animation: oc-sweat 1.3s ease-in infinite; }
+.office-root .oc-char.st-error .oc-sweat2 { animation-delay: -.65s; }
+.office-root .oc-char.st-error.face-front .oc-arm-l .oc-armr { transform: rotate(146deg); }
+.office-root .oc-char.st-error.face-front .oc-arm-r .oc-armr { transform: rotate(-146deg); }
+.office-root .oc-char.st-error.pose-sit .oc-body,
+.office-root .oc-char.st-error.pose-stand .oc-body { animation: oc-shake 2.6s linear infinite; }
+@keyframes oc-sweat { 0% { transform: translateY(-2px); opacity: 0; } 20% { opacity: 1; } 100% { transform: translateY(9px); opacity: 0; } }
+@keyframes oc-shake { 0%, 78%, 100% { transform: translateX(0); } 81% { transform: translateX(-1.6px); } 84% { transform: translateX(1.6px); } 87% { transform: translateX(-1.4px); } 90% { transform: translateX(1px); } }
+
+/* done: 기지개(책상) → 휴게실 커피 */
+.office-root .oc-char.st-done .ex-open { display: none; }
+.office-root .oc-char.st-done .ex-happy { display: inline; }
+.office-root .oc-char.st-done .mo-smile { display: none; }
+.office-root .oc-char.st-done .mo-grin { display: inline; }
+.office-root .oc-char.st-done.at-desk.face-front .oc-arm-l .oc-armr { animation: oc-stretch-l 2.8s ease-in-out infinite; }
+.office-root .oc-char.st-done.at-desk.face-front .oc-arm-r .oc-armr { animation: oc-stretch-r 2.8s ease-in-out infinite; }
+.office-root .oc-char.st-done.at-desk .oc-body { animation: oc-stretch-b 2.8s ease-in-out infinite; }
+@keyframes oc-stretch-l { 0%, 100% { transform: rotate(10deg); } 30%, 70% { transform: rotate(170deg); } }
+@keyframes oc-stretch-r { 0%, 100% { transform: rotate(-10deg); } 30%, 70% { transform: rotate(-170deg); } }
+@keyframes oc-stretch-b { 0%, 100% { transform: scaleY(1); } 35%, 65% { transform: scaleY(1.05); } }
+
+/* paused: 눈 감고 고개 기울이고 zzz */
+.office-root .oc-char.st-paused .ex-open { display: none; }
+.office-root .oc-char.st-paused .ex-closed { display: inline; }
+.office-root .oc-char.st-paused .mo-smile { display: none; }
+.office-root .oc-char.st-paused .mo-flat { display: inline; }
+.office-root .oc-char.st-paused.face-front .oc-head { transform: rotate(9deg); }
+.office-root .oc-char.st-paused .oc-body { animation-duration: 5.5s; }
+.office-root .oc-char.st-paused .oc-z { display: inline; animation: oc-z 2.6s ease-out infinite; }
+.office-root .oc-char.st-paused .oc-z2 { animation-delay: -.87s; }
+.office-root .oc-char.st-paused .oc-z3 { animation-delay: -1.73s; }
+@keyframes oc-z { 0% { opacity: 0; transform: translate(0, 5px); } 30% { opacity: 1; } 100% { opacity: 0; transform: translate(7px, -9px); } }
+
+/* offline: 반투명 유령 + 빈 의자 */
+.office-root .oc-char.st-offline .oc-flip { opacity: .2; }
+.office-root .oc-char.st-offline .ex-open { display: none; }
+.office-root .oc-char.st-offline .ex-closed { display: inline; }
+.office-root .oc-char.st-offline .oc-body { animation: none; }
+.office-root .oc-ov[data-state='offline'] .oc-tag { opacity: .55; filter: grayscale(1); }
+
+/* 서류 들고 걷기 */
+.office-root .oc-char.carry.face-front .oc-papers,
+.office-root .oc-char.carry.face-front .oc-carry { display: inline; }
+.office-root .oc-char.carry.face-front .oc-arm { display: none; }
+
+/* 걷기: 상태 포즈를 덮어씀(다리·팔 프레임은 JS 가 이동 거리로 갱신) */
+.office-root .oc-char.pose-walk .oc-body,
+.office-root .oc-char.pose-walk .oc-head,
+.office-root .oc-char.pose-walk .oc-armr { animation: none !important; }
+.office-root .oc-char.pose-walk .oc-arm-l .oc-armr { transform: rotate(8deg) !important; }
+.office-root .oc-char.pose-walk .oc-arm-r .oc-armr { transform: rotate(-8deg) !important; }
+.office-root .oc-char.pose-walk .oc-arm { display: inline !important; }
+.office-root .oc-char.pose-walk.carry.face-front .oc-arm { display: none !important; }
+.office-root .oc-char.pose-walk .oc-chin,
+.office-root .oc-char.pose-walk .oc-book,
+.office-root .oc-char.pose-walk .oc-mag,
+.office-root .oc-char.pose-walk .oc-pen,
+.office-root .oc-char.pose-walk .oc-cup { display: none !important; }
+.office-root .oc-char.pose-walk .oc-head { transform: none; }
+
+/* 서브에이전트 퇴장 */
+.office-root .oc-char.gone .oc-flip { opacity: 0; transition: opacity .45s ease; }
+.office-root .oc-ov.gone { opacity: 0; transition: opacity .4s ease; }
+
+/* ── 씬 장식 애니메이션(가벼운 steps 위주) ─────────────────── */
+.office-root .oc-led { animation: oc-led 1.8s steps(1) infinite; }
+.office-root .oc-led1 { animation-duration: 2.7s; }
+.office-root .oc-led2 { animation-duration: 1.1s; }
+.office-root .oc-svg.act-server .oc-led { animation-duration: .45s; }
+@keyframes oc-led { 0%, 60% { opacity: 1; } 61%, 100% { opacity: .25; } }
+.office-root .oc-hand { transform-origin: 0 0; animation-name: oc-spin; animation-iteration-count: infinite; animation-timing-function: linear; }
+.office-root .oc-hand-s { animation-timing-function: steps(60); }
+.office-root .oc-hand-m { animation-timing-function: steps(60); }
+@keyframes oc-spin { to { transform: rotate(360deg); } }
+.office-root .oc-globe-spin { transform: translateX(0); }
+.office-root .oc-svg.act-search .oc-globe-spin { animation: oc-globe 5s steps(30) infinite; }
+@keyframes oc-globe { to { transform: translateX(-40px); } }
+.office-root .oc-ping { opacity: 0; }
+.office-root .oc-svg.act-search .oc-ping { animation: oc-ping 2.2s ease-out infinite; }
+.office-root .oc-svg.act-search .oc-ping1 { animation-delay: -.7s; }
+.office-root .oc-svg.act-search .oc-ping2 { animation-delay: -1.4s; }
+@keyframes oc-ping { from { transform: scale(.3); opacity: 1; } to { transform: scale(1.8); opacity: 0; } }
+.office-root .oc-scribble { stroke-dasharray: 260; stroke-dashoffset: 260; opacity: 0; }
+.office-root .oc-svg.act-meeting .oc-scribble { opacity: 1; animation: oc-draw 4s linear infinite; }
+@keyframes oc-draw { 0% { stroke-dashoffset: 260; } 85%, 100% { stroke-dashoffset: 0; } }
+.office-root .oc-door-l, .office-root .oc-door-r { transition: transform .55s ease; }
+.office-root .oc-door.open .oc-door-l { transform: translateX(-24px); }
+.office-root .oc-door.open .oc-door-r { transform: translateX(24px); }
+.office-root .oc-cat-tail { animation: oc-tail 2.6s ease-in-out infinite alternate; }
+@keyframes oc-tail { from { transform: rotate(-10deg); } to { transform: rotate(16deg); } }
+.office-root .oc-mglow { opacity: .9; }
+.office-root .oc-desk.scr-off .oc-mglow { opacity: 0; }
+.office-root .oc-desk.scr-err .oc-mglow { opacity: 1; }
+
+/* 모니터 화면 */
+.office-root .oc-code { animation: oc-scroll 2.6s steps(12) infinite; }
+@keyframes oc-scroll { to { transform: translateY(var(--oc-scroll, -40px)); } }
+.office-root .oc-cursor { animation: oc-cur 1s steps(1) infinite; }
+@keyframes oc-cur { 50% { opacity: 0; } }
+.office-root .oc-spin { animation: oc-spin 1s linear infinite; }
+.office-root .oc-prog { animation: oc-prog 2.4s steps(16) infinite; }
+@keyframes oc-prog { from { transform: scaleX(.04); } to { transform: scaleX(1); } }
+.office-root .oc-tdot { animation: oc-cur 1.2s steps(1) infinite; }
+.office-root .oc-tdot1 { animation-delay: -.4s; }
+.office-root .oc-tdot2 { animation-delay: -.8s; }
+.office-root .oc-blinkcard { animation: oc-cardblink 1.2s steps(1) infinite; }
+@keyframes oc-cardblink { 50% { opacity: .55; } }
+
+/* ── 머리 위 오버레이(태그·말풍선) ───────────────────────── */
+.office-root .oc-ov { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
+.office-root .oc-ov.sel { z-index: 999999 !important; }
+.office-root .oc-ov-lift { position: absolute; left: 0; bottom: 0; width: 0; height: 0; transition: transform .22s ease; }
+.office-root .oc-stem {
+  position: absolute; left: 0; bottom: 0; width: 0; height: 0; opacity: 0;
+  border-left: calc(1.6px * var(--ui, 1)) solid var(--c, #94a3b8); transform: translateX(-50%);
+  transition: height .22s ease, opacity .2s ease;
+}
+.office-root .oc-stem::after {
+  content: ''; position: absolute; left: 0; bottom: 0; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--c, #94a3b8); box-shadow: 0 0 0 1.5px #fff; transform: translate(-50%, 50%) scale(var(--ui, 1));
+}
+.office-root .oc-ov.lifted .oc-stem { opacity: .9; }
+.office-root .oc-ov.compact .oc-tag-l2 { display: none; }
+.office-root .oc-ov-in {
+  position: absolute; left: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  transform: translateX(-50%) scale(var(--ui, 1)); transform-origin: 50% 100%;
+}
+.office-root .oc-tag {
+  pointer-events: auto; cursor: pointer; white-space: nowrap;
+  background: #fff; color: #1f2633; border-radius: 7px; padding: 2px 6px 2px 5px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, .2), 0 0 0 1px rgba(15, 23, 42, .06);
+  border-left: 3px solid var(--c, #6b7cff);
+  font: 700 10.5px/1.25 var(--oc-font);
+}
+.office-root .oc-ov:has(.oc-tag:hover) { z-index: 999998 !important; }
+.office-root .oc-ov.sel .oc-tag { box-shadow: 0 0 0 2px var(--c, #4c8dff), 0 2px 6px rgba(15, 23, 42, .25); }
+.office-root .oc-tag-l1 { display: flex; align-items: center; gap: 4px; }
+.office-root .oc-tag-l2 { display: flex; gap: 5px; margin-top: 0; font: 600 9px/1.2 ui-monospace, 'Cascadia Mono', Consolas, monospace; color: #6b7280; }
+.office-root .oc-tag-l2[hidden], .office-root .oc-chip[hidden], .office-root .oc-tok[hidden], .office-root .oc-badge[hidden] { display: none; }
+.office-root .oc-badge { color: #b45309; }
+.office-root .oc-dot { width: 7px; height: 7px; border-radius: 50%; background: #9ca3af; flex: none; }
+.office-root .oc-chip {
+  font: 700 9px/1 ui-monospace, 'Cascadia Mono', Consolas, monospace; padding: 2px 4px; border-radius: 4px;
+  background: #eef2ff; color: #3730a3; border: 1px solid var(--c, #c7d2fe);
+}
+.office-root .oc-ov[data-state='thinking'] .oc-dot { background: #a78bfa; }
+.office-root .oc-ov[data-state='typing'] .oc-dot { background: #22c55e; }
+.office-root .oc-ov[data-state='tool'] .oc-dot { background: #3b82f6; }
+.office-root .oc-ov[data-state='searching'] .oc-dot { background: #06b6d4; }
+.office-root .oc-ov[data-state='reading'] .oc-dot { background: #f59e0b; }
+.office-root .oc-ov[data-state='running'] .oc-dot { background: #f97316; }
+.office-root .oc-ov[data-state='waiting'] .oc-dot { background: #eab308; animation: oc-cur 1s steps(1) infinite; }
+.office-root .oc-ov[data-state='error'] .oc-dot { background: #ef4444; }
+.office-root .oc-ov[data-state='done'] .oc-dot { background: #16a34a; }
+.office-root .oc-ov[data-state='paused'] .oc-dot { background: #64748b; }
+.office-root .oc-ov[data-state='offline'] .oc-dot { background: transparent; box-shadow: inset 0 0 0 1.5px #9ca3af; }
+
+.office-root .oc-bub {
+  display: none; position: relative; max-width: 136px; padding: 2px 7px; border-radius: 9px;
+  background: #fff; color: #1f2633; box-shadow: 0 1px 4px rgba(15, 23, 42, .22);
+  font: 600 10px/1.3 var(--oc-font); text-align: center;
+  /* 띄어쓰기에서 줄을 바꾸고, 너무 긴 단어만 중간에서 자른다(영어가 "approv/al"처럼 끊기지 않게) */
+  white-space: normal; word-break: normal; overflow-wrap: anywhere;
+}
+/* 한국어는 어절 단위로 줄을 바꾼다(중국어·일본어는 글자 단위가 자연스러워 기본값 유지) */
+.office-root:lang(ko) .oc-bub { word-break: keep-all; }
+.office-root .oc-bub.show { display: block; animation: oc-pop .22s ease-out; }
+.office-root .oc-bub::after {
+  content: ''; position: absolute; left: 50%; bottom: -4px; width: 8px; height: 8px; margin-left: -4px;
+  background: inherit; transform: rotate(45deg); box-shadow: 2px 2px 2px rgba(15, 23, 42, .08);
+}
+.office-root .oc-bub-i:empty, .office-root .oc-bub-t:empty { display: none; }
+.office-root .oc-bub-i { margin-right: 3px; }
+.office-root .oc-dots { display: none; }
+.office-root .oc-bub.k-say { max-width: 172px; font: 500 10px/1.3 ui-monospace, 'Cascadia Mono', Consolas, monospace; text-align: left; background: #f8fafc; }
+.office-root .oc-bub.k-think { border-radius: 14px; padding: 3px 10px; }
+.office-root .oc-bub.k-think::after { width: 6px; height: 6px; border-radius: 50%; bottom: -8px; margin-left: 2px; transform: none; }
+.office-root .oc-bub.k-think .oc-dots { display: inline-flex; gap: 3px; vertical-align: middle; }
+.office-root .oc-dots i { width: 4.5px; height: 4.5px; border-radius: 50%; background: #7c6cff; display: block; animation: oc-dot 1.2s ease-in-out infinite; }
+.office-root .oc-dots i:nth-child(2) { animation-delay: .2s; }
+.office-root .oc-dots i:nth-child(3) { animation-delay: .4s; }
+@keyframes oc-dot { 0%, 60%, 100% { opacity: .25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
+.office-root .oc-bub.k-tool { background: #eef4ff; color: #1e3a8a; }
+.office-root .oc-bub.k-carry, .office-root .oc-bub.k-recv { background: #fff7ed; color: #9a3412; }
+.office-root .oc-bub.k-wait { background: #fde047; color: #422006; font-weight: 800; animation: oc-pop .22s ease-out, oc-bob 1s ease-in-out infinite alternate; }
+.office-root .oc-bub.k-err { background: #ef4444; color: #fff; font-weight: 800; }
+.office-root .oc-bub.k-done { background: #22c55e; color: #fff; }
+.office-root .oc-bub.k-pause { background: #64748b; color: #fff; }
+.office-root .oc-bub.k-wait .oc-bub-i, .office-root .oc-bub.k-err .oc-bub-i {
+  display: inline-grid; place-items: center; width: 13px; height: 13px; border-radius: 50%;
+  font-weight: 900; font-size: 10px; line-height: 1;
+}
+.office-root .oc-bub.k-wait .oc-bub-i { background: #a16207; color: #fde047; }
+.office-root .oc-bub.k-err .oc-bub-i { background: #fff; color: #dc2626; }
+@keyframes oc-pop { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes oc-bob { to { transform: translateY(-2px); } }
+
+.office-root .oc-fly {
+  position: absolute; left: 0; top: 0; font-size: 18px; line-height: 1; margin: -9px 0 0 -9px;
+  pointer-events: none; z-index: 1000000;
+  transition: transform .62s cubic-bezier(.3, .7, .4, 1), opacity .62s ease-in;
+}
+
+/* 구역 표지판(HTML) */
+.office-root .oc-zone { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 1; pointer-events: none; }
+.office-root .oc-zone-in {
+  position: absolute; left: 0; top: 0; transform: translate(-50%, -50%) scale(calc(var(--ui, 1) * .82)); transform-origin: 50% 50%;
+  white-space: nowrap; padding: 4px 11px; border-radius: 8px; background: #fff; color: #2b3240;
+  border: 1px solid #e4e0d8; box-shadow: 0 2px 4px rgba(15, 23, 42, .12);
+  font: 800 13px/1.2 var(--oc-font);
+}
+.office-root .oc-zone-in { transition: opacity .25s ease; }
+.office-root .oc-zone.dim .oc-zone-in { opacity: .18; }
+.office-root.oc-skin-cozy .oc-zone-in { background: #fffaf1; color: #4a3423; border-color: #ead8bf; }
+.office-root.oc-skin-night .oc-zone-in { background: #141b33; color: #d9f6ff; border-color: #3df5ff; box-shadow: 0 0 8px rgba(61, 245, 255, .35); }
+.office-root .oc-neon {
+  position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: none; z-index: 1; white-space: nowrap;
+  font: 800 16px/1 var(--oc-font); letter-spacing: .5px; color: #ffe1fa;
+  text-shadow: 0 0 2px var(--neon, #ff4fd8), 0 0 6px var(--neon, #ff4fd8), 0 0 12px var(--neon, #ff4fd8);
+}
+
+/* 나이트 스킨 오버레이 */
+.office-root.oc-skin-night .oc-tag { background: #141b33; color: #e6f6ff; box-shadow: 0 0 0 1px rgba(61, 245, 255, .35), 0 2px 6px rgba(0, 0, 0, .5); }
+.office-root.oc-skin-night .oc-tag-l2 { color: #9fb3d9; }
+.office-root.oc-skin-night .oc-chip { background: #1f2a4f; color: #bfeaff; }
+.office-root.oc-skin-night .oc-bub.k-say, .office-root.oc-skin-night .oc-bub.k-think { background: #1b2340; color: #e6f6ff; }
+.office-root.oc-skin-night .oc-bub.k-tool { background: #18244a; color: #bfeaff; }
+
+/* 품질: lite = 장식 반복 애니메이션 끔(상태 신호 몇 개만 유지), static = 애니메이션·전환 0 */
+.office-root.oc-q-lite *, .office-root.oc-q-lite *::after { animation-name: none !important; }
+.office-root.oc-q-lite .oc-char.st-waiting .oc-pulse { animation-name: oc-pulse !important; }
+.office-root.oc-q-lite .oc-char.st-error .oc-sweat { animation-name: oc-sweat !important; }
+.office-root.oc-q-lite .oc-dots i { animation-name: oc-dot !important; }
+.office-root.oc-q-static *, .office-root.oc-q-static *::after { animation: none !important; transition: none !important; }
+/* 화면 밖(IntersectionObserver)이면 일시정지 */
+.office-root.oc-offscreen *, .office-root.oc-offscreen *::after { animation-play-state: paused !important; }
+
+/* 탭 숨김 시 정지, 줄이기 모드 */
+.office-root.oc-hidden *, .office-root.oc-hidden *::after { animation-play-state: paused !important; }
+.office-root.oc-reduced *, .office-root.oc-reduced *::after { animation: none !important; transition: none !important; }
+
+/* ── 커스텀 스킨 편집기 ───────────────────────────────────── */
+.oc-editor {
+  --e-bg: #ffffff; --e-fg: #1f2633; --e-mute: #6b7280; --e-line: #e5e7eb; --e-acc: #4c8dff;
+  display: flex; flex-direction: column; gap: 10px; padding: 12px; background: var(--e-bg); color: var(--e-fg);
+  border-radius: 12px; font: 500 13px/1.4 var(--oc-font); min-height: 320px;
+}
+@media (prefers-color-scheme: dark) {
+  .oc-editor { --e-bg: #171b24; --e-fg: #e5e7eb; --e-mute: #9ca3af; --e-line: #2a3140; }
+}
+.oc-editor .oe-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.oc-editor input[type='text'] { flex: 1; min-width: 140px; padding: 6px 9px; border-radius: 8px; border: 1px solid var(--e-line); background: transparent; color: inherit; font: inherit; }
+.oc-editor button { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--e-line); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.oc-editor button:hover { border-color: var(--e-acc); }
+.oc-editor button.on { background: var(--e-acc); border-color: var(--e-acc); color: #fff; }
+.oc-editor button.primary { background: var(--e-acc); border-color: var(--e-acc); color: #fff; font-weight: 700; }
+.oc-editor .oe-hint { color: var(--e-mute); font-size: 12px; }
+.oc-editor .oe-err { color: #dc2626; font-size: 12px; min-height: 1em; }
+.oc-editor .oe-stage {
+  position: relative; flex: 1; min-height: 220px; border: 2px dashed var(--e-line); border-radius: 10px; overflow: auto;
+  display: grid; place-items: center; background: repeating-conic-gradient(rgba(127,127,127,.08) 0 25%, transparent 0 50%) 0 0 / 16px 16px;
+}
+.oc-editor .oe-stage.drag { border-color: var(--e-acc); }
+.oc-editor .oe-empty { text-align: center; color: var(--e-mute); padding: 24px; }
+.oc-editor .oe-wrap { position: relative; display: inline-block; line-height: 0; cursor: crosshair; }
+.oc-editor .oe-wrap img { display: block; max-width: 100%; width: auto; height: auto; object-fit: contain; user-select: none; -webkit-user-drag: none; }
+.oc-editor .oe-mk {
+  position: absolute; transform: translate(-50%, -50%); min-width: 22px; height: 22px; padding: 0 5px; border-radius: 11px;
+  display: grid; place-items: center; font: 800 11px/1 system-ui, sans-serif; color: #fff; background: #4c8dff;
+  box-shadow: 0 0 0 2px #fff, 0 2px 6px rgba(0,0,0,.35); cursor: grab; touch-action: none; white-space: nowrap;
+}
+.oc-editor .oe-mk.spot { background: #f97316; }
+.oc-editor .oe-mk:active { cursor: grabbing; }
+.oc-editor .oe-legend { display: flex; flex-wrap: wrap; gap: 10px; color: var(--e-mute); font-size: 12px; }

@@ -1,0 +1,118 @@
+// 자동 이어받기: 한 AI의 사용량·한도가 바닥나면 작업을 멈추지 않고, 여유 있는 다른 AI가 이어받게 한다
+import { resolveRoute, roleKind } from './routing.js';
+
+// 각 CLI·API 가 한도 초과 때 내는 문구(실측·공식 오류 코드 기준). 일반 오류와 구분해야 엉뚱하게 넘기지 않는다
+const QUOTA_RE = new RegExp([
+  'rate[ _-]?limit', 'usage[ _-]?limit', 'quota', 'resource[_ ]exhausted', 'insufficient[_ ]quota',
+  'too many requests', '(?:http|status|error|code)[ :]*429\\b', 'credit balance', 'out of credits',
+  'exceeded your (?:current )?(?:quota|usage|plan|limit)', 'hit your (?:usage )?limit',
+  'weekly limit', '5-hour limit', 'session limit', '사용량 한도', '사용 한도', '요청 한도', '한도(?:를)? ?초과', '한도에 (?:도달|걸)',
+  '用量上限', '配额', '使用上限', '利用上限', 'レート制限',
+].join('|'), 'i');
+// 문맥 길이·출력 토큰·파일 크기 같은 "크기 한도"는 사용량 한도가 아니다(다른 AI로 넘길 이유가 아님).
+const NOT_QUOTA_RE = /context (?:window|length)|max[_ ]?tokens|maximum context|output tokens?|too long|file size|upload|크기 한도|길이 한도|파일 크기|출력 토큰|(?<!사)용량 한도|업로드|컨텍스트|上下文|コンテキスト/i;
+// 단, 분당 한도("8,000 output tokens per minute", TPM·OTPM, "분당 출력 토큰 한도")는 크기 한도 말이 섞여 있어도 사용량 한도다
+// ("/min" 은 경로(/home/min/)와 헷갈리지 않게 tokens·requests 같은 단위가 앞에 있을 때만)
+const PER_MINUTE_RE = /per[- ](?:1 |one )?min(?:ute)?\b|(?:tokens?|requests?|reqs?)\s*\/\s*min(?:ute)?\b|\b[io]?tpm\b|분당|每分钟|毎分|1分あたり/i;
+
+export function isQuotaError(text = '') {
+  const s = String(text);
+  return QUOTA_RE.test(s) && (PER_MINUTE_RE.test(s) || !NOT_QUOTA_RE.test(s));
+}
+
+const HALF_HOUR = 30 * 60 * 1000;
+
+/**
+ * 한도 기록으로 이 AI를 언제까지 피할지(ms, 피할 필요 없으면 0). 화면 표시와 실행 전 회피가 같은 값을 쓴다.
+ * - "다 찬 창"(사용률이 기준 이상, 거절 상태에선 사용률을 모르는 창도)이 아직 안 풀렸으면 그중 가장 늦은 초기화 시각까지
+ * - 초기화 시각을 모르는 다 찬 창이 있거나, 거절 상태인데 어느 창인지 모르면 관측 뒤 30분까지
+ * - 사용자가 "지금 다시 쓰기"로 푼 뒤의 옛 기록은 무시
+ */
+export function avoidUntil(limit, threshold = 95) {
+  if (!limit?.windows) return 0;
+  if (limit.releasedAt && limit.releasedAt >= (limit.observedAt || 0)) return 0;
+  const now = Date.now();
+  const live = Object.values(limit.windows).filter((w) => !w.resetsAt || w.resetsAt * 1000 > now);
+  const rejected = limit.status === 'rejected';
+  const full = live.filter((w) => (typeof w.pct === 'number' ? w.pct >= threshold : rejected));
+  const timed = full.filter((w) => w.resetsAt).map((w) => w.resetsAt * 1000);
+  if (timed.length) return Math.max(...timed);
+  if (full.length || rejected) {
+    const until = (limit.observedAt ?? now) + HALF_HOUR;
+    return until > now ? until : 0;
+  }
+  return 0;
+}
+
+// 한도 창(%)이 기준 이상이거나 거절 상태라서 지금은 피해야 하는지
+export function nearLimit(limit, threshold = 95) {
+  return avoidUntil(limit, threshold) > Date.now();
+}
+
+// 한도에 걸린 AI는 초기화 시각(모르면 30분)까지 쉬게 둔다
+export class Cooldown {
+  constructor() { this.map = new Map(); }
+
+  mark(provider, { until, reason = '' } = {}) {
+    const t = until && until > Date.now() ? until : Date.now() + 30 * 60 * 1000;
+    this.map.set(provider, { until: t, reason: String(reason).slice(0, 200), at: Date.now() });
+    return this.map.get(provider);
+  }
+
+  active(provider) {
+    const c = this.map.get(provider);
+    if (!c) return null;
+    if (c.until <= Date.now()) { this.map.delete(provider); return null; }
+    return c;
+  }
+
+  clear(provider) { this.map.delete(provider); }
+
+  list() {
+    const out = {};
+    for (const [p] of this.map) { const c = this.active(p); if (c) out[p] = c; }
+    return out;
+  }
+}
+
+// 쉬는 시간이 끝나는 시각(ms): 다 찬 창이 있으면 그중 가장 늦은 초기화 시각, 없으면 0(= 쉬는 시간 기본 30분).
+// (다 차지 않은 창의 초기화 시각을 쓰면, 옛 기록에 주간 창만 남았을 때 며칠씩 쉬게 된다)
+export function resetTime(limit, threshold = 95) {
+  const ws = Object.values(limit?.windows || {}).filter((w) => w.resetsAt && w.resetsAt * 1000 > Date.now());
+  if (!ws.length) return 0;
+  const full = ws.filter((w) => typeof w.pct === 'number' && w.pct >= threshold);
+  return full.length ? Math.max(...full.map((w) => w.resetsAt * 1000)) : 0;
+}
+
+// 쓸 수 없는 AI(쉬는 중·한도 임박)를 빼고 라우팅 카탈로그를 만든다
+export function availableCatalog(catalog, { cooldown, limits = {}, threshold = 95, exclude = [] } = {}) {
+  const blocked = new Set(exclude);
+  for (const p of catalog.providers || []) {
+    if (cooldown?.active(p.id) || nearLimit(limits[p.id], threshold)) blocked.add(p.id);
+  }
+  return {
+    ...catalog,
+    providers: (catalog.providers || []).map((p) => (blocked.has(p.id) ? { ...p, loggedIn: false, blocked: true } : p)),
+    blocked: [...blocked],
+  };
+}
+
+/**
+ * 이어받을 AI 고르기: 같은 역할·프로필 기준으로, 막힌 AI를 빼고 라우팅 엔진에 다시 묻는다
+ * @returns { provider, model, effort, modelLabel, reason } | null
+ */
+export function pickFallback(agent, catalog, opts = {}) {
+  const cat = availableCatalog(catalog, opts);
+  const r = resolveRoute({ role: agent.role, routingProfile: agent.routingProfile || 'balanced' }, cat);
+  if (!r || r.provider === agent.provider) return null;
+  return r;
+}
+
+// 이어받는 AI에게 줄 지시: 원래 요청 + 지금까지 쓴 내용
+export function continuationPrompt(prompt, partial, fromLabel, tr = (s, v) => s.replace(/\{(\w+)\}/g, (_, k) => v?.[k] ?? '')) {
+  const head = tr('[이어받기] {from}이(가) 사용량 한도에 걸려 중단됐어. 아래 원래 요청을 네가 이어서 끝까지 완성해.', { from: fromLabel });
+  const done = partial?.trim() ? `\n\n${tr('[앞 담당이 지금까지 쓴 내용 — 중복 없이 이어서 써]')}\n${partial.slice(-12000)}` : '';
+  return `${head}\n\n${prompt}${done}`;
+}
+
+export { roleKind };

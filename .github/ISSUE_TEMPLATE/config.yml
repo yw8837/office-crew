@@ -1,0 +1,10 @@
+# Blank issues stay enabled so commercial license inquiries can use a free-form
+# issue titled "[Commercial license]" (see COMMERCIAL-LICENSE.md).
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/yw8837/office-crew/security/advisories/new
+    about: Please report security issues privately, not as public issues.
+  - name: Commercial license
+    url: https://github.com/yw8837/office-crew/blob/main/COMMERCIAL-LICENSE.md
+    about: How to ask about using Office Crew outside the AGPL-3.0.

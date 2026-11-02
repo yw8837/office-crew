@@ -1,0 +1,128 @@
+name: Bug report
+description: Something doesn't work as expected
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please search [existing issues](https://github.com/yw8837/office-crew/issues) first.
+        **Security problems:** don't file them here. Report them privately as described in [SECURITY.md](https://github.com/yw8837/office-crew/blob/main/SECURITY.md).
+        한국어·中文·日本語로 작성해도 괜찮습니다.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Can you reproduce it with the built-in Demo team? That helps a lot.
+      placeholder: |
+        1. Start with `npm start`
+        2. Open a new session with the Demo team
+        3. Send "..."
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Office Crew version
+      description: Shown at the top of the Settings page, or run `node bin/office-crew.js --help`.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version
+      description: Output of `node --version`.
+      placeholder: "v22.12.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: window
+    attributes:
+      label: How do you open the app?
+      options:
+        - Edge app window
+        - Chrome app window
+        - Browser tab (--browser)
+        - Other
+    validations:
+      required: false
+
+  - type: dropdown
+    id: providers
+    attributes:
+      label: Which AI providers were involved?
+      multiple: true
+      options:
+        - Claude Code
+        - OpenAI Codex CLI
+        - Gemini CLI
+        - Nous Hermes Agent
+        - ACP agent
+        - OpenAI-compatible API
+        - Local model (Ollama, LM Studio, llama.cpp, vLLM, Jan)
+        - Demo
+        - Not provider-related
+    validations:
+      required: true
+
+  - type: input
+    id: cli-versions
+    attributes:
+      label: CLI version(s)
+      description: Settings → AI accounts shows the version of each CLI.
+      placeholder: "claude 2.1.x, codex 0.148.x"
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and screenshots
+      description: |
+        Server console output, browser console errors or screenshots.
+        **Remove API keys, the `.token` value, account e-mails and private paths before posting.**
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I removed API keys, tokens and personal data from everything I pasted.
+          required: true

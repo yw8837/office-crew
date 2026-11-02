@@ -1,0 +1,16 @@
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+# 개인 데이터는 저장소 밖(~/.office-crew)에 있지만 혹시 모를 실수 방지
+.office-crew/
+*.tmp
+dist/
+.omc/
+# 개발용 실행 설정(개인 경로 포함)
+.claude/
+
+# 로컬 전용(공개 저장소에 넣지 않음)
+.local/
+docs/REQUIREMENTS.md
+.serena/

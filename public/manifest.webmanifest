@@ -1,0 +1,10 @@
+{
+  "name": "오피스 크루",
+  "short_name": "오피스 크루",
+  "description": "여러 AI 에이전트를 팀으로 돌리고 사무실에서 실시간으로 지켜보는 로컬 앱",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f5f2",
+  "theme_color": "#f6f5f2",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

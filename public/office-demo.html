@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>오피스 크루 · 사무실 데모</title>
+<link rel="stylesheet" href="./css/office.css">
+<style>
+  :root { color-scheme: light dark; --bg: #f4f6fa; --fg: #1f2633; --mute: #6b7280; --line: #e3e7ee; --card: #fff; --acc: #4c8dff; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0f1218; --fg: #e5e7eb; --mute: #9ca3af; --line: #252b36; --card: #161a22; } }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 500 13px/1.4 'Pretendard', 'Malgun Gothic', system-ui, sans-serif; }
+  .app { display: grid; grid-template-columns: 1fr 300px; grid-template-rows: auto 1fr; height: 100%; }
+  header { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--card); flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0 8px 0 0; }
+  #office { min-height: 0; min-width: 0; }
+  aside { border-left: 1px solid var(--line); background: var(--card); overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+  aside h2 { font-size: 12px; color: var(--mute); margin: 0 0 6px; font-weight: 700; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  button, select, input { font: inherit; color: inherit; }
+  button { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: transparent; cursor: pointer; }
+  button:hover { border-color: var(--acc); }
+  button.on { background: var(--acc); border-color: var(--acc); color: #fff; }
+  select, input[type=text], input[type=number] { padding: 5px 8px; border-radius: 8px; border: 1px solid var(--line); background: transparent; width: 100%; }
+  header select { width: auto; } header label { white-space: nowrap; }
+  select option { color: #1f2633; }
+  .row { display: flex; gap: 6px; align-items: center; }
+  .agents { display: flex; flex-direction: column; gap: 4px; }
+  .agent { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; }
+  .agent.sel { border-color: var(--acc); background: color-mix(in srgb, var(--acc) 10%, transparent); }
+  .agent small { color: var(--mute); display: block; }
+  .agent .av { width: 34px; height: 34px; border-radius: 50%; background: color-mix(in srgb, var(--c) 18%, transparent); display: grid; place-items: center; overflow: hidden; }
+  #log { font: 11px/1.4 ui-monospace, Consolas, monospace; color: var(--mute); white-space: pre-wrap; max-height: 120px; overflow: auto; }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; z-index: 50; }
+  .modal[hidden] { display: none; }
+  .modal > div { width: min(960px, 94vw); height: min(720px, 90vh); display: flex; }
+  .modal .oc-editor { flex: 1; }
+  @media (max-width: 760px) { .app { grid-template-columns: 1fr; grid-template-rows: auto 60vh auto; } aside { border-left: 0; border-top: 1px solid var(--line); } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>🏢 오피스 크루 · 사무실</h1>
+    <label class="row">스킨 <select id="skin"></select></label>
+    <label class="row">언어 <select id="lang"><option value="ko">한국어</option><option value="en">English</option><option value="zh">简体中文</option><option value="ja">日本語</option></select></label>
+    <label class="row">품질 <select id="quality"><option value="full">full</option><option value="lite">lite</option><option value="static">static</option></select></label>
+    <button id="editSkin" type="button">🖌 커스텀 스킨 편집기</button>
+    <button id="auto" type="button">▶ 자동 데모</button>
+    <button id="count" type="button">👥 12명으로</button>
+    <button id="reduce" type="button">🐢 줄이기 모드</button>
+    <span id="sel" style="color:var(--mute)">선택: 없음</span>
+  </header>
+  <div id="office"></div>
+  <aside>
+    <section>
+      <h2>에이전트(클릭해서 선택)</h2>
+      <div class="agents" id="agents"></div>
+    </section>
+    <section>
+      <h2>상태 바꾸기 — 선택한 에이전트</h2>
+      <div class="grid" id="states"></div>
+      <div class="row" style="margin-top:6px">
+        <input id="text" type="text" placeholder="text(말풍선)" value="const plan = await team.run(stage);">
+      </div>
+      <div class="row" style="margin-top:6px">
+        <select id="tool">
+          <option>Read</option><option>Edit</option><option>Bash</option><option>WebSearch</option>
+          <option>mcp__github__search</option><option>TodoWrite</option><option>Task</option><option>Glob</option><option>CustomTool</option>
+        </select>
+        <input id="tokens" type="number" value="12300" title="tokens">
+      </div>
+    </section>
+    <section>
+      <h2>전달(handoff)</h2>
+      <div class="row"><select id="hfrom"></select>→<select id="hto"></select></div>
+      <div class="row" style="margin-top:6px"><input id="hlabel" type="text" value="조사 결과"><button id="hgo" type="button">📄 전달</button></div>
+      <div class="row" style="margin-top:6px"><button id="hmany" type="button">동시에 3건</button></div>
+    </section>
+    <section>
+      <h2>서브에이전트</h2>
+      <div class="row"><button id="spawn" type="button">➕ 부르기</button><button id="dismiss" type="button">👋 퇴근</button></div>
+    </section>
+    <section>
+      <h2>로그</h2>
+      <div id="log"></div>
+    </section>
+  </aside>
+</div>
+<div class="modal" id="modal" hidden><div id="editorHost"></div></div>
+
+<script type="module">
+import { createOffice, SKINS, skinName, createSkinEditor, renderAvatarSVG } from './js/office/index.js';
+const qs = new URLSearchParams(location.search);
+let lang = qs.get('lang') || 'ko';
+
+const ALL = [
+  { id: 'a1', name: '조사-소네트', role: '조사', model: 'sonnet·medium', color: '#4285f4', avatar: { skin: 'light', hair: '#2b2420', hairStyle: 'bob', outfit: '#e8f0fe', accessory: 'glasses' } },
+  { id: 'a2', name: '정리-솔', role: '정리', model: 'gpt-6.1-sol', color: '#10a37f', avatar: { skin: 'tan', hair: '#7a4e2d', hairStyle: 'short', outfit: 'hoodie', accessory: 'headset' } },
+  { id: 'a3', name: '분석-오푸스', role: '분석', model: 'opus·high', color: '#d97757', avatar: { skin: 'pale', hair: '#e6c27c', hairStyle: 'long', outfit: '#f2cc8f', accessory: 'none' } },
+  { id: 'a4', name: '빌드-오푸스', role: '빌드', model: 'opus·xhigh', color: '#c2410c', avatar: { skin: 'brown', hair: '#3b3f58', hairStyle: 'spiky', outfit: 'suit', accessory: 'none' } },
+  { id: 'a5', name: '검수-코덱스', role: '검수', model: 'codex', color: '#111827', avatar: { skin: 'light', hair: '#8b3a3a', hairStyle: 'ponytail', outfit: 'shirt', accessory: 'none' } },
+  { id: 'a6', name: '기록-헤르메스', role: '기록', model: 'hermes-4', color: '#a855f7', avatar: { skin: 'light', hair: '#e58fb0', hairStyle: 'bun', outfit: 'sweater', accessory: 'ribbon' } },
+  { id: 'a7', name: '번역-제미니', model: 'gemini-3', color: '#8e75ff' },
+  { id: 'a8', name: '테스트-소넷', model: 'sonnet', color: '#e07a3f' },
+  { id: 'a9', name: '디자인-클로드', model: 'opus', color: '#d97757' },
+  { id: 'a10', name: '문서-솔', model: 'gpt-6.1', color: '#10a37f' },
+  { id: 'a11', name: '보안-오푸스', model: 'opus·max', color: '#dc2626' },
+  { id: 'a12', name: '운영-헤르메스', model: 'hermes', color: '#a855f7' },
+];
+// 화면 언어별 이름·역할(데모·사진용). 없는 언어는 한국어 원문
+const NAMES = {
+  en: { a1: 'Research·Sonnet', a2: 'Organize·Sol', a3: 'Analysis·Opus', a4: 'Build·Opus', a5: 'Review·Codex', a6: 'Notes·Hermes', a7: 'Translate·Gemini', a8: 'Test·Sonnet', a9: 'Design·Claude', a10: 'Docs·Sol', a11: 'Security·Opus', a12: 'Ops·Hermes' },
+  zh: { a1: '调研-Sonnet', a2: '整理-Sol', a3: '分析-Opus', a4: '构建-Opus', a5: '审查-Codex', a6: '记录-Hermes', a7: '翻译-Gemini', a8: '测试-Sonnet', a9: '设计-Claude', a10: '文档-Sol', a11: '安全-Opus', a12: '运维-Hermes' },
+  ja: { a1: '調査-Sonnet', a2: '整理-Sol', a3: '分析-Opus', a4: 'ビルド-Opus', a5: 'レビュー-Codex', a6: '記録-Hermes', a7: '翻訳-Gemini', a8: 'テスト-Sonnet', a9: 'デザイン-Claude', a10: 'ドキュメント-Sol', a11: 'セキュリティ-Opus', a12: '運用-Hermes' },
+};
+const ROLES = {
+  en: { 조사: 'Research', 정리: 'Organize', 분석: 'Analysis', 빌드: 'Build', 검수: 'Review', 기록: 'Notes' },
+  zh: { 조사: '调研', 정리: '整理', 분석: '分析', 빌드: '构建', 검수: '审查', 기록: '记录' },
+  ja: { 조사: '調査', 정리: '整理', 분석: '分析', 빌드: 'ビルド', 검수: 'レビュー', 기록: '記録' },
+};
+const localize = (a) => ({ ...a, name: NAMES[lang]?.[a.id] || a.name, ...(a.role ? { role: ROLES[lang]?.[a.role] || a.role } : {}) });
+const STATES = ['idle', 'thinking', 'typing', 'tool', 'searching', 'reading', 'running', 'waiting', 'error', 'done', 'paused', 'offline'];
+const LABEL = { idle: '대기', thinking: '생각', typing: '입력', tool: '도구', searching: '검색', reading: '읽기', running: '실행', waiting: '승인대기', error: '오류', done: '완료', paused: '일시정지', offline: '오프라인' };
+const SNIPPET_TEXT = {
+  ko: ['파이프라인 2단계 결과를 정리하는 중입니다', '테스트 14개 통과, 1개 수정 필요', 'SSE 이벤트 순서를 확인했어요'],
+  en: ['Summarizing the stage 2 results', '14 tests passed, 1 needs a fix', 'Checked the SSE event order'],
+  zh: ['正在整理第 2 阶段的结果', '14 个测试通过，1 个需要修改', '已确认 SSE 事件顺序'],
+  ja: ['ステージ 2 の結果をまとめています', 'テスト 14 件成功、1 件要修正', 'SSE イベントの順序を確認しました'],
+};
+const INIT_TEXT = {
+  ko: { sum: '검색 결과 31건 요약 중…', compact: '압축', approve: '배포 승인 필요', handoff: '결과 전달', sub: '서브', doc: '자료', res: '조사 결과' },
+  en: { sum: 'Summarizing 31 search results…', compact: 'compact ', approve: 'Deploy needs approval', handoff: 'Handing off', sub: 'Sub', doc: 'Doc', res: 'Research notes' },
+  zh: { sum: '正在汇总 31 条搜索结果…', compact: '压缩', approve: '部署需要审批', handoff: '交接结果', sub: '子代理', doc: '资料', res: '调研结果' },
+  ja: { sum: '検索結果 31 件を要約中…', compact: '圧縮', approve: 'デプロイの承認が必要', handoff: '結果の受け渡し', sub: 'サブ', doc: '資料', res: '調査結果' },
+};
+const it = () => INIT_TEXT[lang] || INIT_TEXT.ko;
+const CODE = ['const plan = await team.run(stage);', 'git diff --stat | tail -n 3', 'export function routeAgent(a) { return a.provider; }', 'npm test -- --watch=false'];
+const snippets = () => [...CODE, ...(SNIPPET_TEXT[lang] || SNIPPET_TEXT.ko)];
+const TOOLS = ['Read', 'Edit', 'Bash', 'WebSearch', 'mcp__github__search', 'TodoWrite', 'Grep', 'Write', 'WebFetch'];
+const $ = (id) => document.getElementById(id);
+const log = (m) => { const l = $('log'); l.textContent = `${new Date().toLocaleTimeString()} ${m}\n` + l.textContent.slice(0, 2000); };
+
+let n = 6;
+let selected = 'a1';
+const office = createOffice($('office'), {
+  skin: 'modern', lang, quality: qs.get('quality') || 'full',
+  onSelect: (id) => { selected = id; renderAgents(); log(`onSelect(${id})`); $('sel').textContent = `선택: ${id}`; },
+});
+window.office = office;
+$('lang').value = office.lang; $('quality').value = office.quality; $('hlabel').value = it().res;
+$('lang').onchange = () => { lang = $('lang').value; office.setLanguage(lang); applyAgents(); fillSkins(); if (editor) editor.setLanguage(lang); $('hlabel').value = it().res; log(`setLanguage(${lang})`); };
+$('quality').onchange = () => { office.setQuality($('quality').value); log(`setQuality(${$('quality').value})`); };
+
+function agents() { return ALL.slice(0, n).map(localize); }
+function renderAgents() {
+  const box = $('agents');
+  box.replaceChildren();
+  for (const a of agents()) {
+    const d = document.createElement('div');
+    d.className = 'agent' + (a.id === selected ? ' sel' : '');
+    d.style.setProperty('--c', a.color);
+    d.innerHTML = `<span class="av">${renderAvatarSVG(a.avatar, { size: 34, color: a.color, id: a.id })}</span><span><b></b><small></small></span>`;
+    d.querySelector('b').textContent = a.name;
+    d.querySelector('small').textContent = `${a.model} · ${a.id}`;
+    d.onclick = () => { selected = a.id; office.select(a.id); renderAgents(); $('sel').textContent = `선택: ${a.id}`; };
+    box.append(d);
+  }
+  for (const s of ['hfrom', 'hto']) {
+    const sel = $(s), v = sel.value;
+    sel.replaceChildren(...agents().map((a) => new Option(a.name, a.id)));
+    sel.value = v || (s === 'hto' ? 'a3' : 'a1');
+  }
+}
+function applyAgents() {
+  office.setAgents(agents());
+  renderAgents();
+  office.select(selected);
+}
+applyAgents();
+
+// 스킨
+const skinSel = $('skin');
+let custom = null;
+function fillSkins() {
+  const v = skinSel.value;
+  skinSel.replaceChildren(...SKINS.map((s) => new Option(skinName(s, lang), s.id)), ...(custom ? [new Option(`🖼 ${custom.name}`, 'custom')] : []));
+  if (v) skinSel.value = v;
+}
+fillSkins();
+skinSel.onchange = () => { office.setSkin(skinSel.value === 'custom' ? custom : skinSel.value); office.select(selected); log(`setSkin(${skinSel.value})`); };
+
+// 상태 버튼
+for (const s of STATES) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.textContent = LABEL[s];
+  b.title = s;
+  b.onclick = () => {
+    const patch = { state: s, text: $('text').value, tool: $('tool').value, tokens: +$('tokens').value || 0, badge: s === 'running' ? `89% · ${it().compact}4` : '' };
+    office.setState(selected, patch);
+    log(`setState(${selected}, ${s})`);
+  };
+  $('states').append(b);
+}
+$('hgo').onclick = async () => {
+  const f = $('hfrom').value, t = $('hto').value;
+  log(`handoff(${f}→${t}) 시작`);
+  const ok = await office.handoff(f, t, $('hlabel').value);
+  log(`handoff(${f}→${t}) 전달됨=${ok}`);
+};
+$('hmany').onclick = () => {
+  const ids = agents().map((a) => a.id);
+  for (let i = 0; i < 3; i++) {
+    const f = ids[i], t = ids[(i + 2) % ids.length];
+    office.handoff(f, t, `${it().doc} ${i + 1}`).then((ok) => log(`동시 handoff ${f}→${t} = ${ok}`));
+  }
+};
+const helpers = [];
+$('spawn').onclick = () => { const id = office.spawnHelper(selected, { label: `${it().sub}${helpers.length + 1}` }); if (id) { helpers.push(id); log(`spawnHelper → ${id}`); } };
+$('dismiss').onclick = async () => { const id = helpers.shift(); if (!id) return; log(`dismissHelper(${id})`); await office.dismissHelper(id); log(`${id} 퇴근 완료`); };
+$('count').onclick = () => { n = n === 6 ? 12 : 6; $('count').textContent = n === 6 ? '👥 12명으로' : '👥 6명으로'; applyAgents(); };
+let reduced = false;
+$('reduce').onclick = () => { reduced = !reduced; office.setReducedMotion(reduced); $('reduce').classList.toggle('on', reduced); };
+
+// 자동 데모
+let timer = 0;
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+function step() {
+  const a = pick(agents());
+  const s = pick(['typing', 'typing', 'thinking', 'tool', 'tool', 'searching', 'reading', 'running', 'waiting', 'done', 'idle', 'error', 'paused']);
+  office.setState(a.id, { state: s, text: pick(snippets()), tool: pick(TOOLS), tokens: Math.round(Math.random() * 180000), badge: Math.random() < 0.3 ? `${Math.round(Math.random() * 100)}% · ${it().compact}${1 + Math.floor(Math.random() * 5)}` : '' });
+  if (Math.random() < 0.12) { const b = pick(agents()); if (b.id !== a.id) office.handoff(a.id, b.id, it().handoff); }
+  if (Math.random() < 0.06) { const id = office.spawnHelper(a.id, { label: it().sub }); if (id) { helpers.push(id); setTimeout(() => office.dismissHelper(id), 6000); } }
+}
+$('auto').onclick = () => {
+  if (timer) { clearInterval(timer); timer = 0; $('auto').textContent = '▶ 자동 데모'; $('auto').classList.remove('on'); return; }
+  step(); timer = setInterval(step, 1100);
+  $('auto').textContent = '⏹ 자동 데모 멈춤'; $('auto').classList.add('on');
+};
+
+// 커스텀 스킨 편집기
+let editor = null;
+$('editSkin').onclick = () => {
+  $('modal').hidden = false;
+  editor = createSkinEditor($('editorHost'), {
+    lang,
+    skin: custom,
+    onSave: (s) => { custom = s; fillSkins(); skinSel.value = 'custom'; office.setSkin(s); office.select(selected); close(); log(`커스텀 스킨 저장: 책상 ${s.desks.length}개`); },
+    onCancel: close,
+  });
+  window.editor = editor;
+};
+function close() { if (editor) editor.destroy(); editor = null; $('modal').hidden = true; }
+$('modal').addEventListener('click', (e) => { if (e.target === $('modal')) close(); });
+
+// 초기 장면: 상태 몇 개
+office.setState('a1', { state: 'typing', text: it().sum, tokens: 12300 });
+office.setState('a2', { state: 'thinking', tokens: 8200 });
+office.setState('a3', { state: 'tool', tool: 'Read', tokens: 45100, badge: `89% · ${it().compact}4` });
+office.setState('a4', { state: 'idle', tokens: 0 });
+office.setState('a5', { state: 'waiting', text: it().approve, tokens: 3100 });
+office.setState('a6', { state: 'done', tokens: 99000 });
+window.demo = { ALL, STATES, step, setCount(k) { n = k; applyAgents(); } };
+</script>
+</body>
+</html>

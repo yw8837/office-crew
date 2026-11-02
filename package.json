@@ -1,0 +1,55 @@
+{
+  "name": "office-crew",
+  "version": "1.0.0",
+  "description": "Run the AI CLIs you already use (Claude Code, Codex, Gemini CLI, Hermes, ACP agents) plus APIs and local models as one team, and watch them work in a live office.",
+  "type": "module",
+  "bin": {
+    "office-crew": "bin/office-crew.js"
+  },
+  "scripts": {
+    "start": "node bin/office-crew.js",
+    "serve": "node bin/office-crew.js --no-open",
+    "test": "node --test --test-concurrency=1 test/app.test.js test/regression.test.js test/routing.test.js test/markdown.test.js test/i18n.test.js test/importer.test.js test/failover.test.js test/import-app.test.js test/failover-app.test.js test/acp.test.js test/review-fixes.test.js",
+    "pack": "npm pack --pack-destination dist"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "bin",
+    "server",
+    "public",
+    "docs/DESIGN.md",
+    "README.md",
+    "README.*.md",
+    "LICENSE",
+    "COMMERCIAL-LICENSE.md",
+    "THIRD-PARTY-NOTICES.md",
+    "CHANGELOG.md",
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "오피스크루 실행.cmd"
+  ],
+  "keywords": [
+    "ai",
+    "agents",
+    "claude",
+    "codex",
+    "gemini",
+    "hermes",
+    "multi-agent",
+    "office",
+    "dashboard",
+    "acp",
+    "ollama",
+    "local-llm"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yw8837/office-crew.git"
+  },
+  "homepage": "https://github.com/yw8837/office-crew#readme",
+  "bugs": "https://github.com/yw8837/office-crew/issues",
+  "license": "AGPL-3.0-only"
+}

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-03
+
 ### Added
 - Needs you: the top of the sidebar collects sessions that need you (approvals, decisions after an error, paused runs, failures and results you haven't opened yet). Results and failures leave the list once you open them; approvals, decisions and paused runs stay until they're handled.
 - Handoff note: when another AI takes over after a usage limit, it also gets a note the server pulled from the tool log: tools used (with failed and unfinished counts), files changed (relative to the work folder) and the last three commands, plus an instruction to check the current state before continuing. Commands keep only the program, well-known subcommands and plain file names (`npm test`, `git commit …`); the other arguments, where tokens and passwords usually sit, are left out. Names, paths and commands are quoted and marked as values, not instructions.
@@ -73,5 +75,6 @@ First public release.
 ### Licensing
 - Dual license: AGPL-3.0-only, or a commercial license (see `COMMERCIAL-LICENSE.md`).
 
-[Unreleased]: https://github.com/yw8837/office-crew/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/yw8837/office-crew/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/yw8837/office-crew/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/yw8837/office-crew/releases/tag/v1.0.0

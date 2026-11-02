@@ -43,7 +43,7 @@ body:
     attributes:
       label: Office Crew version
       description: Shown at the top of the Settings page, or run `node bin/office-crew.js --help`.
-      placeholder: "1.0.0"
+      placeholder: "1.1.0"
     validations:
       required: true
 

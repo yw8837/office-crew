@@ -71,3 +71,14 @@ test('R-b 검수 중 한도로 이어받은 AI가 빌드한 AI와 같아지면 �
   assert.equal(m.provider, 'codex', '한도로 Codex 가 이어받음');
   assert.match(sameAiNotice(m)?.text || '', /같은 AI\(ChatGPT · Codex\)/);
 });
+
+test('R-b 자동 라우팅 검수는 사이에 다른 단계가 있어도 빌드한 AI를 피한다(그래서 같은 AI 알림도 없다)', async () => {
+  const b = await agent({ name: '빌더R5', role: '빌드', provider: 'claude', model: 'opus' });
+  const o = await agent({ name: '정리R5', role: '정리', provider: 'codex', model: 'gpt-6.1-sol' });
+  const r = await agent({ name: '검수R5', role: '검수', provider: 'claude', model: '', routing: 'auto', routingProfile: 'balanced' });
+  const s = await runTeam([{ label: '구현', agentIds: [b.id] }, { label: '정리', agentIds: [o.id] }, { label: '검수', agentIds: [r.id] }], '계산기 만들어줘 5');
+  const m = reviewMsg(s);
+  assert.equal(m.status, 'done', m.error);
+  assert.equal(m.provider, 'codex', '빌드한 Claude 를 피해 Codex 로');
+  assert.equal(sameAiNotice(m), undefined);
+});

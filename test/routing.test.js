@@ -1,7 +1,7 @@
 // 자동 라우팅 엔진: 역할·프로필·로그인 상태에 따른 선택, 노력 단계 보정, 교차 검수
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveRoute, roleKind, clampEffort, pickModel } from '../server/routing.js';
+import { resolveRoute, roleKind, clampEffort, pickModel, aiKey } from '../server/routing.js';
 import { guessTier } from '../server/providers/util.js';
 
 const providers = [
@@ -66,4 +66,20 @@ test('여러 회사 모델을 파는 경로에서도 자기 계열(Gemini)을 �
   const r = resolveRoute({ role: '조사', routingProfile: 'balanced' }, { providers: only, models: m });
   assert.equal(r.provider, 'gemini');
   assert.match(r.model, /gemini/);
+});
+
+test('검수는 빌드한 AI 여럿을 목록으로 피할 수 있고, 다 피해야 하면 그중에서라도 고른다', () => {
+  const review = { role: '검수', routingProfile: 'balanced' };
+  assert.equal(resolveRoute(review, { ...ctx, avoid: ['codex'] }).provider, 'claude');
+  assert.equal(resolveRoute(review, { ...ctx, avoid: ['claude'] }).provider, 'codex');
+  assert.equal(resolveRoute(review, { ...ctx, avoid: ['codex', 'claude'] }).provider, 'codex', '다른 AI가 없으면 원래 순서대로');
+});
+
+test('같은 AI 기준: CLI 는 프로바이더가 같으면 같은 AI, API·ACP·로컬은 프로필·에이전트·모델까지 같아야 같은 AI', () => {
+  assert.equal(aiKey({ provider: 'claude', model: 'opus' }), aiKey({ provider: 'claude', model: 'sonnet' }));
+  assert.notEqual(aiKey({ provider: 'claude' }), aiKey({ provider: 'codex' }));
+  assert.notEqual(aiKey({ provider: 'openai', apiProfile: 'openrouter', model: 'x-ai/grok-4' }), aiKey({ provider: 'openai', apiProfile: 'openrouter', model: 'openai/gpt-5' }));
+  assert.notEqual(aiKey({ provider: 'acp', model: 'goose' }), aiKey({ provider: 'acp', model: 'gemini-acp' }));
+  assert.notEqual(aiKey({ provider: 'local', model: 'qwen3' }), aiKey({ provider: 'local', model: 'llama3' }));
+  assert.equal(aiKey({ provider: 'acp', model: 'goose' }), aiKey({ provider: 'acp', model: 'goose' }));
 });

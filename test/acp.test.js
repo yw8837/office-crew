@@ -3,7 +3,9 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { startTestApp } from './helpers.js';
+import { allowedPath } from '../server/providers/acp.js';
 
 let t, work;
 before(async () => {
@@ -93,4 +95,23 @@ test('설정에 없는 ACP 에이전트면 알아듣게 오류', async () => {
   const m = t.app.store.getSession(sid).messages.filter((x) => x.role === 'agent').at(-1);
   assert.equal(m.status, 'error');
   assert.match(m.error, /ACP 에이전트/);
+});
+
+test('ACP 경로: 짧은 이름 표시(~)가 없으면 글자로 작업 폴더 밖인 로컬 경로는 파일 시스템을 건드리기 전에 거절한다', () => {
+  // 기준 폴더는 실제 경로(긴 이름)로 만든다: CI 윈도우 임시 폴더(RUNNER~1)엔 '~'가 있어 시험 조건이 달라진다
+  const base = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'oc-acp-'));
+  const outsideRoot = path.resolve('/oc-outside-check');
+  const seen = [];
+  const real = fs.realpathSync.native, lstat = fs.lstatSync;
+  fs.realpathSync.native = (p, ...rest) => { seen.push(String(p)); return real(p, ...rest); };
+  fs.lstatSync = (p, ...rest) => { seen.push(String(p)); return lstat(p, ...rest); };
+  try {
+    assert.equal(allowedPath(path.join(outsideRoot, 'secret.txt'), [base]), null);
+    assert.deepEqual(seen.filter((x) => x.startsWith(outsideRoot)), [], '밖 경로로는 파일 시스템 호출이 없어야 해');
+    assert.equal(allowedPath(path.join(base, 'a.txt'), [base]), path.join(real(base), 'a.txt'), '안쪽 경로는 그대로 허용');
+  } finally {
+    fs.realpathSync.native = real;
+    fs.lstatSync = lstat;
+    fs.rmSync(base, { recursive: true, force: true });
+  }
 });

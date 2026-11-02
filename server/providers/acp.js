@@ -60,17 +60,22 @@ const within = (base, target) => { const r = path.relative(base, target); return
 
 // 에이전트가 준 경로가 허용 폴더 안이면 실제 경로를, 아니면 null 을 돌려준다(읽기·쓰기는 돌려준 실제 경로로 한다)
 // 1) 절대 경로만, '..' 조각이 든 경로는 거부: 리눅스·맥은 링크를 먼저 따라간 뒤 '..'를 처리해서 글자로 본 위치와 실제 위치가 다를 수 있다
-// 2) 네트워크 경로(\\서버\공유)는 글자로 폴더 안일 때만 다음 단계로 간다(밖이면 파일 시스템을 건드리기 전에 거부).
-//    로컬 경로는 글자로는 밖이어도 짧은 이름(8.3, C:\Users\RUNNER~1 등)일 수 있어 다음 단계로 넘긴다
+// 2) 글자로 허용 폴더 밖이면 파일 시스템을 건드리기 전에 거부한다(연결된 네트워크 드라이브 등에 접속하지 않게).
+//    예외: 윈도우 짧은 이름(8.3, C:\Users\RUNNER~1 등)일 수 있는 로컬 경로. 짧은 이름엔 '~'가 들어가니,
+//    경로나 허용 폴더에 '~'가 있고 허용 폴더와 같은 드라이브일 때만 다음 단계로 넘긴다(네트워크 경로는 예외 없음)
 // 3) 링크·정션·짧은 이름을 다 푼 실제 경로가 허용 폴더의 실제 경로 안이어야 한다
-function allowedPath(p, dirs) {
+export function allowedPath(p, dirs) {
   if (typeof p !== 'string' || !path.isAbsolute(p) || p.split(/[\\/]/).includes('..')) return null;
   const lex = path.resolve(p);
   // 허용 폴더는 글자 경로와 실제 경로를 둘 다 기준으로 삼는다(작업 폴더가 정션·링크여도 실제 경로로 보낸 요청을 받게)
   const bases = dirs.map((d) => path.resolve(d));
   const realBases = bases.map(realish).filter(Boolean);
-  const network = /^[\\/]{2}/.test(lex);
-  if (network && ![...bases, ...realBases].some((b) => within(b, lex))) return null;
+  if (![...bases, ...realBases].some((b) => within(b, lex))) {
+    const root = (x) => path.parse(x).root.toLowerCase();
+    const maybeShort = process.platform === 'win32' && !/^[\\/]{2}/.test(lex) && [lex, ...bases].some((x) => x.includes('~'))
+      && [...bases, ...realBases].some((b) => root(b) === root(lex));
+    if (!maybeShort) return null;
+  }
   const real = realish(lex);
   return real && realBases.some((b) => within(b, real)) ? real : null;
 }

@@ -96,10 +96,10 @@ test('R-a 도구를 쓰다 한도에 걸리면 이어받는 AI가 서버가 기�
   const at = sent.indexOf('[인계서');
   assert.ok(at > sent.indexOf('QUOTATOOLS 앱 고쳐줘'), '원래 요청 뒤에 인계서');
   const card = sent.slice(at);
-  assert.match(card, /Bash 2번 \(실패 1, 안 끝남 1\)/, '실패한 명령과 끝나기 전에 멈춘 명령');
-  assert.match(card, /손댄 파일: src\/app\.js/);
-  assert.match(card, /npm test \(실패\)/);
-  assert.match(card, /npm run build \(안 끝남\)/);
+  assert.match(card, /`Bash` 2번 \(실패 1, 안 끝남 1\)/, '실패한 명령과 끝나기 전에 멈춘 명령');
+  assert.match(card, /손댄 파일: `src\/app\.js`/);
+  assert.match(card, /`npm test` \(실패\)/);
+  assert.match(card, /`npm run build` \(안 끝남\)/);
 });
 
 test('R-d 사용량 창 정보가 없으면 오류 문구의 "Try again in 2 hours"로 쉬는 시간을 정한다(기본 30분 대신)', async () => {

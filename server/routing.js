@@ -4,6 +4,13 @@
 export const PROFILES = ['economy', 'balanced', 'best'];
 const EFFORT_ORDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 
+// 같은 AI 판단 기준: CLI 는 한 회사 AI라 프로바이더가 같으면 같은 AI(모델이 달라도).
+// API 키 모델·ACP·로컬은 한 프로바이더에 여러 회사 모델이 섞이니 프로필·에이전트·모델까지 같아야 같은 AI
+const MIXED = new Set(['openai', 'acp', 'local']);
+export function aiKey(a = {}) {
+  return MIXED.has(a.provider) ? `${a.provider}:${a.apiProfile || ''}:${a.model || ''}` : String(a.provider || '');
+}
+
 // 역할 이름 → 역할 종류
 export function roleKind(role = '') {
   const r = String(role).toLowerCase();
@@ -66,7 +73,7 @@ export function pickModel(models, tier, providerId = '') {
 /**
  * 자동 라우팅 계산
  * @param agent { role, routingProfile }
- * @param ctx { providers: [{id, loggedIn, efforts}], models: { [providerId]: [{id,label,tier,efforts,hidden,legacy}] }, avoid?: providerId }
+ * @param ctx { providers: [{id, loggedIn, efforts}], models: { [providerId]: [{id,label,tier,efforts,hidden,legacy}] }, avoid?: providerId | providerId[] }
  * @returns { provider, model, modelLabel, effort, reason } | null
  */
 export function resolveRoute(agent, ctx) {
@@ -74,8 +81,9 @@ export function resolveRoute(agent, ctx) {
   const kind = roleKind(agent.role);
   const ready = new Set((ctx.providers || []).filter((p) => p.loggedIn).map((p) => p.id));
   const list = CANDIDATES[kind] || CANDIDATES.general;
-  // 검수는 가능하면 빌드와 다른 AI로(교차 검증)
-  const ordered = ctx.avoid ? [...list.filter((c) => c[0] !== ctx.avoid), ...list.filter((c) => c[0] === ctx.avoid)] : list;
+  // 검수는 가능하면 빌드와 다른 AI로(교차 검증). 피할 AI는 뒤로 미루기만 한다(다른 AI가 없으면 그중에서라도)
+  const avoid = new Set([].concat(ctx.avoid || []));
+  const ordered = avoid.size ? [...list.filter((c) => !avoid.has(c[0])), ...list.filter((c) => avoid.has(c[0]))] : list;
   for (const [pid, tier, efforts] of ordered) {
     if (!ready.has(pid)) continue;
     const m = pickModel(ctx.models?.[pid], wantedTier(tier, profile), pid);

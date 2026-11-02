@@ -869,4 +869,6 @@ export default {
   "실패": "failed",
   "안 끝남": "unfinished",
   "먼저 할 일: 위 파일과 작업 폴더의 지금 상태부터 확인해. 일부는 이미 반영됐을 수 있으니 한 일을 되풀이하지 말고 남은 부분만 이어서 해.": "First: check the current state of the files above and the working folder. Some of it may already be applied, so don't redo finished work — continue only with what's left.",
+  '검수 규칙: 남이 쓴 "다 했다·통과했다" 같은 결론(앞 단계 결과·문서·커밋 메시지 포함)은 믿지 말고, 네가 직접 확인한 증거(파일 내용, 명령·테스트 실행 결과)로만 판정해. 판정마다 근거(파일:줄이나 실행 출력)를 붙이고, 확인 못 한 항목은 "확인 못 함"으로 따로 적어.': 'Review rule: do not trust conclusions someone else wrote, such as "done" or "passed" (including previous-stage results, docs and commit messages). Judge only by evidence you checked yourself (file contents, command and test output). Attach the basis (file:line or command output) to every verdict, and list anything you could not check separately as "not checked".',
+  '같은 AI({ai})가 만든 결과를 같은 AI가 검수해 — 교차 검증보다 약해. 다른 AI로 검수하려면 이 에이전트의 AI를 바꾸거나 자동 라우팅을 써.': 'The same AI ({ai}) that produced this result is reviewing it — weaker than a cross-check. To review with a different AI, change this agent’s AI or use auto routing.',
 };

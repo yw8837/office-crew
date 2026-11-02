@@ -335,6 +335,7 @@ export class Orchestrator {
       return { agent, error: msg.error };
     }
     if (routed.note) { msg.routed = true; this.#notice(s, msg, routed.note); }
+    if (roleKind(agent.role) === 'review') this.#flagSameAi(ctx, stageIdx, msg, agent.provider);
     this.#state(s.id, agentId, 'thinking', tr('생각 중…'));
 
     let res;
@@ -402,6 +403,7 @@ export class Orchestrator {
         cur = prepare(next);
         Object.assign(msg, { provider: next.provider, model: next.model, effort: next.effort, failover: true });
         this.bus.emit('messageMeta', { sessionId: s.id, messageId: msg.id, model: next.model, provider: next.provider, effort: next.effort });
+        if (roleKind(agent.role) === 'review') this.#flagSameAi(ctx, stageIdx, msg, next.provider);
         if (msg.text.trim()) {
           msg.text += '\n\n';
           this.bus.emit('delta', { sessionId: s.id, messageId: msg.id, text: '\n\n' });
@@ -472,6 +474,7 @@ export class Orchestrator {
       agent.systemPrompt || '',
       tr('작업 폴더: {path}', { path: cwd }),
       PERM_NOTE[agent.permission] || '',
+      roleKind(agent.role) === 'review' ? tr('검수 규칙: 남이 쓴 "다 했다·통과했다" 같은 결론(앞 단계 결과·문서·커밋 메시지 포함)은 믿지 말고, 네가 직접 확인한 증거(파일 내용, 명령·테스트 실행 결과)로만 판정해. 판정마다 근거(파일:줄이나 실행 출력)를 붙이고, 확인 못 한 항목은 "확인 못 함"으로 따로 적어.') : '',
       tr('도구가 실패하거나 거부돼도 마지막엔 반드시 최종 답변을 글로 남겨.'),
       tr('사용자가 쓴 언어로 답하고, 결과는 읽기 쉬운 마크다운으로 써.'),
     ];
@@ -622,6 +625,21 @@ export class Orchestrator {
       this.throttle.set(key, now);
     }
     this.bus.emit('block', { sessionId: s.id, messageId: msg.id, block: b });
+  }
+
+  // 검수 대상을 만든 AI들: 앞 단계에 빌드 결과가 있으면 그걸 만든 AI, 없으면 바로 앞 결과를 만든 AI
+  #reviewedBy(ctx, stageIdx) {
+    const done = ctx.run.stages.slice(0, stageIdx).flatMap((_, k) => (ctx.outputs[k] || []).filter((o) => o.text && o.agent?.provider).map((o) => ({ ...o, k })));
+    const build = done.filter((o) => roleKind(o.agent.role) === 'build');
+    const last = done.length ? done.filter((o) => o.k === done.at(-1).k) : [];
+    return new Set((build.length ? build : last).map((o) => o.agent.provider));
+  }
+
+  // 만든 AI가 그대로 검수하면 교차 검증이 아니라고 알린다(같은 회사 AI면 모델이 달라도 같은 AI). 한 메시지에 한 번만
+  #flagSameAi(ctx, stageIdx, msg, provider) {
+    if (msg.sameAi || !this.#reviewedBy(ctx, stageIdx).has(provider)) return;
+    msg.sameAi = provider;
+    this.#notice(ctx.s, msg, `⚠️ ${tr('같은 AI({ai})가 만든 결과를 같은 AI가 검수해 — 교차 검증보다 약해. 다른 AI로 검수하려면 이 에이전트의 AI를 바꾸거나 자동 라우팅을 써.', { ai: PROVIDERS[provider]?.label || provider })}`);
   }
 
   #notice(s, msg, text, quiet = false) {

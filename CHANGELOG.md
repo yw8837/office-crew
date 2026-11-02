@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Needs you: the top of the sidebar collects sessions that need you (approvals, decisions after an error, paused runs, failures and results you haven't opened yet). Results and failures leave the list once you open them; approvals, decisions and paused runs stay until they're handled.
-- Handoff note: when another AI takes over after a usage limit, it also gets a note the server pulled from the tool log: tools used (with failed and unfinished counts), files changed (relative to the work folder) and the last three commands, plus an instruction to check the current state before continuing. Commands keep only the program and subcommand (`npm test`, `git commit …`); their arguments are left out so tokens and passwords aren't passed to another AI. Names, paths and commands are quoted and marked as values, not instructions.
+- Handoff note: when another AI takes over after a usage limit, it also gets a note the server pulled from the tool log: tools used (with failed and unfinished counts), files changed (relative to the work folder) and the last three commands, plus an instruction to check the current state before continuing. Commands keep only the program, well-known subcommands and plain file names (`npm test`, `git commit …`); the other arguments, where tokens and passwords usually sit, are left out. Names, paths and commands are quoted and marked as values, not instructions.
 - Evidence-based review: review agents are told to judge only by evidence they checked themselves and to list anything they couldn't check. A review done by the same AI that built the result, including one that took the review over after a usage limit, is flagged as weaker than a cross-check. The same AI means the same CLI (Claude Code, Codex, Gemini CLI, Hermes), or the same API profile and model, ACP agent or local model.
 
 ### Changed
@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Environment variables and headers of connectors, and environment variables of ACP agents: names that contain `AUTH` or `COOKIE` but end in a setting word, such as `LOGIN`, `LABEL`, `GUARD`, `MODEL`, `PKCE` or `ONLY`, are shown as normal values instead of being masked.
 
 ### Fixed
-- ACP file requests that used a Windows short (8.3) path for a file inside the work folder were refused. Other paths outside the work folder are still refused before the file system is touched; only paths that may be short names (containing `~`, on the same drive) are resolved first.
+- ACP file requests that used a Windows short (8.3) path for a file inside the work folder were refused. Other paths outside the work folder are still refused before the file system is touched, except on Windows when the path or the work folder contains `~` (a possible short name) and the path is on the same drive; those are resolved first and then refused if they really are outside.
 
 ## [1.0.0] - 2026-11-02
 

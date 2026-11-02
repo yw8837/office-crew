@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Waiting on you: the top of the sidebar collects sessions that need you (approvals, decisions after an error, paused runs, failures and results you haven't opened yet). Opening a session clears it from the list.
+- Handoff note: when another AI takes over after a usage limit, it also gets a note the server recorded from the tool log: tools used (with failed and unfinished counts), files changed (relative to the work folder) and the last three commands with secrets masked, plus an instruction to check the current state before continuing.
+- Evidence-based review: review agents are told to judge only by evidence they checked themselves and to list anything they couldn't check. A review done by the same AI that built the result, including one that took the review over after a usage limit, is flagged as weaker than a cross-check.
+
+### Changed
+- When there is no usage-window data, an AI that hit its limit now rests until the reset time stated in the error message (`Retry-After`, "try again in …", "try again at …", "resets 3pm", an epoch suffix) instead of a flat 30 minutes.
+- Connector environment variables: fewer non-secret names are masked. Names whose last word is a setting, such as `LOGIN`, `LABEL`, `GUARD`, `MODEL`, `PKCE` or `ONLY`, are shown as normal values.
+
+### Fixed
+- ACP file requests that used a Windows short (8.3) path for a file inside the work folder were refused.
+
 ## [1.0.0] - 2026-11-02
 
 First public release.

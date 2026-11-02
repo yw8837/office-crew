@@ -50,6 +50,8 @@ Office Crew is a local workspace for running several AI agents together. It runs
 - **Error gate:** when an agent fails, choose retry, skip or stop.
 - **Intervene while agents work:** steer a running agent (Claude receives the message inside the running process), queue a message for the next turn, pause and resume, stop, or skip a single agent.
 - **Real-time usage:** tokens per message, agent and session (estimated while streaming, exact once the turn ends), cost when the CLI reports it, and account limits (Claude 5-hour and weekly %, Codex weekly %).
+- **Waiting on you:** the top of the sidebar collects sessions that need you (approvals, decisions after an error, paused runs, failures and results you haven't opened yet). Click one to jump straight to it.
+- **Evidence-based review:** review agents are told to judge only by evidence they checked themselves (files, command and test output) and to list anything they couldn't check. A review done by the same AI that built the result is flagged as weaker than a cross-check.
 
 | Team editor | Approval gate |
 |---|---|
@@ -58,7 +60,7 @@ Office Crew is a local workspace for running several AI agents together. It runs
 
 ### Keeps working, connects to more
 
-- **Automatic handoff:** when an AI hits its usage limit mid-task, another AI with headroom takes the same role and finishes from where it stopped. It receives the original request plus everything written so far. AIs that are resting, or above a usage threshold (95% by default), are avoided before a run starts. Turn it off, change the threshold or release a resting AI on the Routing board.
+- **Automatic handoff:** when an AI hits its usage limit mid-task, another AI with headroom takes the same role and finishes from where it stopped. It receives the original request, everything written so far and a handoff note the server recorded (tools used, files changed and the last commands, with secrets masked), and is told to check the current state first. An AI that hit its limit rests until the reset time in its usage data or, without that, the time stated in the error message (30 minutes when neither says). AIs that are resting, or above a usage threshold (95% by default), are avoided before a run starts. Turn it off, change the threshold or release a resting AI on the Routing board.
 - **Billing per AI:** run Claude Code and Codex on your subscription or on an official API key (pay as you go). In subscription mode, a stray `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` (Claude) or `CODEX_API_KEY` in your environment is ignored, so you aren't billed by surprise. In API key mode with no key entered in the app, your environment's key or gateway token is used as is.
 - **ACP agents:** plug in any agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com), such as Gemini CLI, Hermes, OpenCode, Goose or Qwen Code. Tool permission requests are answered by the agent's permission level. File reads and writes the agent asks Office Crew to do are limited to the work folder (reads also to attachments); the agent's own tools follow its own sandbox and your permission level.
 

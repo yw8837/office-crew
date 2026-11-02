@@ -28,6 +28,32 @@ export async function newSession(extra = {}) {
 const openImport = () => { state.ui.importOpen = true; changed(); };
 const closeImport = () => { state.ui.importOpen = false; changed(); };
 
+// ── 기다리는 일: 승인·결정 대기, 오류로 멈춤, 일시정지, 끝난 지 하루 안 된 결과(열어 보면 확인한 걸로 친다) ──
+const ATTN = () => ({ approve: ['✋', t('승인 필요')], decide: ['⚠️', t('결정 필요')], failed: ['🛑', t('오류로 멈춤')], paused: ['⏸️', t('일시정지됨')], done: ['✅', t('결과 확인')] });
+const ATTN_ORDER = ['approve', 'decide', 'failed', 'paused', 'done'];
+const DAY = 86400000;
+const seenRuns = (() => { try { return new Set(JSON.parse(localStorage.getItem('ui.seen') || '[]')); } catch { return new Set(); } })();
+function markSeen(a) {
+  if (!a || !['done', 'failed'].includes(a.kind) || seenRuns.has(a.runId)) return;
+  seenRuns.add(a.runId);
+  try { localStorage.setItem('ui.seen', JSON.stringify([...seenRuns].slice(-300))); } catch { /* 저장소가 막혀도 이번 화면에선 숨긴다 */ }
+}
+function attentionList(sessions) {
+  const now = Date.now();
+  return sessions
+    .filter((s) => s.attention && s.id !== state.route.id && !seenRuns.has(s.attention.runId) && (s.attention.kind !== 'done' || now - s.attention.since < DAY))
+    .sort((a, b) => ATTN_ORDER.indexOf(a.attention.kind) - ATTN_ORDER.indexOf(b.attention.kind) || a.attention.since - b.attention.since);
+}
+
+function AttentionItem({ s }) {
+  const [icon, label] = ATTN()[s.attention.kind] || ['•', ''];
+  return html`<div class="sess attn" onClick=${() => { markSeen(s.attention); go('session', s.id); if (innerWidth < 860) { state.ui.side = false; changed(); } }} title=${s.preview}>
+    <span class="attn-ic" aria-hidden="true">${icon}</span>
+    <span class="t">${s.title}<small>${label}</small></span>
+    <span class="small muted">${ago(s.attention.since)}</span>
+  </div>`;
+}
+
 function SessionItem({ s }) {
   const [menu, setMenu] = useState(false);
   const on = state.route.view === 'session' && state.route.id === s.id;
@@ -59,6 +85,9 @@ function Sidebar() {
   const pinned = list.filter((s) => s.pinned);
   const rest = list.filter((s) => !s.pinned);
   const okCount = state.providers.filter((p) => p.loggedIn && p.kind === 'cli').length;
+  const waiting = q ? [] : attentionList(state.sessions);
+  // 지금 보고 있는 세션의 결과·오류는 본 걸로 친다
+  useEffect(() => { markSeen(state.sessions.find((s) => s.id === state.route.id)?.attention); });
   return html`<aside class="side">
     <div class="side-head"><div class="logo"><img src="/icon.svg" alt="" />${t('오피스 크루')}</div></div>
     <div class="side-actions">
@@ -67,6 +96,7 @@ function Sidebar() {
     </div>
     <div class="side-search"><input placeholder=${t('세션 검색')} value=${state.ui.search} onInput=${(e) => { state.ui.search = e.target.value; changed(); }} aria-label=${t('세션 검색')} /></div>
     <div class="side-list">
+      ${waiting.length > 0 && html`<div class="side-label attn-label">${t('기다리는 일')} <span class="attn-n">${waiting.length}</span></div>${waiting.map((s) => html`<${AttentionItem} key=${`attn-${s.id}`} s=${s} />`)}`}
       ${pinned.length > 0 && html`<div class="side-label">${t('고정됨')}</div>${pinned.map((s) => html`<${SessionItem} key=${s.id} s=${s} />`)}`}
       <div class="side-label">${t('최근')}</div>
       ${rest.map((s) => html`<${SessionItem} key=${s.id} s=${s} />`)}

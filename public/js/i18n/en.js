@@ -852,4 +852,10 @@ export default {
   "가려진 값({name})을 고치려면 지우고 새로 입력해줘.": "To change the masked value ({name}), clear it and type the new value.",
   // ── 최종 검증 수정 (index) ──
   "가려진 값은 비밀값 이름으로만 옮길 수 있어. {name}에는 새로 입력해줘.": "A masked value can only be moved to a secret-looking name. Type a new value for {name}.",
+  // ── 기다리는 일(1.1) ──
+  "기다리는 일": "Needs you",
+  "승인 필요": "Needs approval",
+  "결정 필요": "Needs a decision",
+  "오류로 멈춤": "Stopped on an error",
+  "결과 확인": "Check the result",
 };

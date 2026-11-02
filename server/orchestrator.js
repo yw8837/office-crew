@@ -191,11 +191,13 @@ export class Orchestrator {
 
   #hold(ctx, status, info) {
     ctx.run.status = status;
-    ctx.run.hold = info;
+    ctx.run.hold = { ...info, at: Date.now() };
     if (info.reason === 'approve' || info.reason === 'error') {
       for (const id of ctx.run.stages[info.stageIndex].agentIds) this.#state(ctx.s.id, id, info.reason === 'approve' ? 'waiting' : 'error', info.reason === 'approve' ? tr('승인 대기') : tr('오류 — 결정 필요'));
     }
     this.#emitRun(ctx);
+    // 사이드바 "기다리는 일"은 세션 요약으로 그린다(다른 세션이 기다리기 시작·끝낼 때도 바로 보이게)
+    this.bus.emit('session', this.store.sessionMeta(ctx.s));
     return new Promise((resolve) => {
       ctx.gate = (d) => {
         ctx.gate = null;
@@ -206,6 +208,7 @@ export class Orchestrator {
           for (const id of ctx.run.stages[info.stageIndex].agentIds) this.#state(ctx.s.id, id, 'idle', tr('중지됨'));
         }
         this.#emitRun(ctx);
+        this.bus.emit('session', this.store.sessionMeta(ctx.s));
         resolve(d);
       };
     });

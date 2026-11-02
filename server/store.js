@@ -28,6 +28,18 @@ function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
 }
 
+// 사람이 볼 일(사이드바 "기다리는 일"): 마지막 실행이 승인·결정을 기다리거나, 일시정지했거나,
+// 오류로 끝났거나, 끝나서 결과 확인이 남았으면 그 종류와 기다리기 시작한 시각. 사용자가 중지한 실행은 뺀다
+export function attentionOf(run) {
+  if (!run) return null;
+  const at = (t) => ({ runId: run.id, since: t || run.startedAt });
+  if (run.status === 'waiting') return { kind: run.hold?.reason === 'approve' ? 'approve' : 'decide', ...at(run.hold?.at) };
+  if (run.status === 'paused') return { kind: 'paused', ...at(run.hold?.at) };
+  if (run.status === 'error' && run.endedAt) return { kind: 'failed', ...at(run.endedAt) };
+  if (run.status === 'done' && run.endedAt) return { kind: 'done', ...at(run.endedAt) };
+  return null;
+}
+
 export class Store {
   constructor(dirs) {
     this.dirs = dirs;
@@ -56,7 +68,11 @@ export class Store {
       const s = readJson(path.join(this.dirs.sessions, `${id}.json`), null);
       if (s?.id) this.meta.set(s.id, this.#metaOf(s));
     }
-    for (const m of this.meta.values()) m.running = false; // 재시작 직후엔 실행 중인 게 없다
+    // 재시작 직후엔 실행 중인 게 없다(기다리던 실행도 중지로 바뀌니 "기다리는 일"에서 뺀다)
+    for (const m of this.meta.values()) {
+      m.running = false;
+      if (['approve', 'decide', 'paused'].includes(m.attention?.kind)) m.attention = null;
+    }
     this.#saveIndexSoon();
     if (first) {
       for (const c of COLLECTIONS) this.#saveCol(c);
@@ -150,6 +166,7 @@ export class Store {
       messageCount: s.messages.length,
       preview: last ? String(last.text || '').slice(0, 80) : '',
       running: s.runs.some((r) => ['running', 'paused', 'waiting'].includes(r.status)),
+      attention: attentionOf(s.runs[s.runs.length - 1]),
     };
   }
 

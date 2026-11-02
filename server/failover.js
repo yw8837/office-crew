@@ -101,14 +101,18 @@ const AT_RE = new RegExp(`${WHEN}(?:at\\s+)?(\\d{1,2})(?::(\\d{2}))?\\s*(?:([ap]
 const MAX_WAIT = 8 * 86400e3; // 주간 한도보다 먼 시각은 잘못 읽은 걸로 본다
 const MIN_WAIT = 60e3;
 const JUST_PASSED = 2 * 3600e3;
-const ZONE_RE = /^\s*\(?\s*(?:(utc|gmt|z)(?:\s*([+-])(\d{1,2})(?::?(\d{2}))?)?\b|([a-z]+(?:\/[a-z0-9_+-]+)+))\s*\)?/i;
+const ZONE_RE = /^\s*\(?\s*(?:(utc|gmt|z)(?:\s*([+\-−])(\d{1,2})(?::?(\d{2}))?)?\b|([a-z]+(?:\/[a-z0-9_+-]+)+))\s*\)?/i;
 
-// 시각 바로 뒤에 적힌 시간대: 'UTC', 'UTC+09:00'(UTC+9·GMT+2 같은 오프셋) 또는 IANA 이름, 없으면 ''(이 PC 시간대)
+// 시각 바로 뒤에 적힌 시간대: 'UTC', 'UTC+09:00'(UTC+9·GMT+2 같은 오프셋) 또는 IANA 이름, 없으면 ''(이 PC 시간대).
+// 말이 안 되는 오프셋(UTC+99)은 모르는 시간대로 돌려서 쓰지 않게 한다
 function zoneAfter(s, m) {
   const z = s.slice(m.index + m[0].length).match(ZONE_RE);
   if (!z) return '';
   if (z[5]) return z[5];
-  return z[2] ? `UTC${z[2]}${z[3].padStart(2, '0')}:${z[4] || '00'}` : 'UTC';
+  if (!z[2]) return 'UTC';
+  const hh = Number(z[3]), mm = Number(z[4] || 0);
+  if (hh > 14 || mm > 59) return 'Invalid/Offset';
+  return `UTC${z[2] === '+' ? '+' : '-'}${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }
 
 // 'UTC±hh:mm' 의 오프셋(분), 오프셋 표기가 아니면 null
@@ -237,14 +241,24 @@ const VERBS = new Set(['test', 'tests', 'build', 'run', 'start', 'stop', 'restar
   'switch', 'merge', 'rebase', 'reset', 'restore', 'stash', 'tag', 'branch', 'revert', 'remote', 'submodule', 'worktree', 'apply', 'get', 'describe',
   'delete', 'rollout', 'scale', 'up', 'down', 'ps', 'images', 'compose', 'version', 'help', 'info', 'migrate', 'makemigrations', 'shell', 'generate',
   'watch', 'bench', 'doc', 'docs', 'preview', 'login', 'logout', 'auth', 'config', 'configure', 'set', 'view', 'search', 'outdated', 'prune', 'sync',
-  'upload', 'download', 'verify', 'validate', 'inspect', 'plan', 'destroy', 'cache', 'env', 'why']);
+  'upload', 'download', 'verify', 'validate', 'inspect', 'plan', 'destroy', 'cache', 'env', 'why', 'clippy', 'vet', 'tidy', 'fix']);
 const STOP_AFTER = new Set(['auth', 'login', 'logout', 'set', 'config', 'env']); // 이 낱말 뒤는 비밀값 자리
 const DIR_PROGS = new Set(['cd', 'pushd', 'ls', 'dir', 'mkdir', 'rmdir', 'tree']); // 뒤에 오는 평범한 폴더 이름은 남긴다
+const ECHO_PROGS = new Set(['echo', 'printf', 'print', 'write-output', 'write-host']); // 인자가 곧 출력할 값(비밀값을 파이프로 넘기는 자리)
+const RUNNERS = new Set(['npx', 'pnpx', 'bunx', 'uvx', 'pipx']); // 바로 뒤 이름 하나(실행할 도구)는 남긴다
+const isPython = (p) => /^(?:python[\d.]*|py)(?:\.exe)?$/i.test(p);
 const KNOWN_TOKEN = /^(?:sk-|sk_(?:live|test)_|rk_(?:live|test)_|gh[pousr]_|github_pat_|glpat-|xox[abposr]-|xapp-|npm_|pypi-|hvs\.|AKIA|ASIA|AIza|ya29\.|eyJ)/;
 // 토큰 모양: 잘 알려진 접두어, 또는 길고 글자·숫자가 섞인 낱말
 const tokenLike = (w) => KNOWN_TOKEN.test(w) || (w.length >= 16 && /\d/.test(w) && /[A-Za-z]/.test(w)) || (w.length >= 24 && /[A-Z]/.test(w) && /[a-z]/.test(w));
-const plainParts = (w) => !/[:@=]/.test(w) && w.replace(/^\.{1,2}\//, '').replace(/\/$/, '').split('/').every((c) => /^[\w.-]{1,40}$/.test(c) && !tokenLike(c));
-const safeFile = (w) => plainParts(w) && /\.[a-z0-9]{1,6}$/i.test(w); // 확장자가 있는 파일 경로
+const plainParts = (w) => {
+  if (/[:@=]/.test(w)) return false;
+  const parts = w.replace(/^\.{1,2}\//, '').replace(/\/$/, '').split('/');
+  if (parts.length > 1 && /^[\w-]+\.[\w.-]+$/.test(parts[0])) return false; // 앞부분이 도메인(files.example.com/…)이면 경로가 아니다
+  return parts.every((c) => /^[\w.-]{1,40}$/.test(c) && !tokenLike(c));
+};
+// 확장자(글자가 든 것: .js·.py — Summer.2024 같은 숫자 꼬리는 아님)가 있는 파일 경로
+const safeFile = (w) => { const ext = /\.([a-z0-9]{1,6})$/i.exec(w); return Boolean(ext && /[a-z]/i.test(ext[1]) && plainParts(w)); };
+const plainName = (w) => /^@?[a-z][\w./-]{0,40}$/.test(w) && plainParts(w.replace(/^@/, '')); // npx·run·exec 뒤 도구·스크립트 이름
 const keepWord = (prog, w) => VERBS.has(w) || safeFile(w) || (DIR_PROGS.has(prog) && plainParts(w));
 const UNWRAP = [ // bash -lc '…'·pwsh -Command "…"·cmd /c … 는 안쪽 명령으로
   /^(?:\S*[\\/])?(?:ba|z|da|k)?sh(?:\.exe)?\s+(?:-\w+\s+)*-\w*c\s+(["']?)(.+)\1$/,
@@ -270,9 +284,13 @@ function summarizeCommand(cmd) {
     // $env:X = … 같은 대입, 토큰 모양 낱말이 프로그램 자리에 오면 그 부분은 통째로 뺀다
     if (!prog || !/^[A-Za-z0-9][\w.+-]{0,39}$/.test(prog) || tokenLike(prog)) { dropped ||= Boolean(first || lost); continue; }
     const kept = [prog];
-    while (kept.length < 3 && words.length && keepWord(prog, words[0])) {
-      const w = words.shift();
-      kept.push(w);
+    let next = RUNNERS.has(prog); // 실행기 바로 뒤, run·exec·python -m 바로 뒤 이름 하나는 남긴다
+    while (kept.length < 3 && words.length && !ECHO_PROGS.has(prog.toLowerCase())) {
+      const w = words[0];
+      if (isPython(prog) && kept.length === 1 && w === '-m') { kept.push(words.shift()); next = true; continue; }
+      if (!keepWord(prog, w) && !(next && plainName(w))) break;
+      kept.push(words.shift());
+      next = w === 'run' || w === 'exec';
       if (STOP_AFTER.has(w)) break; // auth·login·set 뒤는 비밀값 자리
     }
     const part = `${kept.join(' ')}${words.length || lost ? ' …' : ''}`;

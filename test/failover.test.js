@@ -192,6 +192,12 @@ test('R-a 인계서의 명령은 프로그램과 하위 명령만 넣고 인자�
     ['ghp_abcdefghijklmnopqrstuvwxyz0123456789', '…', 'ghp_'],
     ['cd app && sk-proj-abcdefghijklmnopqrstuvwx1234', 'cd app …', 'sk-proj'],
     ['node app.js hunter2-red-door', 'node app.js …', 'hunter2-red-door'],
+    // 3차 검증: 점이 든 비밀번호(파일 이름처럼 보임), 주소 앞부분 없는 공유 링크
+    ['echo Summer.2024 | sudo -S systemctl restart nginx', 'echo … | sudo …', 'Summer.2024'],
+    ['echo Pa55.word | kinit admin', 'echo … | kinit …', 'Pa55.word'],
+    ['./set_password.sh Admin.2024', 'set_password.sh …', 'Admin.2024'],
+    ['python reset_pw.py NewPass.2024', 'python reset_pw.py …', 'NewPass.2024'],
+    ['wget files.example.com/s/k3j4h5g6f7/report.pdf', 'wget …', 'k3j4h5g6f7'],
   ];
   for (const [cmd, want, secret] of secrets) {
     assert.equal(summary(cmd), want, cmd);
@@ -206,11 +212,20 @@ test('R-a 인계서의 명령은 프로그램과 하위 명령만 넣고 인자�
     ['MAX_TOKENS=4096 python run.py', 'python run.py …'],
     ["bash -lc 'make lint'", 'make lint'],
     ['git commit -m "fix: refresh token; add basic validation"', 'git commit …'],
-    ['C:\\Python312\\python.exe -m pytest', 'python.exe …'],
+    ['C:\\Python312\\python.exe -m pytest', 'python.exe -m pytest'],
     ['pwsh -Command "Get-ChildItem -Path src"', 'Get-ChildItem …'],
     ['git push origin main', 'git push …'],
     ['pytest tests/test_api.py -k login', 'pytest tests/test_api.py …'],
     ['make basic examples-all', 'make …'],
+    // 실행기(npx·uv run·poetry run·bundle exec·python -m) 뒤 첫 이름은 남긴다
+    ['npx prisma migrate dev', 'npx prisma migrate …'],
+    ['uv run pytest', 'uv run pytest'],
+    ['poetry run pytest -q', 'poetry run pytest …'],
+    ['python -m pytest', 'python -m pytest'],
+    ['bundle exec rspec', 'bundle exec rspec'],
+    ['npm run e2e', 'npm run e2e'],
+    ['cargo clippy', 'cargo clippy'],
+    ['cat .github/workflows/ci.yml', 'cat .github/workflows/ci.yml'],
   ];
   for (const [cmd, want] of plain) assert.equal(summary(cmd), want, cmd);
 });
@@ -281,5 +296,7 @@ test('R-d 시간대가 적힌 시각은 그 시간대로 계산한다(UTC·IANA 
   assert.equal(resetFromText('quota resets 3pm UTC+9', now), Date.UTC(2026, 10, 2, 6, 0), 'UTC+9 오프셋');
   assert.equal(resetFromText('resets 15:00 GMT+2', now), Date.UTC(2026, 10, 2, 13, 0), 'GMT+2 오프셋');
   assert.equal(resetFromText('resets 9:30 UTC-05:30', now), Date.UTC(2026, 10, 2, 15, 0), 'UTC-05:30 오프셋');
+  assert.equal(resetFromText('resets 15:00 UTC−2', now), Date.UTC(2026, 10, 2, 17, 0), '유니코드 빼기 기호(−)도 오프셋');
+  assert.equal(resetFromText('resets 3pm UTC+99', now), 0, '말이 안 되는 오프셋은 버린다');
   assert.equal(resetFromText('resets 3pm (Mars/Olympus_Mons)', now), 0);
 });

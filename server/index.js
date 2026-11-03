@@ -18,6 +18,7 @@ import { listImportable, readTranscript } from './importer.js';
 import { ACP_PRESETS } from './providers/acp.js';
 import { resolveCommand } from './providers/util.js';
 import { tr, bindLang, serverLang } from './i18n.js';
+import { Scheduler, cleanSchedule } from './scheduler.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -192,7 +193,8 @@ function openFolder(dir) {
   spawn(cmd, [dir], { detached: true, stdio: 'ignore' }).unref();
 }
 
-export function createApp({ home = homeDir(), port = PORT, detect = true } = {}) {
+// schedule: 예약 작업 시계(테스트는 끄고 tick 을 직접 부른다)
+export function createApp({ home = homeDir(), port = PORT, detect = true, schedule = detect } = {}) {
   const dirs = dataDirs(home);
   ensureDirs(dirs);
   // 지난 실행이 남긴 임시 파일(프롬프트·MCP 설정 등) 청소
@@ -209,6 +211,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true } = {})
   const providers = new ProviderRegistry(store);
   const orch = new Orchestrator({ store, bus, usage, catalog, dirs, providers });
   orch.recover();
+  const scheduler = new Scheduler({ store, orch, bus });
   const token = loadToken(home);
   let actualPort = port;
 
@@ -230,7 +233,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true } = {})
     version: VERSION, home, agents: store.all('agents'), teams: store.all('teams'), sessions: store.listSessions(),
     settings: publicSettings(), providers: providers.list(), usage: usage.snapshot(), skills: catalog.skills(),
     connectors: publicConnectors(), plugins: store.all('plugins'), skins: store.all('skins'),
-    active: [...orch.ctx.keys()], cooldown: orch.restingList(),
+    active: [...orch.ctx.keys()], cooldown: orch.restingList(), schedules: scheduler.list(),
   }));
 
   // 프로바이더
@@ -287,6 +290,25 @@ export function createApp({ home = homeDir(), port = PORT, detect = true } = {})
     return t;
   });
   route('DELETE', '/api/teams/([\\w-]+)', async (req, url, [id]) => { store.remove('teams', id); bus.emit('teams', store.all('teams')); return { ok: true }; });
+
+  // 예약 작업
+  route('GET', '/api/schedules', () => scheduler.list());
+  route('POST', '/api/schedules', async (req) => scheduler.save(cleanSchedule({ ...(await readJson(req)), id: undefined }, null, store)));
+  route('PUT', '/api/schedules/([\\w-]+)', async (req, url, [id]) => {
+    const body = await readJson(req);
+    // 본문을 다 받은 뒤에 이전 값을 읽는다(기다리는 사이 실행된 회차 기록을 옛 값으로 덮지 않게)
+    const prev = store.get('schedules', id);
+    if (!prev) throw new HttpError(404, tr('예약 없음'));
+    return scheduler.save(cleanSchedule({ ...body, id }, prev, store));
+  });
+  route('POST', '/api/schedules/([\\w-]+)/run', async (req, url, [id]) => {
+    const s = store.get('schedules', id);
+    if (!s) throw new HttpError(404, tr('예약 없음'));
+    const r = scheduler.fire(s, { manual: true });
+    scheduler.emit();
+    return r;
+  });
+  route('DELETE', '/api/schedules/([\\w-]+)', async (req, url, [id]) => { store.remove('schedules', id); scheduler.emit(); return { ok: true }; });
 
   // 세션
   route('POST', '/api/sessions', async (req) => {
@@ -634,7 +656,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true } = {})
   }
 
   return {
-    server, store, bus, orch, providers, catalog, usage, token, dirs,
+    server, store, bus, orch, providers, catalog, usage, token, dirs, scheduler,
     listen(p = port, host = HOST) {
       return new Promise((resolve, reject) => {
         server.once('error', reject);
@@ -644,11 +666,13 @@ export function createApp({ home = homeDir(), port = PORT, detect = true } = {})
             providers.refresh().then((list) => bus.emit('providers', list)).catch(() => {});
             providers.startAutoRefresh((list) => bus.emit('providers', list));
           }
+          if (schedule) scheduler.start();
           resolve(actualPort);
         });
       });
     },
     async close() {
+      scheduler.stop();
       orch.stopAll();
       providers.stop();
       usage.close();

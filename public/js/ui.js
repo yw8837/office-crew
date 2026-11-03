@@ -55,6 +55,7 @@ const P = {
   pin: 'M12 17v5M9 3h6l-1 7 4 3H6l4-3z',
   eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
   menu: 'M4 6h16M4 12h16M4 18h16',
+  clock: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 7v5l3 2',
 };
 
 export function Icon({ name, size }) {
@@ -77,7 +78,7 @@ export function Modal({ title, onClose, children, foot, size = '' }) {
 }
 
 export function Toggle({ checked, onChange, title }) {
-  return html`<label class="switch" title=${title}><input type="checkbox" checked=${!!checked} onChange=${(e) => onChange(e.target.checked)} /><span></span></label>`;
+  return html`<label class="switch" title=${title}><input type="checkbox" aria-label=${title} checked=${!!checked} onChange=${(e) => onChange(e.target.checked)} /><span></span></label>`;
 }
 
 // 그림 아바타는 data URL 을 한 번만 blob URL 로 바꿔 둔다 → 메시지마다 큰 문자열을 다시 만들거나 DOM 에 복사하지 않음

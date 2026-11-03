@@ -6,7 +6,7 @@ import { t, setLang, getLang } from './i18n/index.js';
 export const state = {
   ready: false, error: null, connected: false,
   version: '', home: '',
-  agents: [], teams: [], sessions: [], settings: {}, providers: [], usage: {}, skills: [], connectors: [], plugins: [], skins: [],
+  agents: [], teams: [], sessions: [], settings: {}, providers: [], usage: {}, skills: [], connectors: [], plugins: [], skins: [], schedules: [],
   active: new Set(),
   sessionData: {}, // id → 전체 세션
   live: {}, // sessionId → agentId → 상태
@@ -107,7 +107,7 @@ async function resync() {
     const b = await get('/api/bootstrap');
     Object.assign(state, {
       agents: b.agents, teams: b.teams, sessions: b.sessions, settings: b.settings, providers: b.providers,
-      usage: b.usage, skills: b.skills, connectors: b.connectors, plugins: b.plugins, skins: b.skins, active: new Set(b.active || []), cooldown: b.cooldown || {},
+      usage: b.usage, skills: b.skills, connectors: b.connectors, plugins: b.plugins, skins: b.skins, schedules: b.schedules || [], active: new Set(b.active || []), cooldown: b.cooldown || {},
     });
     applyLang();
     const keep = state.route.id;
@@ -197,6 +197,7 @@ function handle(type, d) {
     case 'connectors': state.connectors = d; break;
     case 'plugins': state.plugins = d; break;
     case 'skins': state.skins = d; break;
+    case 'schedules': state.schedules = d; break;
     case 'settings': state.settings = d; applyTheme(); applyLang(); break;
     case 'sessionsReset': resync(); break;
     default: break;
@@ -226,7 +227,7 @@ export async function boot() {
     const b = await get('/api/bootstrap');
     Object.assign(state, {
       version: b.version, home: b.home, agents: b.agents, teams: b.teams, sessions: b.sessions, settings: b.settings,
-      providers: b.providers, usage: b.usage, skills: b.skills, connectors: b.connectors, plugins: b.plugins, skins: b.skins,
+      providers: b.providers, usage: b.usage, skills: b.skills, connectors: b.connectors, plugins: b.plugins, skins: b.skins, schedules: b.schedules || [],
       active: new Set(b.active || []), cooldown: b.cooldown || {},
     });
     applyTheme();

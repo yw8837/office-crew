@@ -5,7 +5,7 @@ import { tr } from './i18n.js';
 export function defaultSettings() {
   return {
     theme: 'system',            // system | light | dark
-    skin: 'modern',             // 오피스 스킨 id
+    skin: 'village',            // 오피스 스킨 id(기본: 크루 마을)
     reducedMotion: false,
     viewMode: 'split',          // chat | office | split
     defaultTeamId: 'team-demo',

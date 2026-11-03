@@ -56,7 +56,7 @@ function OfficePanel({ s, full }) {
   const officeRef = useRef(null);
   const [height, setHeight] = useState(() => Number(localStorage.getItem('ui.officeH')) || Math.max(340, Math.round(innerHeight * 0.46)));
   const agents = sessionAgents(s);
-  const key = agents.map((a) => `${a.id}:${a.name}:${a.model}:${JSON.stringify(a.avatar)}`).join('|');
+  const key = agents.map((a) => `${a.id}:${a.name}:${a.model}:${avatarKey(a.avatar)}`).join('|');
   const mod = officeMod.m;
 
   const meta = (a) => ({ id: a.id, name: a.name, role: a.role, model: agentModelText(a, state.sessionData[s.id]), color: providerColorOf(a), avatar: a.avatar || {} });
@@ -124,7 +124,7 @@ function OfficePanel({ s, full }) {
     <div class="office-tools">
       <select class="select" style="width:auto;padding:4px 8px;font-size:12px" value=${state.settings.skin} onChange=${(e) => setSkin(e.target.value)} title=${t('사무실 스킨')}>
         ${(mod?.SKINS || []).map((k) => html`<option value=${k.id}>${mod.skinName ? mod.skinName(k, uiLang()) : k.name}</option>`)}
-        ${state.skins.map((k) => html`<option value=${k.id}>🖼 ${k.name}</option>`)}
+        ${state.skins.map((k) => html`<option value=${k.id}>${k.type === 'village' ? '🏡' : '🖼'} ${k.name}</option>`)}
       </select>
     </div>
     ${!full && html`<div class="resizer" onPointerDown=${startDrag} title=${t('드래그해서 높이 조절')}></div>`}
@@ -136,8 +136,15 @@ const providerColorOf = (a) => ({ claude: '#d97757', codex: '#10a37f', gemini: '
 function badgeFor(a, u) {
   return u.cost ? fmtCost(u.cost) : '';
 }
+// 사무실 갱신 키: 그림(data URL)은 통째로 넣지 않고 길이·끝부분만(렌더마다 큰 문자열 직렬화 방지)
+function avatarKey(av) {
+  if (!av) return '';
+  const { image, ...rest } = av;
+  return JSON.stringify(rest) + (typeof image === 'string' ? `#${image.length}:${image.slice(-24)}` : '');
+}
+
 function skinValue() {
-  const id = state.settings.skin || 'modern';
+  const id = state.settings.skin || 'village';
   return state.skins.find((k) => k.id === id) || id;
 }
 async function setSkin(id) {

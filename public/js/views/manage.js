@@ -1,6 +1,6 @@
 // 관리 화면: 에이전트(라우팅: 모델·노력·권한), 팀 배치(파이프라인), 커넥터(MCP), 스킬, 플러그인
 import { useEffect, useState } from 'preact/hooks';
-import { html, Icon, Modal, Toggle, Avatar, ProviderChip, PERM_LABEL, EFFORT_LABEL, providerColor, officeMod, agentModelText } from '../ui.js';
+import { html, Icon, Modal, Toggle, Avatar, ProviderChip, PERM_LABEL, EFFORT_LABEL, providerColor, officeMod, agentModelText, imageFileToDataURL } from '../ui.js';
 import { state, changed, toast, agentById, providerById } from '../state.js';
 import { get, post, put, del } from '../api.js';
 import { RoutingFields, routeText, PROFILE_LABEL } from './routing.js';
@@ -11,6 +11,8 @@ const HAIR = ['#1d1d24', '#3a2a1e', '#5a3825', '#8a5a3b', '#b04a2f', '#d8b26a', 
 const OUTFIT = ['#3b82f6', '#10a37f', '#d97757', '#8b5cf6', '#f97316', '#0ea5e9', '#22c55e', '#ef4444', '#334155', '#eab308', '#ec4899', '#64748b'];
 const STYLES = () => [['short', t('짧은 머리')], ['bob', t('단발')], ['long', t('긴 머리')], ['spiky', t('삐죽 머리')], ['ponytail', t('포니테일')]];
 const ACCS = () => [['none', t('없음')], ['glasses', t('안경')], ['headset', t('헤드셋')]];
+const KINDS = () => [['person', t('사람')], ['creature', t('크리처')], ['image', t('내 그림')]];
+const SPECIES = () => [['puff', t('뭉게 머리')], ['ears', t('긴 귀')], ['horn', t('작은 뿔')]];
 const EMOJIS = ['🤖', '🔎', '🗂️', '🧠', '🛠️', '✍️', '🎨', '📊', '🧪', '🛡️', '📣', '🧭', '🔁'];
 
 const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -86,6 +88,16 @@ export function AgentEditor({ agent, onClose }) {
   };
   const avatarSvg = officeMod.m?.renderAvatarSVG;
   const profiles = state.settings.apiProfiles || [];
+  const kind = ['creature', 'image'].includes(a.avatar.kind) ? a.avatar.kind : 'person';
+  const pickImage = async (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    try {
+      const { image, pixel } = await imageFileToDataURL(f);
+      setA((x) => ({ ...x, avatar: { ...x.avatar, kind: 'image', image, pixel } }));
+    } catch (er) { toast(er.message, 'error'); }
+  };
 
   return html`<${Modal} title=${isNew ? t('새 에이전트') : t('에이전트 편집 — {name}', { name: agent.name })} onClose=${onClose} size="wide" foot=${html`
     ${!isNew && html`<button class="btn danger" onClick=${remove}><${Icon} name="trash" /> ${t('삭제')}</button>`}
@@ -128,11 +140,21 @@ export function AgentEditor({ agent, onClose }) {
       <div>
         <div class="field"><label>${t('미리보기')}</label>
           <div class="preview-av" dangerouslySetInnerHTML=${{ __html: avatarSvg ? avatarSvg(a.avatar, { size: 96, color: providerColor(a.provider), id: a.id || a.name }) : `<span style="font-size:44px">${escapeHtml(a.emoji)}</span>` }}></div></div>
-        <div class="field"><label>${t('피부')}</label><div class="swatches">${SKIN_TONES.map((c) => html`<span class=${`sw${a.avatar.skin === c ? ' on' : ''}`} style=${`background:${c}`} onClick=${() => setAv('skin', c)}></span>`)}</div></div>
-        <div class="field"><label>${t('머리 색')}</label><div class="swatches">${HAIR.map((c) => html`<span class=${`sw${a.avatar.hair === c ? ' on' : ''}`} style=${`background:${c}`} onClick=${() => setAv('hair', c)}></span>`)}</div></div>
-        <div class="field"><label>${t('머리 모양')}</label><select class="select" value=${a.avatar.hairStyle} onChange=${(e) => setAv('hairStyle', e.target.value)}>${STYLES().map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></div>
-        <div class="field"><label>${t('옷 색')}</label><div class="swatches">${OUTFIT.map((c) => html`<span class=${`sw${a.avatar.outfit === c ? ' on' : ''}`} style=${`background:${c}`} onClick=${() => setAv('outfit', c)}></span>`)}</div></div>
-        <div class="field"><label>${t('소품')}</label><select class="select" value=${a.avatar.accessory} onChange=${(e) => setAv('accessory', e.target.value)}>${ACCS().map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></div>
+        <div class="field"><label>${t('모습')}</label>
+          <div class="seg">${KINDS().map(([k, l]) => html`<button class=${kind === k ? 'on' : ''} onClick=${() => setA((x) => ({ ...x, avatar: { ...x.avatar, kind: k, ...(k === 'creature' && !x.avatar.species ? { species: 'puff' } : {}) } }))}>${l}</button>`)}</div></div>
+        ${kind === 'person' && html`
+          <div class="field"><label>${t('피부')}</label><div class="swatches">${SKIN_TONES.map((c) => html`<span class=${`sw${a.avatar.skin === c ? ' on' : ''}`} style=${`background:${c}`} onClick=${() => setAv('skin', c)}></span>`)}</div></div>
+          <div class="field"><label>${t('머리 색')}</label><div class="swatches">${HAIR.map((c) => html`<span class=${`sw${a.avatar.hair === c ? ' on' : ''}`} style=${`background:${c}`} onClick=${() => setAv('hair', c)}></span>`)}</div></div>
+          <div class="field"><label>${t('머리 모양')}</label><select class="select" value=${a.avatar.hairStyle} onChange=${(e) => setAv('hairStyle', e.target.value)}>${STYLES().map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></div>`}
+        ${kind !== 'image' && html`<div class="field"><label>${kind === 'creature' ? t('몸 색') : t('옷 색')}</label><div class="swatches">${OUTFIT.map((c) => html`<span class=${`sw${a.avatar.outfit === c ? ' on' : ''}`} style=${`background:${c}`} onClick=${() => setAv('outfit', c)}></span>`)}</div></div>`}
+        ${kind === 'person' && html`<div class="field"><label>${t('소품')}</label><select class="select" value=${a.avatar.accessory} onChange=${(e) => setAv('accessory', e.target.value)}>${ACCS().map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></div>`}
+        ${kind === 'creature' && html`<div class="field"><label>${t('생김새')}</label><select class="select" value=${a.avatar.species || 'puff'} onChange=${(e) => setAv('species', e.target.value)}>${SPECIES().map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></div>`}
+        ${kind === 'image' && html`<div class="field"><label>${t('내 그림')}</label>
+          <div class="row" style="flex-wrap:wrap;gap:6px">
+            <label class="btn sm"><${Icon} name="image" /> ${a.avatar.image ? t('다른 그림') : t('그림 올리기')}<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" onChange=${pickImage} /></label>
+            ${a.avatar.image && html`<button class="btn sm" onClick=${() => setA((x) => ({ ...x, avatar: { ...x.avatar, image: undefined, pixel: undefined } }))}>${t('지우기')}</button>`}
+          </div>
+          <div class="hint">${t('투명 배경 PNG를 추천해. 긴 변 256px로 줄여 이 PC에만 저장돼. 작은 도트 그림은 선명하게 확대돼.')}</div></div>`}
       </div>
     </div>
   </${Modal}>`;

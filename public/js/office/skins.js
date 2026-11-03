@@ -1,10 +1,41 @@
 import { normLang } from './i18n.js';
 
-// 내장 스킨 3종(팔레트 + 소품 변형). custom 스킨은 { type:'image', image, width, height, desks, spots }
+// 내장 스킨 4종(마을 + 사무실 3종). custom 스킨은 { type:'image', image, width, height, desks, spots } 또는 { type:'village', homeImage }
 
 const BOOKS_BRIGHT = ['#d9534f', '#4f81bd', '#8cbf4f', '#f0a04b', '#8064a2', '#3fb2c9', '#e0b93a', '#5e8c3a', '#c76b98', '#6d7b8d'];
 
+// 마을: 쉬는 주민은 집에, 일하는 주민은 회사에. 커스텀 마을은 { type:'village', base:'village', homeImage } 로 집 그림만 바꿀 수 있다
+const VILLAGE = {
+  id: 'village',
+  name: '크루 마을',
+  names: { ko: '크루 마을', en: 'Crew Village', zh: '船员小镇', ja: 'クルー村' },
+  type: 'village',
+  palette: {
+    bg: '#e8f4ec', bg2: '#cfe6da',
+    grass: '#9fd47f', grassAlt: '#93ca72', grassDark: '#6fae55', soil: '#a77b52',
+    road: '#cfcac0', roadLine: '#ffffff', path: '#e9dcc0', stone: '#d6d3cc', water: '#7cc7f2',
+    floor: '#ead9bf', floorLine: '#cfb894',
+    wall: '#f8f6f2', wallTop: '#ffffff', glass: '#bfe3fb',
+    roofs: ['#e76f51', '#4c8dff', '#2a9d8f', '#f4a261', '#8e6cc4', '#e05780', '#3d5a80', '#d4a017'],
+    houseWalls: ['#fff6e8', '#f3efe6', '#fdf1e1', '#eef3f7'],
+    door: '#8a5a3b', library: '#c9b79c', workshop: '#b8c2cf', tower: '#e8e3da',
+    trunk: '#8a5a3b', leaf: '#5fae5a', leafDark: '#3e8a45', leafLight: '#93d172',
+    desktop: '#dcb88d', deskBody: '#f2f0eb', cabinet: '#e9e6df',
+    wood: '#cfa676', woodDark: '#a87c52',
+    chair: '#3c4350', chairFrame: '#262b33',
+    plant: '#5fae5a', plantDark: '#3e8a45', plantLight: '#93d172', pot: '#f4f2ee',
+    metal: '#a7afba', dark: '#3a414d',
+    screen: '#1d2430', screenIdle: '#3c5d8f', glow: '#86c9ff',
+    label: '#ffffff', labelText: '#2b3240', labelLine: '#e4e0d8',
+    books: BOOKS_BRIGHT,
+    accent: '#2a9d8f',
+  },
+  props: { sky: 'day', neon: false, lamps: false, plants: 1 },
+};
+const IMG_RE = /^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/;
+
 export const SKINS = [
+  VILLAGE,
   {
     id: 'modern',
     name: '모던 오피스',
@@ -101,9 +132,13 @@ export function resolveSkin(s) {
   if (!s) return SKINS[0];
   if (typeof s === 'string') return SKINS.find((k) => k.id === s) || SKINS[0];
   if (s.type === 'image' && s.image) return s;
+  if (s.type === 'village') {
+    const homeImage = typeof s.homeImage === 'string' && IMG_RE.test(s.homeImage) ? s.homeImage : null;
+    return { ...VILLAGE, ...s, type: 'village', homeImage, palette: { ...VILLAGE.palette, ...(s.palette || {}) }, props: { ...VILLAGE.props, ...(s.props || {}) } };
+  }
   if (s.palette) {
     // 내장 스킨 기반 부분 덮어쓰기 허용: { base:'modern', palette:{...} }
-    const base = SKINS.find((k) => k.id === s.base) || SKINS[0];
+    const base = SKINS.find((k) => k.id === s.base && k.type === 'vector') || SKINS.find((k) => k.id === 'modern');
     return { ...base, ...s, palette: { ...base.palette, ...s.palette }, props: { ...base.props, ...(s.props || {}) } };
   }
   return SKINS[0];

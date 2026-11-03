@@ -5,6 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { VERSION, PUBLIC_DIR, HOST, PORT, homeDir, dataDirs, ensureDirs } from './config.js';
+import { cleanAvatar, cleanSkin } from './media.js';
 import { Store, newId } from './store.js';
 import { Bus } from './bus.js';
 import { Usage } from './usage.js';
@@ -149,7 +150,7 @@ function cleanAgent(a, prev = {}) {
     permission: PERMS.has(x.permission) ? x.permission : 'default', systemPrompt: String(x.systemPrompt || '').slice(0, 20000),
     skills: Array.isArray(x.skills) ? x.skills.map(String) : [], connectors: Array.isArray(x.connectors) ? x.connectors.map(String) : [],
     routing, routingProfile: ['economy', 'balanced', 'best'].includes(x.routingProfile) ? x.routingProfile : 'balanced',
-    light: !!x.light, apiProfile: String(x.apiProfile || ''), avatar: x.avatar && typeof x.avatar === 'object' ? x.avatar : {},
+    light: !!x.light, apiProfile: String(x.apiProfile || ''), avatar: cleanAvatar(x.avatar),
     ...(x.pluginId ? { pluginId: x.pluginId } : {}),
   };
 }
@@ -525,7 +526,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true } = {})
   });
 
   // 스킨(커스텀 배경 이미지)
-  route('POST', '/api/skins', async (req) => { const s = store.upsert('skins', await readJson(req), 'skin'); bus.emit('skins', store.all('skins')); return s; });
+  route('POST', '/api/skins', async (req) => { const s = store.upsert('skins', cleanSkin(await readJson(req)), 'skin'); bus.emit('skins', store.all('skins')); return s; });
   route('DELETE', '/api/skins/([\\w-]+)', async (req, url, [id]) => { store.remove('skins', id); bus.emit('skins', store.all('skins')); return { ok: true }; });
 
   // ── 라우팅 ──

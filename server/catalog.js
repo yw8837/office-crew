@@ -5,6 +5,7 @@ import path from 'node:path';
 import { newId } from './store.js';
 import { runQuick } from './providers/util.js';
 import { tr } from './i18n.js';
+import { cleanAvatar, cleanSkin } from './media.js';
 
 const home = os.homedir();
 // 각 CLI 의 설정 폴더(CLAUDE_CONFIG_DIR·CODEX_HOME 을 바꿨으면 그쪽). 한도·대화 기록과 같은 곳을 본다
@@ -190,7 +191,7 @@ export class Catalog {
     }
     for (const a of bundle.agents || []) {
       const saved = this.store.upsert('agents', {
-        ...a, id: undefined, pluginId,
+        ...a, id: undefined, pluginId, avatar: cleanAvatar(a.avatar),
         connectors: (a.connectors || []).map((id) => conMap.get(id)).filter(Boolean),
         // 외부(CLI) 스킬은 그대로, 앱 스킬은 새로 만든 스킬 id 로 바꿔 연결
         skills: (a.skills || []).map((id) => (String(id).startsWith('ext:') ? id : skillMap.get(id))).filter(Boolean),
@@ -205,7 +206,7 @@ export class Catalog {
       }, 'team');
       items.teams.push(saved.id);
     }
-    for (const s of bundle.skins || []) items.skins.push(this.store.upsert('skins', { ...s, id: undefined, pluginId }, 'skin').id);
+    for (const s of bundle.skins || []) items.skins.push(this.store.upsert('skins', cleanSkin({ ...s, id: undefined, pluginId }), 'skin').id);
     return this.store.upsert('plugins', { id: pluginId, name: bundle.name || tr('플러그인'), description: bundle.description || '', version: bundle.version || 1, items, installedAt: Date.now() });
   }
 

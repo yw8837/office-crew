@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Crew Village, the new default office skin: idle agents stay inside their own house (the windows light up), commute to the office building when work starts, and go home after they finish. Tools still send them places: reading to the library, searching to the lookout tower, running commands to the workshop, planning and long thinking to the plaza fountain. Approvals and errors are handled at the desk. The office skins (Modern, Cozy, Night) are still available.
+- Agent look: besides a person, an agent can be an original creature (three shapes, any body color) or your own image. Uploaded images are shrunk to 256px on the long side and stored only on your machine; small pixel art is scaled up crisply. Only PNG, JPEG, WEBP and GIF are accepted.
+- Customize village: replace the house with your own image (for example a capsule or a tent) in Settings → Display & language → Office skin.
+
 ### Fixed
 - Settings → AI accounts: when Hermes is not signed in, the provider from its config (for example Nous Portal) no longer shows as a signed-in account. The card says "Login required" and names the configured provider in the note instead.
 

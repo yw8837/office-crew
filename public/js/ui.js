@@ -80,8 +80,29 @@ export function Toggle({ checked, onChange, title }) {
   return html`<label class="switch" title=${title}><input type="checkbox" checked=${!!checked} onChange=${(e) => onChange(e.target.checked)} /><span></span></label>`;
 }
 
+// 그림 아바타는 data URL 을 한 번만 blob URL 로 바꿔 둔다 → 메시지마다 큰 문자열을 다시 만들거나 DOM 에 복사하지 않음
+const blobUrls = new Map();
+function imageUrl(dataUrl) {
+  let u = blobUrls.get(dataUrl);
+  if (u) return u;
+  try {
+    const [head, b64] = dataUrl.split(',');
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    u = URL.createObjectURL(new Blob([bytes], { type: head.slice(5, head.indexOf(';')) }));
+  } catch { u = dataUrl; }
+  if (blobUrls.size > 64) { for (const [k, v] of blobUrls) { if (v.startsWith('blob:')) URL.revokeObjectURL(v); blobUrls.delete(k); break; } }
+  blobUrls.set(dataUrl, u);
+  return u;
+}
+
 export function Avatar({ agent, size = 34 }) {
   const fn = officeMod.m?.renderAvatarSVG;
+  if (agent && officeMod.m?.avatarKind?.(agent.avatar) === 'image') {
+    const px = agent.avatar.pixel ? ';image-rendering:pixelated' : '';
+    return html`<div class="avatar" style=${`width:${size}px;height:${size}px`}><img src=${imageUrl(agent.avatar.image)} alt="" style=${`width:100%;height:100%;object-fit:contain${px}`} /></div>`;
+  }
   if (agent && fn) {
     let svg = '';
     try { svg = fn(agent.avatar || {}, { size, color: providerColor(agent.provider), id: agent.id }); } catch { svg = ''; }
@@ -154,3 +175,32 @@ export function agentModelText(a, s = null) {
 export const usageTotal = (u = {}) => (u.input || 0) + (u.output || 0) + (u.cacheRead || 0) + (u.cacheWrite || 0);
 
 export function confirmBox(text) { return window.confirm(text); }
+
+/**
+ * 사용자가 고른 그림 파일 → 작은 PNG data URL(긴 변 max px). 투명 배경 유지.
+ * 긴 변이 128px 이하면 도트 그림으로 보고 pixel=true(화면에서 흐리지 않게 확대)
+ */
+export async function imageFileToDataURL(file, max = 256) {
+  if (!file || !/^image\/(png|jpeg|webp|gif)$/.test(file.type)) throw new Error(t('PNG·JPG·WEBP·GIF 그림만 올릴 수 있어.'));
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = () => rej(new Error(t('그림을 읽지 못했어.')));
+      i.src = url;
+    });
+    const w = img.naturalWidth, hgt = img.naturalHeight;
+    if (!w || !hgt) throw new Error(t('그림을 읽지 못했어.'));
+    const k = Math.min(1, max / Math.max(w, hgt));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(w * k));
+    c.height = Math.max(1, Math.round(hgt * k));
+    const g = c.getContext('2d');
+    g.imageSmoothingEnabled = k < 1;
+    g.drawImage(img, 0, 0, c.width, c.height);
+    return { image: c.toDataURL('image/png'), pixel: Math.max(w, hgt) <= 128 };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}

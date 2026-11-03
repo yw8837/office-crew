@@ -1,6 +1,6 @@
 // 설정(AI 계정 로그인·API 키·화면/사무실 스킨·기본값) + 사용량 화면
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { html, Icon, Modal, Toggle, ProviderChip, providerColor, fmtTok, fmtCost, usageTotal, officeMod, EFFORT_LABEL } from '../ui.js';
+import { html, Icon, Modal, Toggle, ProviderChip, providerColor, fmtTok, fmtCost, usageTotal, officeMod, EFFORT_LABEL, imageFileToDataURL } from '../ui.js';
 import { state, changed, toast, applyTheme, applyLang, agentById } from '../state.js';
 import { get, post, put, del } from '../api.js';
 import { PageHead } from './manage.js';
@@ -171,17 +171,62 @@ function Look() {
     <div class="card"><h4>${t('사무실 스킨')}</h4>
       <div class="cards" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr))">
         ${skins.map((k) => html`<div class="gcard" style=${s.skin === k.id ? 'border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)' : ''} onClick=${() => saveSettings({ skin: k.id })}>
-          <div class="nm">${k.custom ? '🖼 ' : ''}${!k.custom && officeMod.m?.skinName ? officeMod.m.skinName(k, getLang()) : k.name}</div>
-          ${k.custom && k.image ? html`<img src=${k.image} style="width:100%;height:90px;object-fit:cover;border-radius:8px" alt="" />` : html`<div style=${`height:90px;border-radius:8px;background:${previewBg(k)}`}></div>`}
+          <div class="nm">${k.custom ? (k.type === 'village' ? '🏡 ' : '🖼 ') : ''}${!k.custom && officeMod.m?.skinName ? officeMod.m.skinName(k, getLang()) : k.name}</div>
+          ${k.custom && (k.image || k.homeImage) ? html`<div style=${`height:90px;border-radius:8px;background:${previewBg(k)};display:grid;place-items:center`}><img src=${k.image || k.homeImage} style=${`max-width:100%;height:${k.image ? '90px;width:100%;object-fit:cover;border-radius:8px' : '70px'};${k.homePixel ? 'image-rendering:pixelated' : ''}`} alt="" /></div>` : html`<div style=${`height:90px;border-radius:8px;background:${previewBg(k)}`}></div>`}
           ${k.custom && html`<div class="row"><button class="btn sm" onClick=${(e) => { e.stopPropagation(); setEditor(k); }}>${t('편집')}</button><button class="btn sm danger" onClick=${async (e) => { e.stopPropagation(); if (confirm(t('이 스킨을 삭제할까?'))) { await del(`/api/skins/${k.id}`).catch((er) => toast(er.message, 'error')); } }}>${t('삭제')}</button></div>`}
         </div>`)}
+        <div class="gcard add" onClick=${() => setEditor({ id: '', name: t('내 마을'), type: 'village' })}><${Icon} name="plus" size=${22} />${t('마을 꾸미기 (집 그림 바꾸기)')}</div>
         <div class="gcard add" onClick=${() => setEditor({ id: '', name: t('내 사무실'), type: 'image', desks: [], spots: {} })}><${Icon} name="image" size=${22} />${t('이미지로 스킨 만들기')}</div>
       </div>
-      <div class="hint" style="margin-top:8px">${t('내 사무실 그림(예: AI로 만든 아이소메트릭 사무실)을 올리고 책상 위치를 찍으면 캐릭터가 그 위에서 일해.')}</div>
+      <div class="hint" style="margin-top:8px">${t('크루 마을: 쉬는 에이전트는 자기 집에 들어가 있고, 일을 시작하면 회사로 출근해. 집 그림을 내 그림으로 바꿀 수 있어.')}</div>
+      <div class="hint">${t('내 사무실 그림(예: AI로 만든 아이소메트릭 사무실)을 올리고 책상 위치를 찍으면 캐릭터가 그 위에서 일해.')}</div>
     </div>
-    ${editor && html`<${SkinEditorModal} skin=${editor} onClose=${() => setEditor(null)} />`}`;
+    ${editor && (editor.type === 'village'
+      ? html`<${VillageSkinModal} skin=${editor} onClose=${() => setEditor(null)} />`
+      : html`<${SkinEditorModal} skin=${editor} onClose=${() => setEditor(null)} />`)}`;
+}
+
+function VillageSkinModal({ skin, onClose }) {
+  const [v, setV] = useState(() => ({ name: skin.name || t('내 마을'), homeImage: skin.homeImage || '', homePixel: !!skin.homePixel }));
+  const pick = async (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    try {
+      const { image, pixel } = await imageFileToDataURL(f, 256);
+      setV((x) => ({ ...x, homeImage: image, homePixel: pixel }));
+    } catch (er) { toast(er.message, 'error'); }
+  };
+  const save = async () => {
+    try {
+      const saved = await post('/api/skins', { id: skin.id || undefined, name: v.name.trim() || t('내 마을'), type: 'village', base: 'village', homeImage: v.homeImage || null, homePixel: v.homePixel });
+      await saveSettings({ skin: saved.id });
+      toast(t('스킨을 저장하고 적용했어'), 'ok');
+      onClose();
+    } catch (er) { toast(er.message, 'error'); }
+  };
+  return html`<${Modal} title=${t('마을 꾸미기')} onClose=${onClose} foot=${html`
+    <span class="grow" style="flex:1"></span>
+    <button class="btn" onClick=${onClose}>${t('취소')}</button>
+    <button class="btn primary" onClick=${save}>${t('저장')}</button>`}>
+    <div class="field"><label>${t('이름')}</label><input class="input" value=${v.name} onInput=${(e) => setV((x) => ({ ...x, name: e.target.value }))} /></div>
+    <div class="field"><label>${t('집 그림')}</label>
+      <div class="row" style="gap:10px;align-items:center">
+        <div style="width:96px;height:96px;border-radius:12px;background:var(--panel-2);display:grid;place-items:center;overflow:hidden">
+          ${v.homeImage ? html`<img src=${v.homeImage} style=${`max-width:88px;max-height:88px;${v.homePixel ? 'image-rendering:pixelated' : ''}`} alt="" />` : html`<span style="font-size:40px">🏠</span>`}
+        </div>
+        <div class="row" style="flex-wrap:wrap;gap:6px">
+          <label class="btn sm"><${Icon} name="image" /> ${v.homeImage ? t('다른 그림') : t('그림 올리기')}<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" onChange=${pick} /></label>
+          ${v.homeImage && html`<button class="btn sm" onClick=${() => setV((x) => ({ ...x, homeImage: '', homePixel: false }))}>${t('기본 집으로')}</button>`}
+        </div>
+      </div>
+      <div class="hint">${t('쉬는 에이전트가 들어가 있는 집이야. 투명 배경 PNG를 추천해(예: 캡슐·둥지·텐트). 그림은 이 PC에만 저장돼.')}</div>
+    </div>
+    <div class="hint">${t('에이전트 모습은 에이전트 편집에서 사람·크리처·내 그림 중에 골라.')}</div>
+  </${Modal}>`;
 }
 function previewBg(k) {
+  if (k.type === 'village') return 'linear-gradient(160deg, #e8f4ec 0 30%, #9fd47f 30% 100%)';
   const p = k.palette || {};
   return `linear-gradient(135deg, ${p.wallL || p.wall || '#eee'} 0 45%, ${p.floor || p.floorA || '#d9b38c'} 45% 100%)`;
 }

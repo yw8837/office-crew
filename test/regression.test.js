@@ -239,3 +239,22 @@ test('오류 대기 중에 중지하면 사무실 캐릭터의 "결정 필요" �
   const last = states().at(-1).data;
   assert.deepEqual([last.state, last.detail], ['idle', '중지됨']);
 });
+
+test('Hermes 상태: 로그인 안 됐으면 설정된 제공자를 👤 계정처럼 보이지 않고 안내에만 적는다', async () => {
+  const { hermesStatus } = await import('../server/providers/hermes.js');
+  const out = [
+    '  Model:        upstage/solar-pro4:free',
+    '  Provider:     Nous Portal',
+    '◆ Auth Providers',
+    '  Nous Portal   ✗ not logged in (run: hermes portal)',
+    '  OpenAI Codex  ✗ not logged in (run: hermes model)',
+  ].join('\n');
+  const s = hermesStatus(out);
+  assert.equal(s.loggedIn, false);
+  assert.equal(s.account, '');
+  assert.match(s.note, /Nous Portal/);
+  const ok = hermesStatus(out.replace('Nous Portal   ✗ not logged in (run: hermes portal)', 'Nous Portal   ✓ logged in'));
+  assert.equal(ok.loggedIn, true);
+  assert.equal(ok.account, 'Nous Portal · upstage/solar-pro4:free');
+  assert.equal(ok.note, '');
+});

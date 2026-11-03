@@ -16,6 +16,22 @@ function pickNum(obj, keys) {
   return 0;
 }
 
+// `hermes status` 출력 해석. Provider·Model 줄은 설정값이라 로그인 여부와 별개 →
+// 로그인 안 됐으면 계정 칸을 비우고 설정된 제공자는 안내에만 적는다
+export function hermesStatus(out = '') {
+  const model = out.match(/Model:\s*(.+)/)?.[1]?.trim() || '';
+  const provider = out.match(/Provider:\s*(.+)/)?.[1]?.trim() || '';
+  const logged = [...out.matchAll(/^\s{2}(.+?)\s+✓ logged in/gm)].map((m) => m[1].trim());
+  const expired = /Invalid refresh token|No access token/i.test(out);
+  const loggedIn = logged.length > 0;
+  return {
+    model, provider, loggedIn,
+    account: loggedIn ? [provider, model].filter(Boolean).join(' · ') : '',
+    note: loggedIn ? (expired ? tr('토큰 갱신이 필요할 수 있어(로그인 버튼 → hermes model)') : '')
+      : provider ? tr('로그인 필요 · 설정된 제공자: {provider}', { provider }) : tr('로그인 필요'),
+  };
+}
+
 export default {
   id: 'hermes', label: 'Hermes', get sub() { return tr('Hermes Agent CLI · Nous Portal/OAuth 로그인'); }, kind: 'cli', color: '#7c3aed',
   efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
@@ -26,16 +42,11 @@ export default {
     const v = await runQuick('hermes', ['--version']);
     if (v.code === -1) return { installed: false, note: tr('Hermes Agent 미설치') };
     const s = await runQuick('hermes', ['status'], 40000);
-    const out = s.out;
-    const model = out.match(/Model:\s*(.+)/)?.[1]?.trim() || '';
-    const provider = out.match(/Provider:\s*(.+)/)?.[1]?.trim() || '';
-    statusCache = { at: Date.now(), model, provider };
-    const logged = [...out.matchAll(/^\s{2}(.+?)\s+✓ logged in/gm)].map((m) => m[1].trim());
-    const expired = /Invalid refresh token|No access token/i.test(out);
+    const st = hermesStatus(s.out);
+    statusCache = { at: Date.now(), model: st.model, provider: st.provider };
     return {
       installed: true, version: v.out.split('\n')[0].replace('Hermes Agent', '').trim(),
-      loggedIn: logged.length > 0, account: [provider, model].filter(Boolean).join(' · '),
-      note: logged.length ? (expired ? tr('토큰 갱신이 필요할 수 있어(로그인 버튼 → hermes model)') : '') : tr('로그인 필요'),
+      loggedIn: st.loggedIn, account: st.account, note: st.note,
     };
   },
 

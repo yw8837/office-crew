@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Settings → AI accounts: when Hermes is not signed in, the provider from its config (for example Nous Portal) no longer shows as a signed-in account. The card says "Login required" and names the configured provider in the note instead.
+
 ## [1.1.0] - 2026-11-03
 
 ### Added

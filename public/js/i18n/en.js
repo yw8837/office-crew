@@ -539,6 +539,7 @@ export default {
   'Hermes Agent CLI · Nous Portal/OAuth 로그인': 'Hermes Agent CLI · Nous Portal/OAuth login',
   '열린 터미널에서 프로바이더를 고르고 로그인(재인증)해줘.': 'In the terminal that opened, pick a provider and log in (re-authenticate).',
   'Hermes Agent 미설치': 'Hermes Agent not installed',
+  '로그인 필요 · 설정된 제공자: {provider}': 'Login required · configured provider: {provider}',
   '토큰 갱신이 필요할 수 있어(로그인 버튼 → hermes model)': 'Token may need refreshing (Log in → hermes model)',
   '현재 설정': 'current setting',
   '기본 모델(Hermes 설정)': 'Default model (Hermes setting)',

@@ -1068,4 +1068,5 @@ export default {
   "이 카드는 이미 일하는 중이야.": "This card is already being worked on.",
   "카드에 고른 팀이 없어졌어.": "The team picked for this card is gone.",
   "카드에 고른 에이전트가 없어졌어.": "The agent picked for this card is gone.",
+  "예약 실행이 멈춰서 끝냈어. 다음 회차는 정상으로 돌아.": "The scheduled run stalled, so it was ended. The next run goes as usual.",
 };

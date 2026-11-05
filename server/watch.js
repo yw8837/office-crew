@@ -18,7 +18,11 @@ const HEAD_MAX = 1024 * 1024; // Codex 첫 줄(작업 폴더)을 찾을 때 읽�
 const SHOW_MAX = 12; // 한 번에 보여 주는 세션 수
 
 const claudeRoot = () => path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'projects');
-const baseName = (p) => String(p || '').split(/[\\/]/).filter(Boolean).pop() || '';
+const baseName = (p) => String(p || '').split(/[?#]/)[0].split(/[\\/]/).filter(Boolean).pop() || '';
+// 글에 섞인 흔한 토큰 모양은 가린다(화면 공유 중에 그대로 보이지 않게). 모든 비밀을 잡지는 못한다
+const redact = (s) => String(s).replace(/\b(?:sk-[\w-]{8,}|gh[pousr]_\w{8,}|github_pat_\w{8,}|xox[abprs]-[\w-]{8,}|AKIA[0-9A-Z]{12,}|eyJ[\w-]{10,}\.[\w.-]+)\b/g, '•••').replace(/([?&](?:[\w-]*(?:token|key|secret|auth|password)[\w-]*)=)[^\s&]+/gi, '$1•••');
+// 명령에서 프로그램 이름 찾기: 앞쪽 KEY=값 과 env·sudo 는 건너뛴다
+const programOf = (cmd) => cmd.trim().split(/\s+/).find((w) => !/^[\w.-]+=/.test(w) && !/^(?:env|sudo|command|time|nohup)$/.test(w)) || '';
 
 // 도구 입력에서 보여 줄 짧은 이름: 파일은 이름만, 명령은 프로그램 이름만(토큰이 든 인자가 화면에 나오지 않게)
 function toolDetail(rawName, input) {
@@ -27,16 +31,16 @@ function toolDetail(rawName, input) {
   const file = i.file_path || i.path || i.notebook_path || i.filename;
   if (typeof file === 'string' && file) return `${name} · ${baseName(file)}`;
   const cmd = Array.isArray(i.command) ? i.command.join(' ') : i.command || i.cmd;
-  if (typeof cmd === 'string' && cmd.trim()) return `${name} · ${baseName(cmd.trim().split(/\s+/)[0])}`;
+  if (typeof cmd === 'string' && cmd.trim()) return `${name} · ${baseName(programOf(cmd))}`;
   return String(name);
 }
 
 const parseArgs = (v) => { if (typeof v !== 'string') return v; try { return JSON.parse(v); } catch { return {}; } };
-const lastLine = (s) => String(s).trim().split('\n').pop().slice(-70);
+const lastLine = (s) => redact(String(s).trim().split('\n').pop()).slice(-70);
 
 // 기록 한 줄 → 새 상태(바뀌지 않으면 null). 순수 함수(테스트하기 쉽게)
 export function claudeEvent(o) {
-  if (!o || typeof o !== 'object' || o.isSidechain) return null; // 서브에이전트 줄은 본 세션 상태로 치지 않는다
+  if (!o || typeof o !== 'object' || o.isSidechain || o.isMeta) return null; // 서브에이전트 줄·내부 안내 줄은 본 세션 상태로 치지 않는다
   const extra = { cwd: typeof o.cwd === 'string' ? o.cwd : undefined };
   if (o.type === 'assistant') {
     const c = o.message?.content;
@@ -155,7 +159,7 @@ export class SessionWatch {
       let dropFirst = false;
       if (f.offset < 0) {
         f.at = mtimeMs; // 처음 볼 때는 파일 시각을 마지막 활동으로 친다
-        if (f.source === 'codex') await this.#readHead(fh, f, size);
+        await this.#readHead(fh, f, size); // 끝부분이 거대한 한 줄뿐이어도 프로젝트 이름은 알게
         f.offset = Math.max(0, size - FIRST_TAIL);
         dropFirst = f.offset > 0;
       }
@@ -187,11 +191,15 @@ export class SessionWatch {
     const buf = Buffer.alloc(Math.min(HEAD_MAX, size));
     if (!buf.length) return;
     await fh.read(buf, 0, buf.length, 0);
-    const nl = buf.indexOf(10);
-    try {
-      const ev = codexEvent(JSON.parse(buf.toString('utf8', 0, nl < 0 ? buf.length : nl)));
-      if (ev?.cwd) f.cwd = ev.cwd;
-    } catch { /* 첫 줄이 너무 길거나 다른 형식 */ }
+    const parse = f.source === 'codex' ? codexEvent : claudeEvent;
+    const lines = buf.toString('utf8').split('\n');
+    if (buf.length < size) lines.pop(); // 잘린 끝줄
+    for (const line of lines) {
+      try {
+        const ev = parse(JSON.parse(line));
+        if (ev?.cwd) { f.cwd = ev.cwd; return; }
+      } catch { /* 다른 형식이면 다음 줄 */ }
+    }
   }
 
   // 한 번 돌기(테스트는 직접 부른다)

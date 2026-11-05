@@ -27,7 +27,9 @@ export function WatchPage() {
   const host = useRef(null);
   const office = useRef(null);
   const list = state.watch || [];
-  const key = list.map((w) => `${w.id}:${w.project}`).join('|');
+  // 최근 순으로 오는 목록을 그대로 쓰면 세션이 번갈아 일할 때마다 사무실이 다시 그려져서, 자리는 id 순으로 고정한다
+  const seats = [...list].sort((a, b) => (a.id < b.id ? -1 : 1));
+  const key = seats.map((w) => `${w.id}:${w.project}`).join('|');
   const mod = officeMod.m;
 
   // 보고 있는 동안만 서버가 파일을 읽는다(20초마다 "보는 중"이라고 알린다)
@@ -46,8 +48,10 @@ export function WatchPage() {
   }, [mod]);
 
   useEffect(() => {
-    office.current?.setAgents(list.map((w) => ({ id: w.id, name: name(w), role: w.source, model: w.model, color: COLOR[w.source] || '#888', avatar: look(w) })));
+    office.current?.setAgents(seats.map((w) => ({ id: w.id, name: name(w), role: w.source, model: w.model, color: COLOR[w.source] || '#888', avatar: look(w) })));
   }, [key, mod]);
+
+  useEffect(() => { office.current?.setSkin(skinValue()); }, [state.settings.skin, state.skins.length]);
 
   useEffect(() => {
     for (const w of list) office.current?.setState(w.id, { state: w.state, text: w.detail, tool: w.tool, tokens: 0, badge: '' });

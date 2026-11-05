@@ -19,6 +19,7 @@ import { listImportable, readTranscript } from './importer.js';
 import { ACP_PRESETS } from './providers/acp.js';
 import { resolveCommand } from './providers/util.js';
 import { initProcTracker, reapLeftovers, otherAppRunning } from './providers/procs.js';
+import { SessionWatch } from './watch.js';
 import { tr, bindLang, serverLang } from './i18n.js';
 import { Scheduler, cleanSchedule } from './scheduler.js';
 
@@ -222,6 +223,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   const orch = new Orchestrator({ store, bus, usage, catalog, dirs, providers });
   orch.recover();
   const scheduler = new Scheduler({ store, orch, bus });
+  const watch = new SessionWatch(bus);
   const token = loadToken(home);
   let actualPort = port;
 
@@ -512,6 +514,8 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   });
   // 자동 이어받기: 쉬는 중인 AI 목록과 수동 해제(요금제를 올렸거나 한도가 풀렸을 때)
   route('GET', '/api/cooldown', () => orch.restingList());
+  // 터미널 세션 구경: 화면이 보고 있다고 알릴 때마다 지금 상태를 준다(파일만 읽는다)
+  route('GET', '/api/watch', async () => { watch.view(); await watch.tick(); return watch.snapshot(); });
   // ACP 표준 에이전트 프리셋(이 PC에 명령이 있는지 함께)
   route('GET', '/api/acp/presets', () => ACP_PRESETS.map((p) => ({ ...p, npx: p.command === 'npx', installed: p.command !== 'npx' && !!resolveCommand(p.command) })));
   route('DELETE', '/api/cooldown/([\\w-]+)', async (req, url, [id]) => {
@@ -780,7 +784,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   }
 
   return {
-    server, store, bus, orch, providers, catalog, usage, token, dirs, scheduler,
+    server, store, bus, orch, providers, catalog, usage, token, dirs, scheduler, watch,
     listen(p = port, host = HOST) {
       return new Promise((resolve, reject) => {
         server.once('error', reject);
@@ -797,6 +801,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     },
     async close() {
       scheduler.stop();
+      watch.stop();
       orch.stopAll();
       providers.stop();
       usage.close();

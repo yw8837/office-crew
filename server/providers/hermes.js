@@ -35,7 +35,7 @@ export function hermesStatus(out = '') {
 export default {
   id: 'hermes', label: 'Hermes', get sub() { return tr('Hermes Agent CLI · Nous Portal/OAuth 로그인'); }, kind: 'cli', color: '#7c3aed',
   efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
-  caps: { images: true, steer: false, resume: false, tools: true, connectors: false, permissions: false },
+  caps: { images: true, steer: false, resume: false, tools: true, connectors: false, permissions: false, quiet: true }, // quiet: 중간 출력 없이 끝날 때 한 번에 준다
   login: { command: 'hermes model', get hint() { return tr('열린 터미널에서 프로바이더를 고르고 로그인(재인증)해줘.'); } },
 
   async detect() {

@@ -17,6 +17,7 @@ process.stdin.on('end', async () => {
     process.exit(1);
   }
   out({ type: 'item.started', item: { id: 'item_1', type: 'command_execution', command: 'ls', aggregated_output: '', status: 'in_progress' } });
+  if (input.includes('HANGNOW')) await new Promise((r) => setTimeout(r, 120000)); // 출력 없이 멈춘 CLI 흉내
   await new Promise((r) => setTimeout(r, input.includes('SLOW') ? 1500 : 30));
   out({ type: 'item.completed', item: { id: 'item_1', type: 'command_execution', command: 'ls', aggregated_output: 'a.txt\n', exit_code: 0, status: 'completed' } });
   out({ type: 'item.completed', item: { id: 'item_2', type: 'agent_message', text: '정리 결과: 파란색' } });

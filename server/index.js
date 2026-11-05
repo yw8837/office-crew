@@ -532,6 +532,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     if ('defaultCwd' in b && b.defaultCwd && unsafeWorkdir(b.defaultCwd, dirs.home)) throw new HttpError(400, UNSAFE_CWD());
     if ('failoverThreshold' in b) b.failoverThreshold = Math.min(100, Math.max(50, Math.round(Number(b.failoverThreshold) || 95)));
     if ('failover' in b) b.failover = b.failover !== false;
+    if ('stallMinutes' in b) b.stallMinutes = Math.min(1440, Math.max(0, Math.round(Number(b.stallMinutes) || 0)));
     if ('dailyBudget' in b) b.dailyBudget = b.dailyBudget === true;
     if ('dailyBudgetPercent' in b) b.dailyBudgetPercent = Math.min(50, Math.max(5, Math.round(Number(b.dailyBudgetPercent) || 13)));
     if ('desktopNotify' in b) b.desktopNotify = b.desktopNotify === true;

@@ -21,6 +21,7 @@ import { resolveCommand } from './providers/util.js';
 import { initProcTracker, reapLeftovers, otherAppRunning } from './providers/procs.js';
 import { SessionWatch } from './watch.js';
 import { Board } from './board.js';
+import { PhoneNotify, checkPhoneUrl } from './notify.js';
 import { tr, bindLang, serverLang } from './i18n.js';
 import { Scheduler, cleanSchedule } from './scheduler.js';
 
@@ -226,12 +227,14 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   const scheduler = new Scheduler({ store, orch, bus });
   const watch = new SessionWatch(bus);
   const board = new Board({ store, orch, bus, appHome: dirs.home });
+  const phone = new PhoneNotify({ store, bus });
   const token = loadToken(home);
   let actualPort = port;
 
   const publicSettings = () => {
     const s = structuredClone(store.settings);
     s.apiKeys = Object.fromEntries(Object.entries(s.apiKeys || {}).map(([k, v]) => [k, mask(v)]));
+    s.phoneUrl = mask(s.phoneUrl); // 주소 자체가 비밀일 수 있다(웹훅 토큰, ntfy 주제)
     s.apiProfiles = (s.apiProfiles || []).map((p) => ({ ...p, apiKey: mask(p.apiKey) }));
     s.acpAgents = (s.acpAgents || []).map((a) => ({ ...a, env: maskSecrets(a.env) }));
     return s;
@@ -361,6 +364,12 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
 
   // 예약 작업
   // 칸반 보드
+  // 휴대폰 알림 시험 보내기(사용자가 눌렀을 때만)
+  route('POST', '/api/phone/test', async () => {
+    if (!store.settings.phoneUrl) throw new HttpError(400, tr('알림 주소를 먼저 넣어줘.'));
+    try { await phone.send({ title: tr('오피스 크루 알림 시험'), message: tr('이 알림이 보이면 연결된 거야.'), status: 'test' }); } catch (e) { throw new HttpError(502, e.message); }
+    return { ok: true };
+  });
   route('GET', '/api/tasks', () => board.list());
   route('POST', '/api/tasks', async (req) => board.save(await readJson(req)));
   route('PUT', '/api/tasks/([\\w-]+)', async (req, url, [id]) => board.save(await readJson(req), id));
@@ -550,6 +559,9 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     if ('dailyBudget' in b) b.dailyBudget = b.dailyBudget === true;
     if ('dailyBudgetPercent' in b) b.dailyBudgetPercent = Math.min(50, Math.max(5, Math.round(Number(b.dailyBudgetPercent) || 13)));
     if ('desktopNotify' in b) b.desktopNotify = b.desktopNotify === true;
+    if ('phoneNotify' in b) b.phoneNotify = b.phoneNotify === true;
+    if ('phoneType' in b) b.phoneType = b.phoneType === 'webhook' ? 'webhook' : 'ntfy';
+    if ('phoneUrl' in b) b.phoneUrl = checkPhoneUrl(keep(b.phoneUrl, cur.phoneUrl || ''));
     // ACP 에이전트: 명령은 셸 없이 실행되지만 형식은 엄격히(이름·명령·인자 문자열만)
     if ('acpAgents' in b) {
       const seen = new Set();
@@ -794,7 +806,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   }
 
   return {
-    server, store, bus, orch, providers, catalog, usage, token, dirs, scheduler, watch, board,
+    server, store, bus, orch, providers, catalog, usage, token, dirs, scheduler, watch, board, phone,
     listen(p = port, host = HOST) {
       return new Promise((resolve, reject) => {
         server.once('error', reject);

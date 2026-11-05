@@ -10,11 +10,12 @@ import { SettingsPage, UsagePage, PolicyNotice } from './views/settings.js';
 import { RoutingPage } from './views/routing.js';
 import { SchedulesPage } from './views/schedules.js';
 import { WatchPage } from './views/watch.js';
+import { BoardPage } from './views/board.js';
 import { ImportModal } from './views/import.js';
 import { t, setLang } from './i18n/index.js';
 
 const NAV = () => [
-  ['agents', 'bot', t('에이전트')], ['routing', 'spark', t('라우팅')], ['teams', 'users', t('팀 배치')], ['schedules', 'clock', t('예약 작업')], ['watch', 'eye', t('세션 구경')], ['connectors', 'plug', t('커넥터')], ['skills', 'file', t('스킬')],
+  ['agents', 'bot', t('에이전트')], ['board', 'board', t('칸반 보드')], ['routing', 'spark', t('라우팅')], ['teams', 'users', t('팀 배치')], ['schedules', 'clock', t('예약 작업')], ['watch', 'eye', t('세션 구경')], ['connectors', 'plug', t('커넥터')], ['skills', 'file', t('스킬')],
   ['plugins', 'puzzle', t('플러그인')], ['usage', 'chart', t('사용량')], ['settings', 'gear', t('설정')],
 ];
 
@@ -155,6 +156,7 @@ function App() {
   else if (v === 'teams') main = html`<${TeamsPage} />`;
   else if (v === 'schedules') main = html`<${SchedulesPage} />`;
   else if (v === 'watch') main = html`<${WatchPage} />`;
+  else if (v === 'board') main = html`<${BoardPage} />`;
   else if (v === 'connectors') main = html`<${ConnectorsPage} />`;
   else if (v === 'skills') main = html`<${SkillsPage} />`;
   else if (v === 'plugins') main = html`<${PluginsPage} />`;

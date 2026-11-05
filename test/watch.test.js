@@ -122,3 +122,67 @@ test('화면이 안 보면 스스로 멈춘다', async () => {
 test('MCP 도구는 끝 이름만 보여 준다', () => {
   assert.equal(claudeEvent(toolUse('mcp__Browser__read_page', {})).detail, 'read_page');
 });
+
+test('환경변수 앞붙임·URL 쿼리·글 속 토큰이 화면으로 안 나간다', () => {
+  assert.equal(claudeEvent(toolUse('Bash', { command: 'GITHUB_TOKEN=ghp_FAKE12345 gh pr list' })).detail, 'Bash · gh');
+  assert.equal(claudeEvent(toolUse('Bash', { command: 'A=1 B=2 sudo env npm test' })).detail, 'Bash · npm');
+  assert.equal(claudeEvent(toolUse('Read', { path: 'https://x.test/a.js?token=SECRET' })).detail, 'Read · a.js');
+  const text = (t) => claudeEvent({ type: 'assistant', message: { content: [{ type: 'text', text: t }] } }).detail;
+  assert.doesNotMatch(text('토큰은 sk-SECRETVALUE123 이야'), /SECRETVALUE/);
+  assert.doesNotMatch(text('주소는 https://x.test/y?token=SECRET&a=1 이야'), /SECRET/);
+  assert.equal(claudeEvent({ type: 'user', isMeta: true, message: { content: 'x' } }), null, '내부 안내 줄');
+});
+
+test('파일 읽기 경계: 처음 읽을 때 잘린 첫 줄을 버리고, 큰 파일도 이어 읽고, 덜 써진 줄은 완성되면 읽고, 줄어들면 처음부터', async () => {
+  const w = new SessionWatch(null);
+  const f = claudeFile('C--work-edge', 'eeeeeeee-0000-4000-8000-000000000005');
+  // 처음 읽는 범위(끝 64KB)의 앞이 잘려도 그 조각을 줄로 읽지 않는다
+  append(f, toolUse('Write', { file_path: 'first.js' }, '/home/me/edge'));
+  fs.appendFileSync(f, `{"type":"assistant","cwd":"X","timestamp":"${iso()}","message":{"content":[{"type":"tool_use","name":"Bash","input":{"note":"${'x'.repeat(70 * 1024)}"}}]}}\n`);
+  await w.tick();
+  const edge = () => w.snapshot().find((x) => x.project === 'edge');
+  assert.ok(edge(), '거대한 줄이 끝에 있어도 머리에서 프로젝트 이름을 읽는다');
+  // 512KB 한 번에 못 읽는 양을 지나 뒤 줄까지 읽는다
+  fs.appendFileSync(f, `${JSON.stringify(toolUse('Read', { file_path: 'pad.js' }, '/home/me/edge'))}\n`.repeat(4000));
+  append(f, toolUse('Grep', { path: 'after-big.js' }, '/home/me/edge'));
+  for (let i = 0; i < 6; i++) { w.ticks = 1; await w.tick(); }
+  assert.equal(edge().detail, 'Grep · after-big.js');
+  // 512KB 보다 긴 한 줄 뒤의 줄도 읽는다(그 자리에 멈추지 않는다)
+  fs.appendFileSync(f, `${'y'.repeat(600 * 1024)}
+`);
+  append(f, toolUse('Grep', { path: 'after-huge.js' }, '/home/me/edge'));
+  for (let i = 0; i < 4; i++) { w.ticks = 1; await w.tick(); }
+  assert.equal(edge().detail, 'Grep · after-huge.js');
+  // 덜 써진 줄은 완성된 뒤 읽는다
+  const line = JSON.stringify(toolUse('Edit', { file_path: 'half.js' }, '/home/me/edge'));
+  fs.appendFileSync(f, line.slice(0, 30));
+  w.ticks = 1; await w.tick();
+  assert.equal(edge().detail, 'Grep · after-big.js');
+  fs.appendFileSync(f, `${line.slice(30)}\n`);
+  w.ticks = 1; await w.tick();
+  assert.equal(edge().detail, 'Edit · half.js');
+  // 파일이 새로 써지면 처음부터
+  fs.writeFileSync(f, `${JSON.stringify(toolUse('Bash', { command: 'npm test' }, '/home/me/edge'))}\n`);
+  w.ticks = 1; await w.tick();
+  assert.equal(edge().detail, 'Bash · npm');
+  fs.rmSync(f);
+  w.stop();
+});
+
+test('상태·일하는 중 여부가 바뀌면 알린다(시간이 지나 쉬는 중으로 바뀔 때도)', async () => {
+  let now = Date.now();
+  const seen = [];
+  const w = new SessionWatch({ emit: (type, d) => seen.push(d) }, { now: () => now });
+  const f = claudeFile('C--work-tell', 'ffffffff-0000-4000-8000-000000000006');
+  append(f, toolUse('Read', { file_path: 'a.js' }, 'C:\\work\\tell'));
+  await w.tick();
+  const n = seen.length;
+  append(f, toolUse('Bash', { command: 'ls' }, 'C:\\work\\tell'));
+  w.ticks = 1; await w.tick();
+  assert.equal(seen.length, n + 1, '상태 변화');
+  now += ACTIVE_MS + 5000;
+  w.ticks = 1; await w.tick();
+  assert.equal(seen.length, n + 2, '쉬는 중으로 바뀜');
+  assert.equal(seen.at(-1).find((x) => x.project === 'tell').state, 'idle');
+  fs.rmSync(f);
+});

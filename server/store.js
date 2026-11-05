@@ -9,7 +9,7 @@ export function newId(prefix = 'id') {
   return `${prefix}-${crypto.randomBytes(6).toString('base64url').replace(/[-_]/g, '').slice(0, 8).toLowerCase()}`;
 }
 
-const COLLECTIONS = ['agents', 'teams', 'connectors', 'skills', 'skins', 'plugins'];
+const COLLECTIONS = ['agents', 'teams', 'connectors', 'skills', 'skins', 'plugins', 'schedules'];
 const MAX_CACHE = Number(process.env.OFFICE_CREW_SESSION_CACHE || 12); // 메모리에 올려둘 세션 본문 수
 
 function writeAtomic(file, text) {

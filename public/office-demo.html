@@ -197,7 +197,7 @@ for (const s of STATES) {
   b.textContent = LABEL[s];
   b.title = s;
   b.onclick = () => {
-    const patch = { state: s, text: $('text').value, tool: $('tool').value, tokens: +$('tokens').value || 0, badge: s === 'running' ? `89% · ${it().compact}4` : '' };
+    const patch = { state: s, text: $('text').value, tool: $('tool').value, tokens: +$('tokens').value || 0, badge: s === 'running' ? `57% · ${it().compact}2` : '' };
     office.setState(selected, patch);
     log(`setState(${selected}, ${s})`);
   };
@@ -257,7 +257,7 @@ $('modal').addEventListener('click', (e) => { if (e.target === $('modal')) close
 // 초기 장면: 상태 몇 개
 office.setState('a1', { state: 'typing', text: it().sum, tokens: 12300 });
 office.setState('a2', { state: 'thinking', tokens: 8200 });
-office.setState('a3', { state: 'tool', tool: 'Read', tokens: 45100, badge: `89% · ${it().compact}4` });
+office.setState('a3', { state: 'tool', tool: 'Read', tokens: 45100, badge: `57% · ${it().compact}2` });
 office.setState('a4', { state: 'idle', tokens: 0 });
 office.setState('a5', { state: 'waiting', text: it().approve, tokens: 3100 });
 office.setState('a6', { state: 'done', tokens: 99000 });

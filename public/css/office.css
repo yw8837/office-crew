@@ -435,3 +435,35 @@
 .oc-editor .oe-mk.spot { background: #f97316; }
 .oc-editor .oe-mk:active { cursor: grabbing; }
 .oc-editor .oe-legend { display: flex; flex-wrap: wrap; gap: 10px; color: var(--e-mute); font-size: 12px; }
+
+/* ── 마을 ─────────────────────────────────────────────────────── */
+/* 집에 들어간 주민: 문 앞에서 작아지며 사라지고, 집 창문에 불이 켜짐 */
+.office-root .oc-char.at-house:not(.pose-walk) .oc-flip { opacity: 0; transform: scale(.35); transform-origin: 0 -20px; transition: opacity .35s ease, transform .35s ease; }
+.office-root .oc-char.at-house:not(.pose-walk) .oc-cshadow,
+.office-root .oc-char.at-house:not(.pose-walk) .oc-ring,
+.office-root .oc-char.at-house:not(.pose-walk) .oc-pulse,
+.office-root .oc-char.at-house:not(.pose-walk) .oc-fx { display: none; }
+.office-root .oc-ov.home .oc-tag { opacity: .82; }
+.office-root .oc-ov.home .oc-chip,
+.office-root .oc-ov.home .oc-tag-l2 { display: none; }
+.office-root .oc-ov.home .oc-bub:not(.k-recv) { display: none; }
+.office-root .oc-house.sel { filter: drop-shadow(0 0 4px var(--oc-sel, #4c8dff)) drop-shadow(0 0 2px #fff); }
+.office-root .oc-house .oc-win { fill: #bfe3fb; stroke: #8aa4b8; stroke-width: .8; }
+.office-root .oc-house.lit .oc-win { fill: #ffd76a; }
+.office-root .oc-house .oc-hz { display: none; }
+.office-root .oc-house.lit .oc-hz { display: inline; }
+.office-root .oc-house.lit .oc-hz path { animation: oc-z 2.6s ease-out infinite; }
+.office-root .oc-house.lit .oc-hz .oc-hz1 { animation-delay: -.87s; }
+.office-root .oc-house.lit .oc-hz .oc-hz2 { animation-delay: -1.73s; }
+.office-root .oc-house .oc-home-img { transition: filter .3s ease; }
+.office-root .oc-house.lit .oc-home-img { filter: drop-shadow(0 0 6px rgba(255, 215, 106, .95)); }
+.office-root .oc-smoke { opacity: .35; }
+.office-root .oc-svg.act-server .oc-smoke { opacity: 1; animation: oc-smoke 1.6s ease-in-out infinite alternate; }
+@keyframes oc-smoke { to { transform: translateY(-6px); } }
+.office-root .oc-svg.act-search .oc-dish { animation: oc-dish 1.4s ease-in-out infinite alternate; transform-box: fill-box; transform-origin: 100% 50%; }
+@keyframes oc-dish { to { transform: rotate(-18deg); } }
+.office-root .oc-spray { animation: oc-spray 1.2s ease-in-out infinite alternate; }
+.office-root .oc-svg.act-meeting .oc-spray { stroke-width: 3; }
+@keyframes oc-spray { to { opacity: .45; } }
+.office-root.oc-q-lite .oc-spray, .office-root.oc-q-static .oc-spray,
+.office-root.oc-q-lite .oc-house.lit .oc-hz path, .office-root.oc-q-static .oc-house.lit .oc-hz path { animation: none; }

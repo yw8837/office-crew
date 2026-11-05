@@ -8,11 +8,12 @@ import { SessionView, RightPanel } from './views/session.js';
 import { AgentsPage, TeamsPage, ConnectorsPage, SkillsPage, PluginsPage } from './views/manage.js';
 import { SettingsPage, UsagePage, PolicyNotice } from './views/settings.js';
 import { RoutingPage } from './views/routing.js';
+import { SchedulesPage } from './views/schedules.js';
 import { ImportModal } from './views/import.js';
 import { t, setLang } from './i18n/index.js';
 
 const NAV = () => [
-  ['agents', 'bot', t('에이전트')], ['routing', 'spark', t('라우팅')], ['teams', 'users', t('팀 배치')], ['connectors', 'plug', t('커넥터')], ['skills', 'file', t('스킬')],
+  ['agents', 'bot', t('에이전트')], ['routing', 'spark', t('라우팅')], ['teams', 'users', t('팀 배치')], ['schedules', 'clock', t('예약 작업')], ['connectors', 'plug', t('커넥터')], ['skills', 'file', t('스킬')],
   ['plugins', 'puzzle', t('플러그인')], ['usage', 'chart', t('사용량')], ['settings', 'gear', t('설정')],
 ];
 
@@ -106,7 +107,7 @@ function Sidebar() {
       ${NAV().map(([v, icon, label]) => html`<button class=${`nav${state.route.view === v ? ' on' : ''}`} onClick=${() => { go(v); if (innerWidth < 860) { state.ui.side = false; changed(); } }}><${Icon} name=${icon} />${label}</button>`)}
     </div>
     <div class="side-foot">
-      ${state.providers.filter((p) => p.kind !== 'mock').map((p) => html`<span class=${`pdot${p.loggedIn ? ' ok' : p.installed ? ' warn' : ''}`} title=${`${p.label}: ${p.checking ? t('확인 중') : p.loggedIn ? t('사용 가능') : p.installed ? t('로그인 필요') : t('미설치')}${p.account ? ` · ${p.account}` : ''}`} onClick=${() => { state.ui.settingsTab = 'accounts'; go('settings'); }}><i></i>${{ claude: 'Claude', codex: 'GPT', gemini: 'Gemini', hermes: 'Hermes', openai: 'API', acp: 'ACP' }[p.id] || p.id}</span>`)}
+      ${state.providers.filter((p) => p.kind !== 'mock').map((p) => html`<span class=${`pdot${p.loggedIn ? ' ok' : p.installed ? ' warn' : ''}`} title=${`${p.label}: ${p.checking ? t('확인 중') : p.loggedIn ? t('사용 가능') : p.installed ? t('로그인 필요') : t('미설치')}${p.account ? ` · ${p.account}` : ''}`} onClick=${() => { state.ui.settingsTab = 'accounts'; go('settings'); }}><i></i>${{ claude: 'Claude', codex: 'GPT', gemini: 'Gemini', hermes: 'Hermes', openai: 'API', acp: 'ACP' }[p.id] || (p.base === 'codex' ? `GPT·${p.accountName}` : p.id)}</span>`)}
       <span class="small" style="width:100%">${t('{n}개 CLI 사용 가능', { n: okCount })}</span>
     </div>
   </aside>`;
@@ -151,6 +152,7 @@ function App() {
   else if (v === 'agents') main = html`<${AgentsPage} />`;
   else if (v === 'routing') main = html`<${RoutingPage} />`;
   else if (v === 'teams') main = html`<${TeamsPage} />`;
+  else if (v === 'schedules') main = html`<${SchedulesPage} />`;
   else if (v === 'connectors') main = html`<${ConnectorsPage} />`;
   else if (v === 'skills') main = html`<${SkillsPage} />`;
   else if (v === 'plugins') main = html`<${PluginsPage} />`;

@@ -23,6 +23,22 @@ export function modelOptions(providerId, { showLegacy = false } = {}) {
   return list.filter((m) => !m.hidden && (showLegacy || !m.legacy));
 }
 
+// 노력 단계 옆 표시: CLI 에서 내가 기본으로 쓰는 값, 모델(또는 Claude Code)이 추천하는 값
+function modelOf(providerId, modelId) { return (state.catalog?.models?.[providerId] || []).find((x) => x.id === modelId); }
+export function effortTag(providerId, modelId, ef) {
+  const m = modelOf(providerId, modelId);
+  if (!m) return '';
+  if (m.defaultEffort === ef && m.mine) return ` (${t('내 기본')})`;
+  if (m.recommendedEffort === ef) return ` (${providerId === 'claude' ? t('추천') : t('기본')})`;
+  return '';
+}
+export function effortNote(providerId, modelId, ef) {
+  const m = modelOf(providerId, modelId);
+  if (m?.defaultEffort === ef && m.mine) return t('CLI 설정에서 쓰는 노력 단계야.');
+  if (m?.recommendedEffort === ef) return providerId === 'claude' ? t('Claude Code가 추천하는 단계야.') : t('이 모델의 기본 단계야.');
+  return '';
+}
+
 export function effortOptions(providerId, modelId) {
   const m = (state.catalog?.models?.[providerId] || []).find((x) => x.id === modelId);
   const p = state.providers.find((x) => x.id === providerId);
@@ -102,6 +118,7 @@ export function RoutingPage() {
     </div>
 
     <${FailoverCard} />
+    <${BudgetCard} />
 
     <div class="list rtable">
       <div class="rrow rhead"><span>${t('에이전트')}</span><span>${t('방식')}</span><span>AI</span><span>${t('모델')}</span><span>${t('노력')}</span><span>${t('권한')}</span></div>
@@ -140,7 +157,7 @@ function RoutingRow({ a, legacy, preview }) {
         ${ready.map((p) => html`<option value=${p.id}>${p.label}</option>`)}</select></span>
       <span><select class="select sm" value=${a.model} onChange=${(e) => setModel(e.target.value)}>
         ${!known && html`<option value=${a.model}>${a.model || t('(CLI 기본)')}</option>`}
-        ${models.map((m) => html`<option value=${m.id} title=${m.description || ''}>${m.label}${m.tier ? ` · ${TIER_LABEL[m.tier] || ''}` : ''}</option>`)}</select></span>
+        ${models.map((m) => html`<option value=${m.id} title=${[m.description, m.tier && TIER_LABEL[m.tier]].filter(Boolean).join(' · ')}>${m.label}${m.older ? ` (${t('이전 세대')})` : ''}</option>`)}</select></span>
       <span>${efforts.length ? html`<select class="select sm" value=${a.effort} onChange=${(e) => saveAgent(a, { effort: e.target.value })}>
         ${!efforts.includes(a.effort) && html`<option value=${a.effort}>${a.effort ? (EFFORT_LABEL[a.effort] || a.effort) : '-'}</option>`}
         ${efforts.map((ef) => html`<option value=${ef}>${EFFORT_LABEL[ef] || ef}</option>`)}</select>` : html`<span class="small muted">${t('없음')}</span>`}</span>`}
@@ -187,8 +204,9 @@ export function RoutingFields({ a, set, setMany }) {
         <div class="field"><label>${t('모델')}</label>
           ${custom ? html`<input class="input mono" value=${a.model} onInput=${(e) => set('model', e.target.value)} placeholder=${t('모델 이름(고급)')} />`
             : html`<select class="select" value=${a.model} onChange=${(e) => { const ef = effortOptions(a.provider, e.target.value); setMany({ model: e.target.value, effort: ef.includes(a.effort) ? a.effort : (ef.includes('medium') ? 'medium' : ef[0] || '') }); }}>
-                ${!models.some((m) => m.id === a.model) && html`<option value=${a.model}>${a.model || t('(CLI 기본 모델)')}</option>`}
-                ${models.map((m) => html`<option value=${m.id} title=${m.description || ''}>${m.label}${m.tier ? ` · ${TIER_LABEL[m.tier] || ''}` : ''}</option>`)}
+                ${state.providers.find((p) => p.id === a.provider)?.kind === 'cli' && html`<option value="">${t('기본 (CLI 설정을 따름)')}</option>`}
+                ${a.model && !models.some((m) => m.id === a.model) && html`<option value=${a.model}>${a.model}</option>`}
+                ${models.map((m) => html`<option value=${m.id} title=${[m.description, m.tier && TIER_LABEL[m.tier]].filter(Boolean).join(' · ')}>${m.label}${m.older ? ` (${t('이전 세대')})` : ''}</option>`)}
               </select>`}
           <div class="row small" style="gap:10px;margin-top:4px">
             <label class="row" style="gap:4px"><input type="checkbox" checked=${legacy} onChange=${(e) => setLegacy(e.target.checked)} /> ${t('구형·고정 모델')}</label>
@@ -196,7 +214,8 @@ export function RoutingFields({ a, set, setMany }) {
           </div>
         </div>
         <div class="field"><label>${t('노력(effort)')}</label>
-          ${efforts.length ? html`<div class="seg" style="flex-wrap:wrap">${efforts.map((ef) => html`<button class=${a.effort === ef ? 'on' : ''} onClick=${() => set('effort', ef)}>${EFFORT_LABEL[ef] || ef}</button>`)}</div>`
+          ${efforts.length ? html`<div class="seg" style="flex-wrap:wrap" role="group" aria-label=${t('노력(effort)')}>${efforts.map((ef) => html`<button class=${a.effort === ef ? 'on' : ''} aria-pressed=${a.effort === ef} title=${effortNote(a.provider, a.model, ef)} onClick=${() => set('effort', ef)}>${EFFORT_LABEL[ef] || ef}${effortTag(a.provider, a.model, ef)}</button>`)}</div>
+              ${a.provider === 'claude' && a.effort === 'max' && html`<div class="hint" style="color:var(--warn)">⚠ ${t('최대는 사용량을 크게 써(Claude Code 기준 3.5배 이상). 정말 어려운 일에만 써.')}</div>`}`
             : html`<div class="hint">${t('이 모델은 노력 단계를 따로 고르지 않아.')}</div>`}
         </div>
       </div>`}`;
@@ -206,8 +225,30 @@ export function RoutingFields({ a, set, setMany }) {
 const resting = () => Object.fromEntries(Object.entries(state.cooldown || {}).filter(([, c]) => c.until > Date.now()));
 const restLabel = (c) => {
   const time = new Date(c.until).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' });
+  if (c.budget) return t('오늘 예산을 다 써서 {time}까지 피하는 중', { time });
   return c.near ? t('사용률이 기준을 넘어 {time}까지 피하는 중', { time }) : t('{time}까지 쉬는 중', { time });
 };
+
+// 하루 예산: 주간 한도를 하루 이틀에 다 쓰지 않게 하루 몫을 정한다(기본은 꺼짐)
+function BudgetCard() {
+  const st = state.settings;
+  const on = st.dailyBudget === true;
+  const pct = Number(st.dailyBudgetPercent) || 13;
+  const save = (b) => put('/api/settings', b).catch((e) => toast(e.message, 'error'));
+  // 자정이 지나 새 사용량이 아직 안 왔으면 어제 숫자를 오늘로 보여주지 않는다
+  const spent = state.usage?.spentDay === new Date().toLocaleDateString('sv-SE') ? Object.entries(state.usage?.daySpent || {}) : [];
+  return html`<div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+    <${Toggle} checked=${on} onChange=${(v) => save({ dailyBudget: v })} title=${t('하루 예산')} />
+    <div style="flex:1;min-width:240px"><b>💰 ${t('하루 예산')}</b>
+      <div class="hint">${t('주간 한도를 하루 이틀에 다 쓰지 않게 해. 오늘 쓰는 속도가 빠르면 노력을 낮추고, 하루 몫을 다 쓴 AI는 자정까지 다른 AI에게 맡겨. 맡을 AI가 없으면 낮은 노력으로 계속해. 주간 사용률을 아는 AI에만 적용돼.')}</div></div>
+    <label class="row small" style="gap:6px">${t('하루 몫')}
+      <select class="select sm" value=${String(pct)} disabled=${!on} onChange=${(e) => save({ dailyBudgetPercent: Number(e.target.value) })}>
+        ${[...new Set([10, 13, 15, 20, 25, pct])].sort((a, b) => a - b).map((n) => html`<option value=${String(n)}>${t('주간의 {n}%', { n })}</option>`)}</select></label>
+    ${on && spent.length > 0 && html`<div class="row wrap" style="gap:6px;width:100%">
+      ${spent.map(([id, n]) => html`<span class=${`chip${n >= pct ? ' warn' : ''}`}>${PROVIDER_SHORT[id] || id} · ${t('오늘 {n}% / {pct}%', { n, pct })}</span>`)}
+    </div>`}
+  </div>`;
+}
 
 // 자동 이어받기: 한도에 걸리면 같은 역할의 다른 AI가 지금까지 쓴 내용을 이어받는다
 function FailoverCard() {

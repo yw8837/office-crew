@@ -5,7 +5,7 @@ import { tr } from './i18n.js';
 export function defaultSettings() {
   return {
     theme: 'system',            // system | light | dark
-    skin: 'modern',             // 오피스 스킨 id
+    skin: 'village',            // 오피스 스킨 id(기본: 크루 마을)
     reducedMotion: false,
     viewMode: 'split',          // chat | office | split
     defaultTeamId: 'team-demo',
@@ -21,6 +21,9 @@ export function defaultSettings() {
     acpAgents: [],              // ACP 표준 에이전트 [{id, name, command, args[], env{}}] (설정에서 프리셋 추가)
     failover: true,             // 사용량 한도에 걸리면 여유 있는 다른 AI가 이어받기
     failoverThreshold: 95,      // 한도 사용률이 이 % 이상이면 실행 전에 미리 피함
+    dailyBudget: false,         // 하루 예산: 켜면 주간 한도의 일정 몫만 하루에 쓰게 조절
+    dailyBudgetPercent: 13,     // 하루 몫(주간 사용률 %포인트, 1/7 ≈ 14)
+    desktopNotify: false,       // 창이 뒤에 있을 때 승인 대기·작업 끝을 데스크톱 알림으로
     apiProfiles: [
       { id: 'openai', name: 'OpenAI API', baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-5.1' },
       { id: 'openrouter', name: tr('OpenRouter (Hermes·Grok·DeepSeek 등)'), baseUrl: 'https://openrouter.ai/api/v1', apiKey: '', model: 'nousresearch/hermes-4-405b' },

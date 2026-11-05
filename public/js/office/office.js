@@ -2,6 +2,7 @@
 import { el, NS } from './iso.js';
 import { resolveSkin } from './skins.js';
 import { buildVectorScene, MAX_DESKS } from './scene.js';
+import { buildVillageScene } from './village.js';
 import { buildRig } from './character.js';
 import { renderScreen, SCREEN_OF } from './screens.js';
 import { tr, normLang } from './i18n.js';
@@ -190,7 +191,7 @@ export function createOffice(container, opts = {}) {
       dest: null, targetKey: null, spot: null, walking: null, dist: 0,
       busy: false, queue: Promise.resolve(), carry: null, flash: null, visitors: 0,
       timers: {}, longThink: false, relax: false, leaving: false, gone: false,
-      scale: extra.helper ? 0.7 : 1, home: null, screenKey: null,
+      scale: extra.helper ? 0.7 : 1, home: null, house: null, screenKey: null,
       ov: makeOverlay(agent.id),
     };
     newRig(ch);
@@ -308,12 +309,23 @@ export function createOffice(container, opts = {}) {
     d.chairNear.style.display = front ? 'none' : '';
     d.chairFar.style.display = front ? '' : 'none';
   }
+  // 마을: 집 안에 있으면 캐릭터는 숨기고 집 창문에 불을 켬
+  function updateHouse(ch) {
+    const inside = ch.at === 'house' && !ch.walking;
+    if (ch.ov.root.classList.contains('home') !== inside) {
+      ch.ov.root.classList.toggle('home', inside); // 집 안: 이름표를 이름만 남게 줄임 → 크기 다시 재기
+      ch.ov.dirty = true;
+      scheduleLayout();
+    }
+    if (ch.house) ch.house.setHome(inside);
+  }
   function apply(ch) {
     applyClass(ch);
     updateBubble(ch);
     updateTag(ch);
     updateScreen(ch);
     updateChair(ch);
+    updateHouse(ch);
   }
   function place(ch) {
     const [sx, sy] = scene.toScreen(ch.pos, ch.lift);
@@ -337,6 +349,8 @@ export function createOffice(container, opts = {}) {
   function desired(ch) {
     const s = ch.st.state, t = ch.st.tool;
     if (ch.leaving) return 'door';
+    // 마을: 쉬거나 퇴근(완료 후)이면 자기 집으로
+    if (ch.house && (s === 'idle' || s === 'offline' || (s === 'done' && ch.relax))) return 'house';
     let spot = null;
     if (s === 'searching' || (s === 'tool' && isMcp(t))) spot = 'search';
     else if (s === 'reading') spot = 'shelf';
@@ -376,6 +390,7 @@ export function createOffice(container, opts = {}) {
     releaseSpot(ch);
     const dest = want === 'home' ? homeDef(ch) : want === 'door'
       ? { pos: scene.doorPos.slice(), pose: 'stand', face: 'back', flip: -1, at: 'door' }
+      : want === 'house' ? { pos: ch.house.door.slice(), pose: 'stand', face: 'back', flip: 1, at: 'house' }
       : claimSpot(ch, want);
     ch.targetKey = want;
     ch.dest = dest;
@@ -635,7 +650,9 @@ export function createOffice(container, opts = {}) {
           from.targetKey = 'visit';
           const k = to.visitors++;
           const atDesk = to.at === 'desk' && to.desk && !to.walking;
-          const vpos = atDesk ? scene.visitor(to.desk, k) : scene.beside(to.pos, k);
+          // 마을: 받는 사람이 집에 있으면(곧 출근할 다음 단계) 빈 집 대신 그 사람 회사 책상으로 가져다 둠
+          const atHome = to.house && to.desk && (to.at === 'house' || to.dest?.at === 'house' || to.dest?.at === 'desk');
+          const vpos = atDesk || atHome ? scene.visitor(to.desk, k) : scene.beside(to.pos, k);
           dest = { pos: vpos, pose: 'stand', face: 'front', flip: 1, at: 'visit' };
           from.dest = dest;
           apply(from);
@@ -728,7 +745,7 @@ export function createOffice(container, opts = {}) {
 
   // ── 씬 구성 ──
   function applySkinVars() {
-    root.className = root.className.replace(/\boc-skin-\S+/g, '').trim() + ` oc-skin-${skin.type === 'image' ? 'custom' : skin.id}`;
+    root.className = root.className.replace(/\boc-skin-\S+/g, '').trim() + ` oc-skin-${skin.type === 'image' ? 'custom' : skin.type === 'village' ? 'village' : skin.id}`;
     const p = skin.palette;
     root.style.setProperty('--oc-bg1', p ? p.bg : '#20242c');
     root.style.setProperty('--oc-bg2', p ? p.bg2 : '#14171d');
@@ -744,7 +761,9 @@ export function createOffice(container, opts = {}) {
     for (const ch of chars.values()) stopWalk(ch, false);
     spotOcc.clear();
     clearTimeout(doorTimer);
-    scene = skin.type === 'image' ? buildImageScene(skin, list.length) : buildVectorScene(skin, list.length, { lite: quality !== 'full' });
+    scene = skin.type === 'image' ? buildImageScene(skin, list.length)
+      : skin.type === 'village' ? buildVillageScene(skin, list.length, { lite: quality !== 'full' })
+        : buildVectorScene(skin, list.length, { lite: quality !== 'full' });
     applySkinVars();
     svg.setAttribute('viewBox', `0 0 ${scene.width} ${scene.height}`);
     svg.setAttribute('width', scene.width);
@@ -781,6 +800,8 @@ export function createOffice(container, opts = {}) {
         ch.desk.setPlate(colorOf(a));
         ch.desk.group && ch.desk.group.setAttribute('data-agent-desk', a.id);
       }
+      ch.house = (scene.houses && scene.houses[i]) || null;
+      if (ch.house) ch.house.setPlate(colorOf(a));
     });
     for (const ch of [...chars.values()]) {
       if (ch.helper && !chars.has(ch.parentId)) { chars.delete(ch.id); continue; }
@@ -825,6 +846,7 @@ export function createOffice(container, opts = {}) {
         newRig(ch);
         insertItem(ch.item);
         if (ch.desk) ch.desk.setPlate(colorOf(ch.agent));
+        if (ch.house) ch.house.setPlate(colorOf(ch.agent));
         ch.screenKey = null;
         place(ch);
       }
@@ -847,6 +869,7 @@ export function createOffice(container, opts = {}) {
       ch.ov.root.style.zIndex = String(Math.round(ch.item.depth * 20) + (on ? 100000 : 0));
       scheduleLayout();
       if (ch.desk && ch.desk.group) ch.desk.group.classList.toggle('sel', on);
+      if (ch.house) ch.house.group.classList.toggle('sel', on);
     }
   }
 
@@ -931,8 +954,8 @@ export function createOffice(container, opts = {}) {
     const a = target.closest('[data-agent]');
     if (a) id = a.getAttribute('data-agent');
     if (!id) {
-      const dk = target.closest('[data-desk]');
-      if (dk) { const i = +dk.getAttribute('data-desk'); id = list[i] ? list[i].id : null; }
+      const dk = target.closest('[data-desk]') || target.closest('[data-house]');
+      if (dk) { const i = +(dk.getAttribute('data-desk') ?? dk.getAttribute('data-house')); id = list[i] ? list[i].id : null; }
     }
     const ch = id && chars.get(id);
     if (!ch) return;

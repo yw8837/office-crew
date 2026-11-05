@@ -242,12 +242,125 @@ function face(h, skin, withVariants = true) {
   );
 }
 
+// ── 크리처·이미지 주민 ─────────────────────────────────────────────
+export const AVATAR_KINDS = ['person', 'creature', 'image'];
+export const CREATURE_SPECIES = ['puff', 'ears', 'horn'];
+const IMG_RE = /^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/;
+
+/** 아바타 종류: 사람(기본) | 크리처 | 이미지(사용자가 올린 래스터 그림만, SVG 는 받지 않음) */
+export function avatarKind(avatar) {
+  const a = avatar || {};
+  if (a.kind === 'image' && typeof a.image === 'string' && IMG_RE.test(a.image)) return 'image';
+  if (a.kind === 'creature') return 'creature';
+  return 'person';
+}
+
+function creatureLook(agent) {
+  const a = (agent && agent.avatar) || {};
+  const r = rng(hash(String(agent.id || agent.name || 'x')));
+  const color = isColor(a.outfit) ? a.outfit : OUTFIT_LIST[Math.floor(r() * OUTFIT_LIST.length)];
+  const species = CREATURE_SPECIES.includes(a.species) ? a.species : CREATURE_SPECIES[Math.floor(r() * CREATURE_SPECIES.length)];
+  return { color, species };
+}
+
+/** 크리처 몸통(원점 = 발밑, 키 약 64px). 눈·입은 사람 리그와 같은 클래스라 상태별 표정 CSS 를 그대로 받는다 */
+function creatureBody(h, look, withVariants = true) {
+  const c = look.color, dk = shade(c, -0.28), lt = shade(c, 0.35);
+  const ears = {
+    puff: [h('path', { d: 'M-4 -60 C-6 -70 2 -74 4 -66 C8 -72 12 -66 6 -60 Z', fill: c, stroke: dk, 'stroke-width': 1.2 })],
+    ears: [
+      h('path', { d: 'M-16 -48 C-24 -66 -20 -80 -12 -78 C-8 -70 -8 -58 -8 -52 Z', fill: c, stroke: dk, 'stroke-width': 1.2 }),
+      h('path', { d: 'M-15 -54 C-19 -64 -17 -73 -13 -72 C-11 -66 -11 -60 -11 -56 Z', fill: lt }),
+      h('path', { d: 'M16 -48 C24 -66 20 -80 12 -78 C8 -70 8 -58 8 -52 Z', fill: c, stroke: dk, 'stroke-width': 1.2 }),
+      h('path', { d: 'M15 -54 C19 -64 17 -73 13 -72 C11 -66 11 -60 11 -56 Z', fill: lt }),
+    ],
+    horn: [
+      h('path', { d: 'M-12 -54 L-16 -68 L-6 -58 Z', fill: '#fff4d6', stroke: '#c9a46a', 'stroke-width': 1 }),
+      h('path', { d: 'M12 -54 L16 -68 L6 -58 Z', fill: '#fff4d6', stroke: '#c9a46a', 'stroke-width': 1 }),
+    ],
+  }[look.species];
+  const base = [
+    h('ellipse', { cx: -13, cy: -30, rx: 4, ry: 2.4, fill: '#ff9aa8', 'fill-opacity': 0.55 }),
+    h('ellipse', { cx: 13, cy: -30, rx: 4, ry: 2.4, fill: '#ff9aa8', 'fill-opacity': 0.55 }),
+    h('g', { class: 'oc-ex ex-open' }, h('circle', { cx: -8, cy: -37, r: 3.2, fill: '#2b2420' }), h('circle', { cx: 8, cy: -37, r: 3.2, fill: '#2b2420' }),
+      h('circle', { cx: -7, cy: -38.2, r: 1.1, fill: '#fff' }), h('circle', { cx: 9, cy: -38.2, r: 1.1, fill: '#fff' })),
+    h('path', { class: 'oc-mo mo-smile', d: 'M-3.5 -29 Q0 -26 3.5 -29', fill: 'none', stroke: '#2b2420', 'stroke-width': 1.4, 'stroke-linecap': 'round' }),
+  ];
+  const face = !withVariants ? h('g', null, ...base) : h('g', { class: 'oc-headf' }, ...base,
+    h('g', { class: 'oc-ex ex-wide' }, h('circle', { cx: -8, cy: -37, r: 4.4, fill: '#fff', stroke: '#2b2420', 'stroke-width': 1.2 }), h('circle', { cx: 8, cy: -37, r: 4.4, fill: '#fff', stroke: '#2b2420', 'stroke-width': 1.2 }),
+      h('circle', { cx: -8, cy: -37, r: 1.8, fill: '#2b2420' }), h('circle', { cx: 8, cy: -37, r: 1.8, fill: '#2b2420' })),
+    h('path', { class: 'oc-ex ex-closed', d: 'M-11 -37 L-5 -37 M5 -37 L11 -37', stroke: '#2b2420', 'stroke-width': 1.8, 'stroke-linecap': 'round' }),
+    h('path', { class: 'oc-ex ex-happy', d: 'M-11 -36 Q-8 -40 -5 -36 M5 -36 Q8 -40 11 -36', fill: 'none', stroke: '#2b2420', 'stroke-width': 1.8, 'stroke-linecap': 'round' }),
+    h('path', { class: 'oc-mo mo-flat', d: 'M-3 -28 L3 -28', stroke: '#2b2420', 'stroke-width': 1.4, 'stroke-linecap': 'round' }),
+    h('ellipse', { class: 'oc-mo mo-o', cx: 0, cy: -28, rx: 2.2, ry: 2.8, fill: '#7a2e2e' }),
+    h('path', { class: 'oc-mo mo-grin', d: 'M-5 -30 Q0 -23 5 -30 Z', fill: '#7a2e2e', stroke: '#2b2420', 'stroke-width': 1 }),
+    h('path', { class: 'oc-mo mo-wavy', d: 'M-5 -28 q1.7 -2 3.3 0 q1.7 2 3.4 0 q1.6 -2 3.3 0', fill: 'none', stroke: '#2b2420', 'stroke-width': 1.3 }),
+    h('path', { class: 'oc-brow', d: 'M-12 -44 L-5 -42 M12 -44 L5 -42', stroke: '#2b2420', 'stroke-width': 1.5, 'stroke-linecap': 'round' }),
+  );
+  return [
+    h('path', { d: 'M18 -14 C30 -14 32 -28 26 -34', fill: 'none', stroke: dk, 'stroke-width': 5, 'stroke-linecap': 'round' }),
+    ...ears,
+    h('path', { d: 'M-22 -24 C-24 -46 -14 -58 0 -58 C14 -58 24 -46 22 -24 C21 -8 12 -3 0 -3 C-12 -3 -21 -8 -22 -24 Z', fill: c, stroke: dk, 'stroke-width': 1.4 }),
+    h('ellipse', { cx: 0, cy: -16, rx: 12, ry: 9, fill: lt, 'fill-opacity': 0.75 }),
+    h('ellipse', { cx: -8, cy: -48, rx: 6, ry: 3, fill: '#fff', 'fill-opacity': 0.3 }),
+    face,
+  ];
+}
+
+function statusFx() {
+  return el('g', { class: 'oc-fx' },
+    el('path', { class: 'oc-sweat', d: 'M22 -66 C25.5 -60.5 25.5 -57 22 -56.5 C18.5 -57 18.5 -60.5 22 -66 Z', fill: '#8fd3ff', stroke: '#4aa3e0', 'stroke-width': 0.8 }),
+    zzz('oc-z oc-z1', 19, -76, 7),
+    zzz('oc-z oc-z2', 27, -88, 9),
+    zzz('oc-z oc-z3', 36, -102, 11),
+  );
+}
+
+/** 크리처·이미지 리그(사람 리그와 같은 인터페이스). 걸을 땐 통통 뛰고, 뒷모습이면 얼굴만 숨김 */
+function simpleRig(agent, kind) {
+  const root = el('g', { class: 'oc-char st-idle face-front pose-stand', 'data-agent': agent.id });
+  const pos = el('g', { class: 'oc-pos' });
+  const flip = el('g', { class: 'oc-flip' });
+  const bodyW = el('g', { class: 'oc-bodyw' });
+  let look = null;
+  if (kind === 'image') {
+    bodyW.append(el('g', { class: 'oc-body' },
+      el('image', { href: agent.avatar.image, x: -34, y: -70, width: 68, height: 68, preserveAspectRatio: 'xMidYMax meet', style: agent.avatar.pixel ? 'image-rendering:pixelated' : null })));
+  } else {
+    look = creatureLook(agent);
+    bodyW.append(el('g', { class: 'oc-body' }, ...creatureBody(el, look)));
+  }
+  flip.append(el('g', { class: 'oc-sel' }, bodyW));
+  pos.append(
+    el('ellipse', { class: 'oc-ring', cx: 0, cy: 0, rx: 27, ry: 12.5 }),
+    el('ellipse', { class: 'oc-pulse', cx: 0, cy: 0, rx: 25, ry: 11.5 }),
+    el('ellipse', { class: 'oc-cshadow', cx: 0, cy: 0, rx: 16, ry: 6, fill: '#000', 'fill-opacity': 0.18 }),
+    flip, statusFx(),
+  );
+  root.append(pos);
+  root.style.setProperty('--oc-d', `-${(hash(String(agent.id)) % 4000) / 1000}s`);
+  return {
+    root, pos, flip, avatar: look || { kind },
+    setFace() { /* 뒷모습 처리는 CSS(face-back .oc-headf) */ },
+    setWalk(ph) {
+      if (ph == null) { bodyW.removeAttribute('transform'); return; }
+      bodyW.setAttribute('transform', `translate(0 ${(-Math.abs(Math.sin(ph)) * 4.5).toFixed(2)})`);
+    },
+  };
+}
+
 /**
  * 상반신 정면 아바타 SVG 문자열(채팅·사이드바·편집기 미리보기용). DOM 불필요.
  * @param {{skin,hair,hairStyle,outfit,accessory}} avatar
  * @param {{size?:number,color?:string,id?:string}} opts
  */
 export function renderAvatarSVG(avatar, { size = 40, color, id } = {}) {
+  const kind = avatarKind(avatar);
+  if (kind !== 'person') {
+    const box = { xmlns: 'http://www.w3.org/2000/svg', viewBox: '-40 -78 80 80', width: size, height: size, 'aria-hidden': 'true', focusable: 'false', style: 'background:transparent;overflow:hidden' };
+    if (kind === 'image') return svgStr('svg', box, svgStr('image', { href: avatar.image, x: -38, y: -76, width: 76, height: 76, preserveAspectRatio: 'xMidYMid meet', style: avatar.pixel ? 'image-rendering:pixelated' : null }));
+    return svgStr('svg', box, creatureBody(svgStr, creatureLook({ id: id || JSON.stringify(avatar || {}), avatar }), false).join(''));
+  }
   const av = normalizeAvatar({ id: id || JSON.stringify(avatar || {}), avatar: avatar || {} });
   const accent = isColor(color) ? color : '#6b7cff';
   const h = svgStr;
@@ -288,6 +401,8 @@ function zzz(cls, x, y, s) {
  * @returns {{root, pos, flip, setFace(face), setWalk(phase|null), avatar}}
  */
 export function buildRig(agent) {
+  const kind = avatarKind(agent.avatar);
+  if (kind !== 'person') return simpleRig(agent, kind);
   const h = el;
   const av = normalizeAvatar(agent);
   const accent = isColor(agent.color) ? agent.color : '#6b7cff';

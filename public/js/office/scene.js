@@ -56,7 +56,7 @@ function leaf(cx, cy, len, w, ang, fill, rib) {
   );
 }
 
-function plant(P, x, y, kind, pal, size = 1, seed = 1) {
+export function plant(P, x, y, kind, pal, size = 1, seed = 1) {
   const r = rng(seed * 977 + 13);
   const g = el('g', { class: 'oc-plant' });
   const potR = 0.2 * size, potH = 17 * size;
@@ -141,7 +141,7 @@ function officeChair(P, x, y, pal, axis = 'x') {
 }
 
 // 구역 표지판은 HTML 오버레이로 그림(SVG text 는 확대/축소 뒤 크롬에서 글자 크기가 어긋나는 문제가 있어 쓰지 않음)
-function zoneLabel(P, x, y, z, key) {
+export function zoneLabel(P, x, y, z, key) {
   const [sx, sy] = P(x, y, z);
   return { x: sx, y: sy, key }; // 글자는 언어 사전(zone.<key>)에서
 }
@@ -395,8 +395,8 @@ function globe(P, x, y, pal, defs, items) {
 }
 
 // ── 책상 유닛 ───────────────────────────────────────────────────────
-function deskUnit(P, i, n, pal, props, defs) {
-  const { dx, dy } = deskSlot(i, n);
+export function deskUnit(P, i, n, pal, props, defs, slot) {
+  const { dx, dy } = slot || deskSlot(i, n);
   const r = rng(i * 131 + 7);
   const g = el('g', { class: 'oc-desk', 'data-desk': i });
   g.append(floorShadow(P, dx, dy, 1.0, 2.0, 0.12));

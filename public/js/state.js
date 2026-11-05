@@ -2,11 +2,12 @@
 import { useEffect, useReducer } from 'preact/hooks';
 import { get, connectEvents } from './api.js';
 import { t, setLang, getLang } from './i18n/index.js';
+import { setAccountNames } from './ui.js';
 
 export const state = {
   ready: false, error: null, connected: false,
   version: '', home: '',
-  agents: [], teams: [], sessions: [], settings: {}, providers: [], usage: {}, skills: [], connectors: [], plugins: [], skins: [],
+  agents: [], teams: [], sessions: [], settings: {}, providers: [], usage: {}, skills: [], connectors: [], plugins: [], skins: [], schedules: [],
   active: new Set(),
   sessionData: {}, // id → 전체 세션
   live: {}, // sessionId → agentId → 상태
@@ -107,8 +108,9 @@ async function resync() {
     const b = await get('/api/bootstrap');
     Object.assign(state, {
       agents: b.agents, teams: b.teams, sessions: b.sessions, settings: b.settings, providers: b.providers,
-      usage: b.usage, skills: b.skills, connectors: b.connectors, plugins: b.plugins, skins: b.skins, active: new Set(b.active || []), cooldown: b.cooldown || {},
+      usage: b.usage, skills: b.skills, connectors: b.connectors, plugins: b.plugins, skins: b.skins, schedules: b.schedules || [], active: new Set(b.active || []), cooldown: b.cooldown || {},
     });
+    setAccountNames(state.providers);
     applyLang();
     const keep = state.route.id;
     for (const k of Object.keys(state.sessionData)) if (k !== keep) delete state.sessionData[k];
@@ -187,20 +189,47 @@ function handle(type, d) {
       if (['running', 'paused', 'waiting'].includes(d.run.status) && !d.run.endedAt) state.active.add(d.sessionId);
       else state.active.delete(d.sessionId);
       if (d.run.status === 'waiting' && d.sessionId !== state.route.id) toast(d.run.hold?.reason === 'approve' ? t('다른 세션에서 승인이 필요해') : t('다른 세션에서 결정이 필요해'), 'warn');
+      notifyRun(d.sessionId, d.run);
       break;
     }
     case 'usage': state.usage = d; break;
-    case 'providers': state.providers = d; break;
+    case 'providers': state.providers = d; setAccountNames(d); break;
     case 'agents': state.agents = d; break;
     case 'teams': state.teams = d; break;
     case 'skills': state.skills = d; break;
     case 'connectors': state.connectors = d; break;
     case 'plugins': state.plugins = d; break;
     case 'skins': state.skins = d; break;
+    case 'schedules': state.schedules = d; break;
+    case 'skillKo': toast(d.saved ? t('스킬 설명 {n}개를 한글로 저장했어. 남은 것 {left}개.', { n: d.saved, left: d.missing }) : d.failed ? t('스킬 설명 번역이 끝나지 못했어. 세션을 확인해줘.') : t('번역 결과를 읽지 못했어. 세션의 답을 확인해줘.'), d.saved ? 'ok' : 'error'); break;
     case 'settings': state.settings = d; applyTheme(); applyLang(); break;
     case 'sessionsReset': resync(); break;
     default: break;
   }
+}
+
+// 데스크톱 알림: 창이 뒤에 있을 때만, 같은 실행의 같은 상태는 한 번만 띄운다
+export async function askNotifyPermission() {
+  if (typeof Notification === 'undefined') return false;
+  if (Notification.permission === 'granted') return true;
+  if (Notification.permission === 'denied') return false;
+  return (await Notification.requestPermission()) === 'granted';
+}
+
+const notified = new Set();
+function notifyRun(sessionId, run) {
+  const title = {
+    waiting: run.hold?.reason === 'approve' ? t('승인이 필요해') : t('결정이 필요해'),
+    done: t('작업이 끝났어'),
+    error: t('작업이 실패했어'),
+  }[run.status];
+  if (!title || !state.settings.desktopNotify || document.hasFocus()) return;
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  const key = `${run.id}:${run.status}:${run.hold?.at ?? ''}`; // 같은 단계를 고친 뒤 다시 기다릴 때도 새로 알린다
+  if (notified.has(key)) return;
+  notified.add(key);
+  const n = new Notification(title, { body: state.sessions.find((s) => s.id === sessionId)?.title || t('오피스 크루'), tag: `crew-${sessionId}` });
+  n.onclick = () => { window.focus(); go('session', sessionId); n.close(); };
 }
 
 // 화면 언어 적용: 설정값(비면 브라우저 언어). 바뀌면 모델 목록(서버가 라벨을 번역)도 다시 받는다
@@ -226,9 +255,10 @@ export async function boot() {
     const b = await get('/api/bootstrap');
     Object.assign(state, {
       version: b.version, home: b.home, agents: b.agents, teams: b.teams, sessions: b.sessions, settings: b.settings,
-      providers: b.providers, usage: b.usage, skills: b.skills, connectors: b.connectors, plugins: b.plugins, skins: b.skins,
+      providers: b.providers, usage: b.usage, skills: b.skills, connectors: b.connectors, plugins: b.plugins, skins: b.skins, schedules: b.schedules || [],
       active: new Set(b.active || []), cooldown: b.cooldown || {},
     });
+    setAccountNames(state.providers);
     applyTheme();
     applyLang();
     connectEvents((type, d) => {

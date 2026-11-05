@@ -55,6 +55,7 @@ const P = {
   pin: 'M12 17v5M9 3h6l-1 7 4 3H6l4-3z',
   eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
   menu: 'M4 6h16M4 12h16M4 18h16',
+  clock: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 7v5l3 2',
 };
 
 export function Icon({ name, size }) {
@@ -77,11 +78,32 @@ export function Modal({ title, onClose, children, foot, size = '' }) {
 }
 
 export function Toggle({ checked, onChange, title }) {
-  return html`<label class="switch" title=${title}><input type="checkbox" checked=${!!checked} onChange=${(e) => onChange(e.target.checked)} /><span></span></label>`;
+  return html`<label class="switch" title=${title}><input type="checkbox" aria-label=${title} checked=${!!checked} onChange=${(e) => onChange(e.target.checked)} /><span></span></label>`;
+}
+
+// 그림 아바타는 data URL 을 한 번만 blob URL 로 바꿔 둔다 → 메시지마다 큰 문자열을 다시 만들거나 DOM 에 복사하지 않음
+const blobUrls = new Map();
+function imageUrl(dataUrl) {
+  let u = blobUrls.get(dataUrl);
+  if (u) return u;
+  try {
+    const [head, b64] = dataUrl.split(',');
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    u = URL.createObjectURL(new Blob([bytes], { type: head.slice(5, head.indexOf(';')) }));
+  } catch { u = dataUrl; }
+  if (blobUrls.size > 64) { for (const [k, v] of blobUrls) { if (v.startsWith('blob:')) URL.revokeObjectURL(v); blobUrls.delete(k); break; } }
+  blobUrls.set(dataUrl, u);
+  return u;
 }
 
 export function Avatar({ agent, size = 34 }) {
   const fn = officeMod.m?.renderAvatarSVG;
+  if (agent && officeMod.m?.avatarKind?.(agent.avatar) === 'image') {
+    const px = agent.avatar.pixel ? ';image-rendering:pixelated' : '';
+    return html`<div class="avatar" style=${`width:${size}px;height:${size}px`}><img src=${imageUrl(agent.avatar.image)} alt="" style=${`width:100%;height:100%;object-fit:contain${px}`} /></div>`;
+  }
   if (agent && fn) {
     let svg = '';
     try { svg = fn(agent.avatar || {}, { size, color: providerColor(agent.provider), id: agent.id }); } catch { svg = ''; }
@@ -91,8 +113,15 @@ export function Avatar({ agent, size = 34 }) {
 }
 
 export const PROVIDER_COLORS = { claude: '#d97757', codex: '#10a37f', gemini: '#8e75ff', hermes: '#7c3aed', openai: '#0ea5e9', local: '#65a30d', acp: '#14b8a6', mock: '#64748b' };
-export const providerColor = (id) => PROVIDER_COLORS[id] || '#888';
-export const PROVIDER_SHORT = tmap(() => ({ claude: 'Claude', codex: 'GPT·Codex', gemini: 'Gemini', hermes: 'Hermes', openai: 'API', local: t('로컬'), acp: 'ACP', mock: t('데모') }));
+// Codex 추가 계정(codex-xxxx)은 기본 Codex 색·이름 + 계정 이름
+const ACCOUNT_NAMES = {};
+export function setAccountNames(providers = []) {
+  for (const k of Object.keys(ACCOUNT_NAMES)) delete ACCOUNT_NAMES[k];
+  for (const p of providers) if (p.base && p.base !== p.id && p.accountName) ACCOUNT_NAMES[p.id] = p.accountName;
+}
+export const providerColor = (id = '') => PROVIDER_COLORS[id] || PROVIDER_COLORS[String(id).replace(/^codex-[a-z0-9]+$/, 'codex')] || '#888';
+export const PROVIDER_SHORT = tmap(() => ({ claude: 'Claude', codex: 'GPT·Codex', gemini: 'Gemini', hermes: 'Hermes', openai: 'API', local: t('로컬'), acp: 'ACP', mock: t('데모'),
+  ...Object.fromEntries(Object.entries(ACCOUNT_NAMES).map(([id, name]) => [id, `GPT·${name}`])) }));
 
 export function ProviderChip({ id }) {
   return html`<span class="chip" style=${`background:${providerColor(id)}1f;color:${providerColor(id)}`}><span class="pdot-inline" style=${`background:${providerColor(id)}`}></span>${PROVIDER_SHORT[id] || id}</span>`;
@@ -109,7 +138,7 @@ export const PERM_LABEL = tmap(() => ({
   auto: [t('자동 판단'), t('CLI가 알아서 허용 여부 판단')],
   full: [t('전부 허용 ⚠'), t('모든 명령·편집 무승인 실행 (신뢰하는 작업만)')],
 }));
-export const EFFORT_LABEL = tmap(() => ({ none: t('없음'), minimal: t('미니멀'), low: t('로우'), medium: t('미디엄'), high: t('하이'), xhigh: t('X하이'), max: t('맥스'), ultra: t('울트라') }));
+export const EFFORT_LABEL = tmap(() => ({ none: t('없음'), minimal: t('최소'), low: t('낮음'), medium: t('중간'), high: t('높음'), xhigh: t('엑스트라'), max: t('최대'), ultra: t('울트라') }));
 
 export function fmtTok(n = 0) {
   if (!n) return '0';
@@ -154,3 +183,32 @@ export function agentModelText(a, s = null) {
 export const usageTotal = (u = {}) => (u.input || 0) + (u.output || 0) + (u.cacheRead || 0) + (u.cacheWrite || 0);
 
 export function confirmBox(text) { return window.confirm(text); }
+
+/**
+ * 사용자가 고른 그림 파일 → 작은 PNG data URL(긴 변 max px). 투명 배경 유지.
+ * 긴 변이 128px 이하면 도트 그림으로 보고 pixel=true(화면에서 흐리지 않게 확대)
+ */
+export async function imageFileToDataURL(file, max = 256) {
+  if (!file || !/^image\/(png|jpeg|webp|gif)$/.test(file.type)) throw new Error(t('PNG·JPG·WEBP·GIF 그림만 올릴 수 있어.'));
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = () => rej(new Error(t('그림을 읽지 못했어.')));
+      i.src = url;
+    });
+    const w = img.naturalWidth, hgt = img.naturalHeight;
+    if (!w || !hgt) throw new Error(t('그림을 읽지 못했어.'));
+    const k = Math.min(1, max / Math.max(w, hgt));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(w * k));
+    c.height = Math.max(1, Math.round(hgt * k));
+    const g = c.getContext('2d');
+    g.imageSmoothingEnabled = k < 1;
+    g.drawImage(img, 0, 0, c.width, c.height);
+    return { image: c.toDataURL('image/png'), pixel: Math.max(w, hgt) <= 128 };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}

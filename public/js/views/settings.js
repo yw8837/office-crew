@@ -1,8 +1,8 @@
 // 설정(AI 계정 로그인·API 키·화면/사무실 스킨·기본값) + 사용량 화면
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { html, Icon, Modal, Toggle, ProviderChip, providerColor, fmtTok, fmtCost, usageTotal, officeMod, EFFORT_LABEL } from '../ui.js';
-import { state, changed, toast, applyTheme, applyLang, agentById } from '../state.js';
-import { get, post, put, del } from '../api.js';
+import { html, Icon, Modal, Toggle, ProviderChip, providerColor, fmtTok, fmtCost, usageTotal, officeMod, EFFORT_LABEL, imageFileToDataURL } from '../ui.js';
+import { state, changed, toast, applyTheme, applyLang, agentById, askNotifyPermission } from '../state.js';
+import { get, post, put, patch, del } from '../api.js';
 import { PageHead } from './manage.js';
 import { Limits } from './session.js';
 import { t, LANGS, getLang } from '../i18n/index.js';
@@ -36,6 +36,23 @@ function Accounts() {
     setBusy((b) => ({ ...b, [id]: false }));
   };
   const refreshAll = async () => { setBusy({ all: true }); try { state.providers = await get('/api/providers?refresh=1'); changed(); } catch (e) { toast(e.message, 'error'); } setBusy({}); };
+  const addAccount = async () => {
+    const name = prompt(t('추가할 ChatGPT 계정 이름(예: 회사 계정)'), t('계정 {n}', { n: (state.settings.codexAccounts || []).length + 2 }));
+    if (name === null) return;
+    try {
+      const r = await post('/api/accounts/codex', { name });
+      toast(t("'{name}' 계정을 만들었어. 그 줄의 로그인을 눌러 다른 ChatGPT 계정으로 로그인해.", { name: r.name }), 'ok', 7000);
+    } catch (e) { toast(e.message, 'error'); }
+  };
+  const renameAccount = async (p) => {
+    const name = prompt(t('계정 이름'), p.accountName);
+    if (!name) return;
+    try { await patch(`/api/accounts/codex/${p.id.slice(6)}`, { name }); } catch (e) { toast(e.message, 'error'); }
+  };
+  const removeAccount = async (p) => {
+    if (!confirm(t("'{name}' 계정을 목록에서 뺄까? 이 계정을 쓰던 에이전트는 다른 AI로 바꿔야 해. 로그인 정보 폴더는 지우지 않아.", { name: p.accountName }))) return;
+    try { await del(`/api/accounts/codex/${p.id.slice(6)}`); } catch (e) { toast(e.message, 'error'); }
+  };
   const login = async (p) => {
     try {
       const r = await post(`/api/providers/${p.id}/login`);
@@ -47,7 +64,7 @@ function Accounts() {
     <div class="row" style="margin-bottom:10px"><span class="grow" style="flex:1"></span><button class="btn" disabled=${busy.all} onClick=${refreshAll}><${Icon} name="refresh" /> ${t('전부 다시 확인')}</button></div>
     <div class="list">
       ${state.providers.map((p) => html`<div class="li-row pcard">
-        <div class="plogo" style=${`background:${providerColor(p.id)}`}>${p.label.slice(0, 1)}</div>
+        <div class="plogo" style=${`background:${providerColor(p.id)}`}>${p.base === 'codex' && p.id !== 'codex' ? '+' : p.label.slice(0, 1)}</div>
         <div style="min-width:0">
           <div class="t">${p.label} ${p.version ? html`<span class="chip mono">${p.version}</span>` : ''}
             ${p.checking ? html`<span class="chip">${t('확인 중…')}</span>` : !p.installed ? html`<span class="chip err">${t('미설치')}</span>` : p.loggedIn ? html`<span class="chip ok">${t('사용 가능')}</span>` : html`<span class="chip warn">${t('로그인 필요')}</span>`}</div>
@@ -55,10 +72,14 @@ function Accounts() {
           ${p.account && html`<div class="d">👤 ${p.account}</div>`}
           ${p.note && html`<div class="d" style="color:var(--warn)">${p.note}</div>`}
           ${AUTH_PROVIDERS.includes(p.id) && html`<${AuthMode} p=${p} />`}
+          ${p.id === 'codex' && html`<div class="d">${t('ChatGPT 계정이 여러 개면 "계정 추가"로 붙여. 한 계정이 한도에 걸리면 자동 이어받기가 다음 계정으로 넘겨.')}</div>`}
           <div class="d">${t('노력 단계: {list}', { list: (p.efforts || []).map((e) => EFFORT_LABEL[e] || e).join(' · ') || t('없음') })} · ${p.caps?.steer ? t('작업 중 지시 추가 ✓') : t('지시는 턴 끝나고 반영')} · ${p.caps?.images ? t('이미지 ✓') : t('이미지는 파일 경로로')}</div>
         </div>
         <div class="row">
           ${p.login && html`<button class="btn sm" onClick=${() => login(p)}><${Icon} name="login" /> ${t('로그인')}</button>`}
+          ${p.id === 'codex' && html`<button class="btn sm" onClick=${addAccount}><${Icon} name="plus" /> ${t('계정 추가')}</button>`}
+          ${p.base === 'codex' && p.id !== 'codex' && html`<button class="btn sm ghost" title=${t('이름 바꾸기')} aria-label=${t('이름 바꾸기')} onClick=${() => renameAccount(p)}><${Icon} name="edit" /></button>
+            <button class="btn sm ghost" title=${t('계정 빼기')} aria-label=${t('계정 빼기')} onClick=${() => removeAccount(p)}><${Icon} name="trash" /></button>`}
           ${p.id === 'openai' || p.id === 'gemini' ? html`<button class="btn sm" onClick=${() => { state.ui.settingsTab = 'keys'; changed(); }}>${t('API 키')}</button>` : ''}
           <button class="btn sm ghost" disabled=${busy[p.id]} onClick=${() => refresh(p.id)}>${busy[p.id] ? html`<span class="spin"></span>` : t('다시 확인')}</button>
         </div>
@@ -171,17 +192,62 @@ function Look() {
     <div class="card"><h4>${t('사무실 스킨')}</h4>
       <div class="cards" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr))">
         ${skins.map((k) => html`<div class="gcard" style=${s.skin === k.id ? 'border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)' : ''} onClick=${() => saveSettings({ skin: k.id })}>
-          <div class="nm">${k.custom ? '🖼 ' : ''}${!k.custom && officeMod.m?.skinName ? officeMod.m.skinName(k, getLang()) : k.name}</div>
-          ${k.custom && k.image ? html`<img src=${k.image} style="width:100%;height:90px;object-fit:cover;border-radius:8px" alt="" />` : html`<div style=${`height:90px;border-radius:8px;background:${previewBg(k)}`}></div>`}
+          <div class="nm">${k.custom ? (k.type === 'village' ? '🏡 ' : '🖼 ') : ''}${!k.custom && officeMod.m?.skinName ? officeMod.m.skinName(k, getLang()) : k.name}</div>
+          ${k.custom && (k.image || k.homeImage) ? html`<div style=${`height:90px;border-radius:8px;background:${previewBg(k)};display:grid;place-items:center`}><img src=${k.image || k.homeImage} style=${`max-width:100%;height:${k.image ? '90px;width:100%;object-fit:cover;border-radius:8px' : '70px'};${k.homePixel ? 'image-rendering:pixelated' : ''}`} alt="" /></div>` : html`<div style=${`height:90px;border-radius:8px;background:${previewBg(k)}`}></div>`}
           ${k.custom && html`<div class="row"><button class="btn sm" onClick=${(e) => { e.stopPropagation(); setEditor(k); }}>${t('편집')}</button><button class="btn sm danger" onClick=${async (e) => { e.stopPropagation(); if (confirm(t('이 스킨을 삭제할까?'))) { await del(`/api/skins/${k.id}`).catch((er) => toast(er.message, 'error')); } }}>${t('삭제')}</button></div>`}
         </div>`)}
+        <div class="gcard add" onClick=${() => setEditor({ id: '', name: t('내 마을'), type: 'village' })}><${Icon} name="plus" size=${22} />${t('마을 꾸미기 (집 그림 바꾸기)')}</div>
         <div class="gcard add" onClick=${() => setEditor({ id: '', name: t('내 사무실'), type: 'image', desks: [], spots: {} })}><${Icon} name="image" size=${22} />${t('이미지로 스킨 만들기')}</div>
       </div>
-      <div class="hint" style="margin-top:8px">${t('내 사무실 그림(예: AI로 만든 아이소메트릭 사무실)을 올리고 책상 위치를 찍으면 캐릭터가 그 위에서 일해.')}</div>
+      <div class="hint" style="margin-top:8px">${t('크루 마을: 쉬는 에이전트는 자기 집에 들어가 있고, 일을 시작하면 회사로 출근해. 집 그림을 내 그림으로 바꿀 수 있어.')}</div>
+      <div class="hint">${t('내 사무실 그림(예: AI로 만든 아이소메트릭 사무실)을 올리고 책상 위치를 찍으면 캐릭터가 그 위에서 일해.')}</div>
     </div>
-    ${editor && html`<${SkinEditorModal} skin=${editor} onClose=${() => setEditor(null)} />`}`;
+    ${editor && (editor.type === 'village'
+      ? html`<${VillageSkinModal} skin=${editor} onClose=${() => setEditor(null)} />`
+      : html`<${SkinEditorModal} skin=${editor} onClose=${() => setEditor(null)} />`)}`;
+}
+
+function VillageSkinModal({ skin, onClose }) {
+  const [v, setV] = useState(() => ({ name: skin.name || t('내 마을'), homeImage: skin.homeImage || '', homePixel: !!skin.homePixel }));
+  const pick = async (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    try {
+      const { image, pixel } = await imageFileToDataURL(f, 256);
+      setV((x) => ({ ...x, homeImage: image, homePixel: pixel }));
+    } catch (er) { toast(er.message, 'error'); }
+  };
+  const save = async () => {
+    try {
+      const saved = await post('/api/skins', { id: skin.id || undefined, name: v.name.trim() || t('내 마을'), type: 'village', base: 'village', homeImage: v.homeImage || null, homePixel: v.homePixel });
+      await saveSettings({ skin: saved.id });
+      toast(t('스킨을 저장하고 적용했어'), 'ok');
+      onClose();
+    } catch (er) { toast(er.message, 'error'); }
+  };
+  return html`<${Modal} title=${t('마을 꾸미기')} onClose=${onClose} foot=${html`
+    <span class="grow" style="flex:1"></span>
+    <button class="btn" onClick=${onClose}>${t('취소')}</button>
+    <button class="btn primary" onClick=${save}>${t('저장')}</button>`}>
+    <div class="field"><label>${t('이름')}</label><input class="input" value=${v.name} onInput=${(e) => setV((x) => ({ ...x, name: e.target.value }))} /></div>
+    <div class="field"><label>${t('집 그림')}</label>
+      <div class="row" style="gap:10px;align-items:center">
+        <div style="width:96px;height:96px;border-radius:12px;background:var(--panel-2);display:grid;place-items:center;overflow:hidden">
+          ${v.homeImage ? html`<img src=${v.homeImage} style=${`max-width:88px;max-height:88px;${v.homePixel ? 'image-rendering:pixelated' : ''}`} alt="" />` : html`<span style="font-size:40px">🏠</span>`}
+        </div>
+        <div class="row" style="flex-wrap:wrap;gap:6px">
+          <label class="btn sm"><${Icon} name="image" /> ${v.homeImage ? t('다른 그림') : t('그림 올리기')}<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" onChange=${pick} /></label>
+          ${v.homeImage && html`<button class="btn sm" onClick=${() => setV((x) => ({ ...x, homeImage: '', homePixel: false }))}>${t('기본 집으로')}</button>`}
+        </div>
+      </div>
+      <div class="hint">${t('쉬는 에이전트가 들어가 있는 집이야. 투명 배경 PNG를 추천해(예: 캡슐·둥지·텐트). 그림은 이 PC에만 저장돼.')}</div>
+    </div>
+    <div class="hint">${t('에이전트 모습은 에이전트 편집에서 사람·크리처·내 그림 중에 골라.')}</div>
+  </${Modal}>`;
 }
 function previewBg(k) {
+  if (k.type === 'village') return 'linear-gradient(160deg, #e8f4ec 0 30%, #9fd47f 30% 100%)';
   const p = k.palette || {};
   return `linear-gradient(135deg, ${p.wallL || p.wall || '#eee'} 0 45%, ${p.floor || p.floorA || '#d9b38c'} 45% 100%)`;
 }
@@ -236,6 +302,13 @@ function Storage() {
       <div class="seg">${Q.map(([k, l]) => html`<button class=${(s.officeQuality || 'full') === k ? 'on' : ''} onClick=${() => saveSettings({ officeQuality: k })}>${l}</button>`)}</div>
       <div class="hint">${t('가볍게: 반복 애니메이션을 끄고 걷기만 유지 · 정지 화면: 애니메이션 0(말풍선·이름표만 갱신). 저사양 PC·노트북 배터리 절약에 좋아.')}</div>
       <div class="row" style="margin-top:10px"><${Toggle} checked=${s.reducedMotion} onChange=${(v) => saveSettings({ reducedMotion: v })} /><span>${t('화면 전환 애니메이션 줄이기(멀미 방지)')}</span></div>
+    </div>
+    <div class="card"><h4>${t('데스크톱 알림')}</h4>
+      <div class="row"><${Toggle} checked=${s.desktopNotify === true} onChange=${async (v) => {
+        if (v && !(await askNotifyPermission())) { toast(t('알림이 막혀 있어. 브라우저 사이트 설정에서 알림을 허용해줘.'), 'warn'); return; }
+        saveSettings({ desktopNotify: v });
+      }} /><span>${t('창이 뒤에 있을 때 승인 대기·작업 끝을 알려줘')}</span></div>
+      ${s.desktopNotify === true && (typeof Notification === 'undefined' || Notification.permission !== 'granted') && html`<div class="hint">${t('이 브라우저에는 알림 권한이 없어. 껐다 켜서 허용해줘.')}</div>`}
     </div>
     <div class="card"><h4>${t('저장공간')} <button class="btn sm ghost" title=${t('다시 계산')} onClick=${load}><${Icon} name="refresh" /></button></h4>
       ${!r ? html`<div class="muted">${t('계산 중…')}</div>` : html`
@@ -294,7 +367,18 @@ export function PolicyNotice({ onOk }) {
 }
 
 function About() {
-  return html`<${PolicyNotice} /><div class="card">
+  const quit = async () => {
+    if (!confirm(t('오피스 크루를 끌까? 진행 중인 작업과 예약 작업도 멈춰. 다시 쓰려면 바로가기로 켜.'))) return;
+    try {
+      const r = await post('/api/quit');
+      if (r.ok) toast(t('오피스 크루를 껐어. 이 창은 닫아도 돼.'), 'ok', 10000);
+      else toast(t('이 방식으로 켠 서버는 여기서 끌 수 없어. 켠 터미널에서 Ctrl+C로 꺼줘.'), 'error', 8000);
+    } catch (e) { toast(e.message, 'error'); }
+  };
+  return html`<${PolicyNotice} /><div class="card row wrap" style="gap:10px;align-items:center;margin-bottom:12px">
+    <span style="flex:1;min-width:220px"><b>⏻ ${t('오피스 크루 끄기')}</b><div class="hint">${t('창 없이 켰다면 여기서 꺼. 앱 창만 닫으면 서버는 계속 켜져 있어서 예약 작업이 돌아.')}</div></span>
+    <button class="btn danger sm" onClick=${quit}>${t('끄기')}</button>
+  </div><div class="card">
     <h4>🏢 ${t('오피스 크루')} ${state.version}</h4>
     <p class="small">${t('여러 AI CLI(Claude Code·Codex·Gemini CLI·Hermes)와 OpenAI 호환 API를 한 화면에서 팀으로 묶어 쓰는 로컬 앱이야. 서버는 이 PC(127.0.0.1)에서만 열리고, 런타임 의존성이 없어 가벼워.')}</p>
     <ul class="small">

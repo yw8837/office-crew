@@ -11,6 +11,9 @@ if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, `${JSON.string
 const sysFile = val('--append-system-prompt-file');
 if (process.env.FAKE_LOG && sysFile) fs.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ cli: 'claude', system: fs.readFileSync(sysFile, 'utf8') })}\n`);
 
+const settingsFile = val('--settings');
+if (process.env.FAKE_LOG && settingsFile) fs.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ cli: 'claude', settings: JSON.parse(fs.readFileSync(settingsFile, 'utf8')) })}\n`);
+
 // stdin 을 읽기 전에 바로 죽는 CLI 흉내(서버가 EPIPE 로 죽지 않는지 확인용)
 if (process.env.FAKE_EXIT_NOW === '1') process.exit(3);
 const resume = val('--resume');
@@ -43,7 +46,11 @@ async function pump() {
     out({ type: 'stream_event', event: { type: 'message_start' } });
   }
   // EMPTYANSWER: 도구만 쓰고 글 없이 끝남(실측#1 흉내). 재요청을 받으면 그때 답한다
-  const chunks = text.includes('도구를 더 쓰지 말고') ? ['조사 결과 ', '정리했어'] : text.includes('EMPTYANSWER') ? [] : ['안녕', '하세요 ', `turn${turn}`];
+  // 스킬 설명 한글화 요청([{"i":0,"d":...}] 목록)이면 ```json 블록으로 번역을 돌려준다
+  const koReq = text.match(/\[\{"i":0,"d":[\s\S]*\}\]/);
+  const koItems = koReq ? (() => { try { return JSON.parse(koReq[0]); } catch { return null; } })() : null;
+  const chunks = koItems ? ['```json\n', JSON.stringify(Object.fromEntries(koItems.map((x) => [String(x.i), `가짜 한글 설명 ${x.i}`]))), '\n```']
+    : text.includes('도구를 더 쓰지 말고') ? ['조사 결과 ', '정리했어'] : text.includes('EMPTYANSWER') ? [] : ['안녕', '하세요 ', `turn${turn}`];
   for (const ch of chunks) {
     out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: ch } } });
     await sleep(20);

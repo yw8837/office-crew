@@ -6,4 +6,4 @@ export { createOffice, toolIcon } from './office.js';
 export { SKINS, resolveSkin, skinName } from './skins.js';
 export { LANGS, normLang } from './i18n.js';
 export { createSkinEditor } from './editor.js';
-export { renderAvatarSVG, HAIR_STYLES, ACCESSORIES, OUTFITS } from './character.js';
+export { renderAvatarSVG, avatarKind, HAIR_STYLES, ACCESSORIES, OUTFITS } from './character.js';

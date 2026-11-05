@@ -47,7 +47,7 @@ export const uploadUrl = (id) => `/api/uploads/${id}?token=${encodeURIComponent(
 export function connectEvents(onEvent, onStatus) {
   let es = null, retry = 0, closed = false;
   const types = ['hello', 'session', 'sessionDeleted', 'message', 'delta', 'block', 'messageDone', 'messageUsage', 'messageMeta',
-    'agentState', 'run', 'handoff', 'usage', 'providers', 'agents', 'teams', 'skills', 'connectors', 'plugins', 'skins', 'settings', 'sessionsReset', 'cooldown'];
+    'agentState', 'run', 'handoff', 'usage', 'providers', 'agents', 'teams', 'skills', 'connectors', 'plugins', 'skins', 'schedules', 'skillKo', 'settings', 'sessionsReset', 'cooldown'];
   const open = () => {
     es = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
     es.onopen = () => { retry = 0; onStatus(true); };

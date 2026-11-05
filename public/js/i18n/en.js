@@ -1041,4 +1041,5 @@ export default {
   "{n}분 동안 아무 출력이 없어서 멈춘 걸로 보고 껐어. 다시 시도하거나 건너뛰어줘.": "There was no output for {n} min, so it was treated as stalled and stopped. Retry or skip it.",
   "멈춘 실행으로 볼 시간(분)": "Treat a run as stalled after (minutes)",
   "출력이 이만큼 없으면 CLI를 끄고 오류로 돌려. 도구가 도는 중엔 4배까지 기다려. 0이면 끄기.": "With no output for this long, the CLI is stopped and the run goes to the error step. It waits up to four times as long while a tool is running. 0 turns this off.",
+  "예약 실행이 멈춰서 끝냈어. 다음 회차는 정상으로 돌아.": "The scheduled run stalled, so it was ended. The next run goes as usual.",
 };

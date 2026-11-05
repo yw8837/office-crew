@@ -11,6 +11,9 @@ if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, `${JSON.string
 const sysFile = val('--append-system-prompt-file');
 if (process.env.FAKE_LOG && sysFile) fs.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ cli: 'claude', system: fs.readFileSync(sysFile, 'utf8') })}\n`);
 
+const settingsFile = val('--settings');
+if (process.env.FAKE_LOG && settingsFile) fs.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ cli: 'claude', settings: JSON.parse(fs.readFileSync(settingsFile, 'utf8')) })}\n`);
+
 // stdin 을 읽기 전에 바로 죽는 CLI 흉내(서버가 EPIPE 로 죽지 않는지 확인용)
 if (process.env.FAKE_EXIT_NOW === '1') process.exit(3);
 const resume = val('--resume');

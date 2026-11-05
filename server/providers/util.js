@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { tr } from '../i18n.js';
+import { trackChild } from './procs.js';
 
 const isWin = process.platform === 'win32';
 const cache = new Map();
@@ -98,6 +99,7 @@ export function spawnCli(name, args, { cwd, env, unset = [], stdin = 'pipe' } = 
   // 따옴표 안에서도 해석되는 " 와 %(환경변수 펼침)가 든 경로는 거부한다
   if (r.shell && /["%]/.test(r.file)) throw new Error(tr('셸 실행에 안전하지 않은 인자: {arg}', { arg: r.file.slice(0, 40) }));
   const child = spawn(r.shell ? `"${r.file}"` : r.file, r.shell ? finalArgs.map(safeShellArg) : finalArgs, opts);
+  trackChild(child, name);
   child.stdout.setEncoding('utf8');
   child.stderr.setEncoding('utf8');
   // CLI 가 먼저 끝난 뒤 stdin 에 쓰면 EPIPE/EOF 오류가 난다 → 처리 안 하면 서버 전체가 죽음

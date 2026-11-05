@@ -54,6 +54,19 @@ function permArgs(p) {
   }
 }
 
+// 절대 경로 → Claude Code 권한 규칙의 절대 경로 표기(//c/Users/…)
+const ruleRoot = (p) => `//${path.resolve(p).replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, d) => d.toLowerCase()).replace(/^\/+/, '')}`;
+
+// 에이전트가 로그인 파일과 앱 비밀(API 키가 든 설정·접속 토큰)을 읽지 못하게 한다(이 실행에만 더하는 설정, 기존 설정은 그대로).
+// Read 계열 도구만 막는다. 명령 실행까지 허락한 에이전트의 셸은 막지 못한다
+function crewSettings(appHome) {
+  const app = ruleRoot(appHome);
+  const paths = ['//**/.credentials.json', '//**/.codex/auth.json', '//**/.hermes/auth.json', '//**/.gemini/oauth_creds.json', '//**/.gemini/google_accounts.json',
+    `${app}/settings.json`, `${app}/.token`,`${app}/accounts/*/auth.json`];
+  if (process.env.CODEX_HOME) paths.push(`${ruleRoot(process.env.CODEX_HOME)}/auth.json`);
+  return JSON.stringify({ permissions: { deny: paths.map((p) => `Read(${p})`) } });
+}
+
 function resultText(content) {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) return content.map((c) => (c.type === 'text' ? c.text : `[${c.type}]`)).join('\n');
@@ -118,6 +131,12 @@ export default {
     if (agent.model) args.push('--model', agent.model);
     if (agent.effort) args.push('--effort', agent.effort);
     args.push(...permArgs(agent.permission));
+    // 읽기 전용 에이전트는 작업 폴더의 설정을 읽지 않는다. claude -p 는 폴더 신뢰를 묻지 않아서,
+    // 받아 온 저장소를 읽기만 시켜도 그 저장소 설정의 훅이 돌 수 있다
+    if (agent.permission === 'plan') args.push('--setting-sources', 'user');
+    const settingsFile = path.join(tmpDir, `settings-${crypto.randomUUID()}.json`);
+    fs.writeFileSync(settingsFile, crewSettings(path.dirname(tmpDir)));
+    args.push('--settings', settingsFile); // JSON 을 명령줄에 직접 넣지 않으려고 파일로 넘긴다
     let sysFile = null;
     if (system) {
       sysFile = path.join(tmpDir, `sys-${crypto.randomUUID()}.md`);
@@ -208,6 +227,7 @@ export default {
     child.on('close', (code) => {
       feeder.close();
       if (sysFile) fs.rmSync(sysFile, { force: true });
+      fs.rmSync(settingsFile, { force: true });
       const err = stopped ? null : (errorMsg || (code !== 0 ? (stderr.trim().split('\n').slice(-3).join(' ') || tr('종료 코드 {code}', { code })) : null));
       h.resolve({ text, providerSessionId: sessionId, error: err, stopped });
     });

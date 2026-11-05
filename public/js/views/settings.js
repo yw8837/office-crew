@@ -1,7 +1,7 @@
 // 설정(AI 계정 로그인·API 키·화면/사무실 스킨·기본값) + 사용량 화면
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { html, Icon, Modal, Toggle, ProviderChip, providerColor, fmtTok, fmtCost, usageTotal, officeMod, EFFORT_LABEL, imageFileToDataURL } from '../ui.js';
-import { state, changed, toast, applyTheme, applyLang, agentById } from '../state.js';
+import { state, changed, toast, applyTheme, applyLang, agentById, askNotifyPermission } from '../state.js';
 import { get, post, put, patch, del } from '../api.js';
 import { PageHead } from './manage.js';
 import { Limits } from './session.js';
@@ -302,6 +302,13 @@ function Storage() {
       <div class="seg">${Q.map(([k, l]) => html`<button class=${(s.officeQuality || 'full') === k ? 'on' : ''} onClick=${() => saveSettings({ officeQuality: k })}>${l}</button>`)}</div>
       <div class="hint">${t('가볍게: 반복 애니메이션을 끄고 걷기만 유지 · 정지 화면: 애니메이션 0(말풍선·이름표만 갱신). 저사양 PC·노트북 배터리 절약에 좋아.')}</div>
       <div class="row" style="margin-top:10px"><${Toggle} checked=${s.reducedMotion} onChange=${(v) => saveSettings({ reducedMotion: v })} /><span>${t('화면 전환 애니메이션 줄이기(멀미 방지)')}</span></div>
+    </div>
+    <div class="card"><h4>${t('데스크톱 알림')}</h4>
+      <div class="row"><${Toggle} checked=${s.desktopNotify === true} onChange=${async (v) => {
+        if (v && !(await askNotifyPermission())) { toast(t('알림이 막혀 있어. 브라우저 사이트 설정에서 알림을 허용해줘.'), 'warn'); return; }
+        saveSettings({ desktopNotify: v });
+      }} /><span>${t('창이 뒤에 있을 때 승인 대기·작업 끝을 알려줘')}</span></div>
+      ${s.desktopNotify === true && (typeof Notification === 'undefined' || Notification.permission !== 'granted') && html`<div class="hint">${t('이 브라우저에는 알림 권한이 없어. 껐다 켜서 허용해줘.')}</div>`}
     </div>
     <div class="card"><h4>${t('저장공간')} <button class="btn sm ghost" title=${t('다시 계산')} onClick=${load}><${Icon} name="refresh" /></button></h4>
       ${!r ? html`<div class="muted">${t('계산 중…')}</div>` : html`

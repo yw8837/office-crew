@@ -118,6 +118,7 @@ export function RoutingPage() {
     </div>
 
     <${FailoverCard} />
+    <${BudgetCard} />
 
     <div class="list rtable">
       <div class="rrow rhead"><span>${t('에이전트')}</span><span>${t('방식')}</span><span>AI</span><span>${t('모델')}</span><span>${t('노력')}</span><span>${t('권한')}</span></div>
@@ -224,8 +225,30 @@ export function RoutingFields({ a, set, setMany }) {
 const resting = () => Object.fromEntries(Object.entries(state.cooldown || {}).filter(([, c]) => c.until > Date.now()));
 const restLabel = (c) => {
   const time = new Date(c.until).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' });
+  if (c.budget) return t('오늘 예산을 다 써서 {time}까지 피하는 중', { time });
   return c.near ? t('사용률이 기준을 넘어 {time}까지 피하는 중', { time }) : t('{time}까지 쉬는 중', { time });
 };
+
+// 하루 예산: 주간 한도를 하루 이틀에 다 쓰지 않게 하루 몫을 정한다(기본은 꺼짐)
+function BudgetCard() {
+  const st = state.settings;
+  const on = st.dailyBudget === true;
+  const pct = Number(st.dailyBudgetPercent) || 13;
+  const save = (b) => put('/api/settings', b).catch((e) => toast(e.message, 'error'));
+  // 자정이 지나 새 사용량이 아직 안 왔으면 어제 숫자를 오늘로 보여주지 않는다
+  const spent = state.usage?.spentDay === new Date().toLocaleDateString('sv-SE') ? Object.entries(state.usage?.daySpent || {}) : [];
+  return html`<div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+    <${Toggle} checked=${on} onChange=${(v) => save({ dailyBudget: v })} title=${t('하루 예산')} />
+    <div style="flex:1;min-width:240px"><b>💰 ${t('하루 예산')}</b>
+      <div class="hint">${t('주간 한도를 하루 이틀에 다 쓰지 않게 해. 오늘 쓰는 속도가 빠르면 노력을 낮추고, 하루 몫을 다 쓴 AI는 자정까지 다른 AI에게 맡겨. 맡을 AI가 없으면 낮은 노력으로 계속해. 주간 사용률을 아는 AI에만 적용돼.')}</div></div>
+    <label class="row small" style="gap:6px">${t('하루 몫')}
+      <select class="select sm" value=${String(pct)} disabled=${!on} onChange=${(e) => save({ dailyBudgetPercent: Number(e.target.value) })}>
+        ${[...new Set([10, 13, 15, 20, 25, pct])].sort((a, b) => a - b).map((n) => html`<option value=${String(n)}>${t('주간의 {n}%', { n })}</option>`)}</select></label>
+    ${on && spent.length > 0 && html`<div class="row wrap" style="gap:6px;width:100%">
+      ${spent.map(([id, n]) => html`<span class=${`chip${n >= pct ? ' warn' : ''}`}>${PROVIDER_SHORT[id] || id} · ${t('오늘 {n}% / {pct}%', { n, pct })}</span>`)}
+    </div>`}
+  </div>`;
+}
 
 // 자동 이어받기: 한도에 걸리면 같은 역할의 다른 AI가 지금까지 쓴 내용을 이어받는다
 function FailoverCard() {

@@ -198,10 +198,10 @@ export function resetFromText(text = '', now = Date.now()) {
 }
 
 // 쓸 수 없는 AI(쉬는 중·한도 임박)를 빼고 라우팅 카탈로그를 만든다
-export function availableCatalog(catalog, { cooldown, limits = {}, threshold = 95, exclude = [] } = {}) {
+export function availableCatalog(catalog, { cooldown, limits = {}, threshold = 95, exclude = [], overBudget = null } = {}) {
   const blocked = new Set(exclude);
   for (const p of catalog.providers || []) {
-    if (cooldown?.active(p.id) || nearLimit(limits[p.id], threshold)) blocked.add(p.id);
+    if (cooldown?.active(p.id) || nearLimit(limits[p.id], threshold) || overBudget?.has(p.id)) blocked.add(p.id);
   }
   return {
     ...catalog,

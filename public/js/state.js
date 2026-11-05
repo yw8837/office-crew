@@ -189,6 +189,7 @@ function handle(type, d) {
       if (['running', 'paused', 'waiting'].includes(d.run.status) && !d.run.endedAt) state.active.add(d.sessionId);
       else state.active.delete(d.sessionId);
       if (d.run.status === 'waiting' && d.sessionId !== state.route.id) toast(d.run.hold?.reason === 'approve' ? t('다른 세션에서 승인이 필요해') : t('다른 세션에서 결정이 필요해'), 'warn');
+      notifyRun(d.sessionId, d.run);
       break;
     }
     case 'usage': state.usage = d; break;
@@ -205,6 +206,30 @@ function handle(type, d) {
     case 'sessionsReset': resync(); break;
     default: break;
   }
+}
+
+// 데스크톱 알림: 창이 뒤에 있을 때만, 같은 실행의 같은 상태는 한 번만 띄운다
+export async function askNotifyPermission() {
+  if (typeof Notification === 'undefined') return false;
+  if (Notification.permission === 'granted') return true;
+  if (Notification.permission === 'denied') return false;
+  return (await Notification.requestPermission()) === 'granted';
+}
+
+const notified = new Set();
+function notifyRun(sessionId, run) {
+  const title = {
+    waiting: run.hold?.reason === 'approve' ? t('승인이 필요해') : t('결정이 필요해'),
+    done: t('작업이 끝났어'),
+    error: t('작업이 실패했어'),
+  }[run.status];
+  if (!title || !state.settings.desktopNotify || document.hasFocus()) return;
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  const key = `${run.id}:${run.status}:${run.hold?.at ?? ''}`; // 같은 단계를 고친 뒤 다시 기다릴 때도 새로 알린다
+  if (notified.has(key)) return;
+  notified.add(key);
+  const n = new Notification(title, { body: state.sessions.find((s) => s.id === sessionId)?.title || t('오피스 크루'), tag: `crew-${sessionId}` });
+  n.onclick = () => { window.focus(); go('session', sessionId); n.close(); };
 }
 
 // 화면 언어 적용: 설정값(비면 브라우저 언어). 바뀌면 모델 목록(서버가 라벨을 번역)도 다시 받는다

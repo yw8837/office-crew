@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { VERSION, PUBLIC_DIR, HOST, PORT, homeDir, dataDirs, ensureDirs } from './config.js';
+import { VERSION, PUBLIC_DIR, HOST, PORT, homeDir, dataDirs, ensureDirs, unsafeWorkdir } from './config.js';
 import { cleanAvatar, cleanSkin } from './media.js';
 import { Store, newId } from './store.js';
 import { Bus } from './bus.js';
@@ -18,6 +18,7 @@ import { storageReport, cleanup } from './storage.js';
 import { listImportable, readTranscript } from './importer.js';
 import { ACP_PRESETS } from './providers/acp.js';
 import { resolveCommand } from './providers/util.js';
+import { initProcTracker, reapLeftovers, otherAppRunning } from './providers/procs.js';
 import { tr, bindLang, serverLang } from './i18n.js';
 import { Scheduler, cleanSchedule } from './scheduler.js';
 
@@ -90,6 +91,7 @@ const isSecretName = (name) => {
 const maskSecrets = (obj) => Object.fromEntries(Object.entries(obj || {}).map(([k, v]) => [k, isSecretName(k) && v ? mask(v) : v]));
 
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
+const UNSAFE_CWD = () => tr('이 폴더는 작업 폴더로 쓸 수 없어. 드라이브 맨 위, 홈 폴더 전체, 앱 데이터 폴더는 에이전트에게 맡기기 위험해. 프로젝트 폴더를 골라줘.');
 
 // 가린 값을 그대로 다시 보내면 원래 값을 유지한다(이름만 바꿨으면 같은 가림 표시의 원래 값을 찾아 유지).
 // - 가린 값은 비밀값 이름으로만 옮길 수 있다(일반 이름으로 옮기면 화면에 그대로 보이게 되므로)
@@ -200,8 +202,13 @@ function openFolder(dir) {
 export function createApp({ home = homeDir(), port = PORT, detect = true, schedule = detect, onQuit = null } = {}) {
   const dirs = dataDirs(home);
   ensureDirs(dirs);
-  // 지난 실행이 남긴 임시 파일(프롬프트·MCP 설정 등) 청소
-  for (const f of fs.readdirSync(dirs.tmp)) fs.rmSync(path.join(dirs.tmp, f), { recursive: true, force: true });
+  // 지난번에 앱이 비정상으로 꺼졌으면 그때 띄운 CLI가 남아 사용량을 쓰지 않게 끈다
+  const procDir = path.join(home, 'running-cli');
+  const leftovers = reapLeftovers(procDir);
+  if (leftovers) console.warn(`남은 CLI ${leftovers}개를 정리했어.`);
+  initProcTracker(procDir);
+  // 지난 실행이 남긴 임시 파일(프롬프트·MCP 설정 등) 청소. 같은 폴더를 쓰는 다른 앱이 CLI 를 돌리는 중이면 그 파일을 지우지 않게 건너뛴다
+  if (!otherAppRunning(procDir)) for (const f of fs.readdirSync(dirs.tmp)) fs.rmSync(path.join(dirs.tmp, f), { recursive: true, force: true });
   const store = new Store(dirs);
   // 서버 문구(오류·알림·에이전트 지침)는 설정 언어를 따른다(비면 OS 언어).
   // 초기화 전에 연결해야 첫 실행 기본 데이터(에이전트·팀 이름)도 그 언어로 만들어진다
@@ -305,6 +312,10 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     let moved = 0;
     for (const a of store.all('agents')) if (a.provider === pid) { store.upsert('agents', { id: a.id, provider: 'codex' }); moved++; }
     if (moved) bus.emit('agents', store.all('agents'));
+    // 뺀 계정의 한도·쉬는 기록이 화면에 남지 않게 지운다
+    orch.cooldown.clear(pid);
+    usage.forget(pid);
+    bus.emit('cooldown', orch.restingList());
     accountsChanged(null);
     // 로그인 정보가 든 폴더는 지우지 않는다(다시 추가하면 새 폴더라 다시 로그인해야 함)
     return { ok: true, moved, kept: codexAccountHome(dirs.home, id) };
@@ -369,6 +380,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     // teamId 를 명시(null 포함)하면 그대로, 에이전트만 주면 팀 없이, 아무것도 없으면 기본 팀
     const teamId = 'teamId' in b ? (b.teamId || null) : (b.agentId ? null : (store.settings.defaultTeamId || null));
     if (b.cwd && !fs.existsSync(b.cwd)) throw new HttpError(400, tr('그 폴더가 없어.'));
+    if (b.cwd && unsafeWorkdir(b.cwd, dirs.home)) throw new HttpError(400, UNSAFE_CWD());
     const s = store.createSession({ title: b.title, teamId, agentId: b.agentId || null, cwd: b.cwd || '' });
     bus.emit('session', store.sessionMeta(s));
     return s;
@@ -421,6 +433,8 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     if (!s) throw new HttpError(404, tr('세션 없음'));
     const b = await readJson(req);
     if ('cwd' in b && b.cwd && !(fs.existsSync(b.cwd) && fs.statSync(b.cwd).isDirectory())) throw new HttpError(400, tr('그 폴더가 없어.'));
+    // 불러온 세션의 원래 폴더처럼 이미 쓰던 값은 그대로 두고, 새로 고르는 폴더만 검사한다
+    if ('cwd' in b && b.cwd && b.cwd !== s.cwd && unsafeWorkdir(b.cwd, dirs.home)) throw new HttpError(400, UNSAFE_CWD());
     if ('teamId' in b && b.teamId && !store.get('teams', b.teamId)) throw new HttpError(400, tr('없는 팀이야.'));
     if ('agentId' in b && b.agentId && !store.get('agents', b.agentId)) throw new HttpError(400, tr('없는 에이전트야.'));
     if ('title' in b) b.title = String(b.title || '').slice(0, 120) || s.title;
@@ -515,8 +529,12 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     if (b.apiKeys) b.apiKeys = { ...(cur.apiKeys || {}), ...Object.fromEntries(Object.entries(b.apiKeys).map(([k, v]) => [k, keep(v, cur.apiKeys?.[k] || '')])) };
     if (b.apiProfiles) b.apiProfiles = b.apiProfiles.map((p) => ({ ...p, id: p.id || newId('api'), apiKey: keep(p.apiKey || '', (cur.apiProfiles || []).find((x) => x.id === p.id)?.apiKey || '') }));
     if ('defaultCwd' in b && b.defaultCwd && !fs.existsSync(b.defaultCwd)) throw new HttpError(400, tr('기본 작업 폴더가 없어.'));
+    if ('defaultCwd' in b && b.defaultCwd && unsafeWorkdir(b.defaultCwd, dirs.home)) throw new HttpError(400, UNSAFE_CWD());
     if ('failoverThreshold' in b) b.failoverThreshold = Math.min(100, Math.max(50, Math.round(Number(b.failoverThreshold) || 95)));
     if ('failover' in b) b.failover = b.failover !== false;
+    if ('dailyBudget' in b) b.dailyBudget = b.dailyBudget === true;
+    if ('dailyBudgetPercent' in b) b.dailyBudgetPercent = Math.min(50, Math.max(5, Math.round(Number(b.dailyBudgetPercent) || 13)));
+    if ('desktopNotify' in b) b.desktopNotify = b.desktopNotify === true;
     // ACP 에이전트: 명령은 셸 없이 실행되지만 형식은 엄격히(이름·명령·인자 문자열만)
     if ('acpAgents' in b) {
       const seen = new Set();
@@ -545,6 +563,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     store.settings = { ...cur, ...b };
     store.saveSettings();
     bus.emit('settings', publicSettings());
+    if ('dailyBudget' in b || 'dailyBudgetPercent' in b) bus.emit('cooldown', orch.restingList());
     if (acpChanged) { delete providers.modelCache.acp; providers.refresh('acp').then(() => bus.emit('providers', providers.list())).catch(() => {}); }
     if (authChanged && detect && !langChanged) Promise.all(['claude', 'codex'].map((p) => providers.refresh(p))).then(() => bus.emit('providers', providers.list())).catch(() => {});
     // 언어가 바뀌면 프로바이더 안내·모델 라벨을 새 언어로 다시 만든다

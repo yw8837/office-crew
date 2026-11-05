@@ -142,6 +142,9 @@ export function makeCodex({ id = 'codex', name = '', home = null } = {}) {
     const sb = sandbox(agent.permission);
     if (sb) args.push('-c', `sandbox_mode=${tomlStr(sb)}`);
     else args.push('--dangerously-bypass-approvals-and-sandbox');
+    // 읽기 전용 에이전트는 훅을 돌리지 않는다(읽기만 시켰는데 그 저장소의 명령이 도는 걸 막는다. 사용자 훅도 함께 꺼진다).
+    // --disable 은 이름을 모르는 옛 Codex 에서 실패할 수 있어 설정 값으로 넘긴다
+    if (sb === 'read-only') args.push('-c', 'features.hooks=false');
     // 가벼운 모드: 설정(로그인·모델 경로)은 유지하고, 매 실행마다 큰 설명을 붙이는 무거운 기능만 끈다
     // (--ignore-user-config 는 사용자 전용 model_provider 까지 빠져 모델 오류가 나는 것을 실측으로 확인)
     if (agent.light) for (const f of LIGHT_OFF) args.push('--disable', f);
@@ -162,6 +165,11 @@ export function makeCodex({ id = 'codex', name = '', home = null } = {}) {
 
     const h = makeHandle();
     const auth = authEnv(opts.settings, 'codex');
+    // 하루 예산: 한도는 실행이 끝나야 읽히니, 시작 전 값을 먼저 읽어 이번 실행 사용량도 오늘 쓴 양에 들어가게 한다
+    if (opts.settings?.dailyBudget) {
+      const lim = readCodexLimits(null, codexHome(), id);
+      if (lim) emit({ type: 'limits', ...lim });
+    }
     const child = spawnCli('codex', args, { cwd, env: { ...auth.env, ...homeEnv }, unset: auth.unset });
     // 이어하기(resume)면 이전 턴에 이미 지침을 줬으므로 다시 붙이지 않는다(토큰 절약)
     const fullPrompt = system && !resumeId ? `<${tr('역할 지침')}>\n${system}\n</${tr('역할 지침')}>\n\n${prompt}` : prompt;

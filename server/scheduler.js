@@ -3,6 +3,7 @@
 //   지난 실행이 아직 안 끝났으면 이번 회차는 건너뛴다(같은 일이 겹쳐 쌓이지 않게)
 import fs from 'node:fs';
 import path from 'node:path';
+import { unsafeWorkdir } from './config.js';
 import { tr } from './i18n.js';
 
 export const GRACE_MS = 10 * 60 * 1000; // 예정 시각에서 이만큼 늦은 것까지는 제때 실행으로 본다(절전 해제·잠깐 꺼짐)
@@ -130,6 +131,9 @@ export class Scheduler {
     if (s.teamId && !this.store.get('teams', s.teamId)) return rec('error', { note: tr('예약에 고른 팀이 없어졌어.') });
     if (s.agentId && !this.store.get('agents', s.agentId)) return rec('error', { note: tr('예약에 고른 에이전트가 없어졌어.') });
     if (s.cwd && !fs.existsSync(s.cwd)) return rec('error', { note: tr('예약에 고른 작업 폴더가 없어.') });
+    if (s.cwd && unsafeWorkdir(s.cwd, this.orch.dirs?.home)) return rec('error', { note: tr('예약에 고른 작업 폴더는 에이전트에게 맡기기 위험해. 프로젝트 폴더로 바꿔줘.') });
+    // 사람이 안 볼 때 도는 실행은 더 엄격하게: 맡을 AI가 오늘 몫을 다 썼으면 낮은 노력으로 돌리지 않고 건너뛴다("지금 실행"은 그대로)
+    if (!manual && this.#outOfBudget(s)) return rec('skipped', { note: tr('맡을 AI가 오늘 예산을 다 써서 이번 회차는 건너뛰었어.') });
     try {
       let sess = s.session === 'same' && s.sessionId ? this.store.getSession(s.sessionId) : null;
       // 이어 쓸 세션이 지금 예약과 대상·폴더가 다르면(직접 바꿨거나 옛 기록) 새 세션으로
@@ -148,6 +152,21 @@ export class Scheduler {
     } catch (e) {
       return rec('error', { note: e.message });
     }
+  }
+
+  // 에이전트 중 하나라도 오늘 예산 안에서 맡을 AI가 없으면 true(이어받기가 켜져 있거나 자동 라우팅이면 다른 AI도 후보)
+  #outOfBudget(s) {
+    const over = this.store.settings.dailyBudget ? this.orch.usage?.overBudget() : null;
+    if (!over?.size) return false;
+    const team = s.teamId ? this.store.get('teams', s.teamId) : null;
+    const ids = team ? team.stages.flatMap((st) => st.agentIds) : [s.agentId];
+    const others = (this.orch.providers?.list() || []).filter((p) => p.loggedIn && p.id !== 'mock');
+    const anyFree = others.some((p) => !over.has(p.id));
+    return ids.map((id) => this.store.get('agents', id)).filter(Boolean).some((a) => {
+      if (a.routing === 'auto') return others.length > 0 && !anyFree;
+      if (!over.has(a.provider)) return false;
+      return this.store.settings.failover === false || !anyFree;
+    });
   }
 
   #record(s, lastRun) {

@@ -341,6 +341,7 @@ function Defaults() {
         <div class="hint">${t('에이전트가 파일을 만들고 읽는 곳. 이미 있는 폴더 경로를 넣어.')}</div></div>
       <div class="grid2">
         <div class="field"><label>${t('기억 못 하는 모델에 넣어줄 최근 대화 수')}</label><input class="input" type="number" min="0" max="40" value=${s.historyTurns ?? 8} onChange=${(e) => saveSettings({ historyTurns: Number(e.target.value) })} /></div>
+        <div class="field"><label>${t('멈춘 실행으로 볼 시간(분)')}</label><input class="input" type="number" min="0" max="1440" value=${s.stallMinutes ?? 30} onChange=${(e) => saveSettings({ stallMinutes: Number(e.target.value) })} /><div class="hint">${t('출력이 이만큼 없으면 CLI를 끄고 오류로 돌려. 도구가 도는 중엔 4배까지 기다려. 0이면 끄기.')}</div></div>
         <div class="field"><label>${t('보내기 키')}</label><div class="seg"><button class=${s.sendOnEnter !== false ? 'on' : ''} onClick=${() => saveSettings({ sendOnEnter: true })}>Enter</button><button class=${s.sendOnEnter === false ? 'on' : ''} onClick=${() => saveSettings({ sendOnEnter: false })}>Ctrl+Enter</button></div></div>
       </div>
     </div>`;

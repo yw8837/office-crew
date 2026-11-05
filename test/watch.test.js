@@ -157,7 +157,7 @@ test('파일 읽기 경계: 처음 읽을 때 잘린 첫 줄을 버리고, 큰 �
   const line = JSON.stringify(toolUse('Edit', { file_path: 'half.js' }, '/home/me/edge'));
   fs.appendFileSync(f, line.slice(0, 30));
   w.ticks = 1; await w.tick();
-  assert.equal(edge().detail, 'Grep · after-big.js');
+  assert.equal(edge().detail, 'Grep · after-huge.js');
   fs.appendFileSync(f, `${line.slice(30)}\n`);
   w.ticks = 1; await w.tick();
   assert.equal(edge().detail, 'Edit · half.js');

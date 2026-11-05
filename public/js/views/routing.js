@@ -23,6 +23,22 @@ export function modelOptions(providerId, { showLegacy = false } = {}) {
   return list.filter((m) => !m.hidden && (showLegacy || !m.legacy));
 }
 
+// 노력 단계 옆 표시: CLI 에서 내가 기본으로 쓰는 값, 모델(또는 Claude Code)이 추천하는 값
+function modelOf(providerId, modelId) { return (state.catalog?.models?.[providerId] || []).find((x) => x.id === modelId); }
+export function effortTag(providerId, modelId, ef) {
+  const m = modelOf(providerId, modelId);
+  if (!m) return '';
+  if (m.defaultEffort === ef && m.mine) return ` (${t('내 기본')})`;
+  if (m.recommendedEffort === ef) return ` (${providerId === 'claude' ? t('추천') : t('기본')})`;
+  return '';
+}
+export function effortNote(providerId, modelId, ef) {
+  const m = modelOf(providerId, modelId);
+  if (m?.defaultEffort === ef && m.mine) return t('CLI 설정에서 쓰는 노력 단계야.');
+  if (m?.recommendedEffort === ef) return providerId === 'claude' ? t('Claude Code가 추천하는 단계야.') : t('이 모델의 기본 단계야.');
+  return '';
+}
+
 export function effortOptions(providerId, modelId) {
   const m = (state.catalog?.models?.[providerId] || []).find((x) => x.id === modelId);
   const p = state.providers.find((x) => x.id === providerId);
@@ -140,7 +156,7 @@ function RoutingRow({ a, legacy, preview }) {
         ${ready.map((p) => html`<option value=${p.id}>${p.label}</option>`)}</select></span>
       <span><select class="select sm" value=${a.model} onChange=${(e) => setModel(e.target.value)}>
         ${!known && html`<option value=${a.model}>${a.model || t('(CLI 기본)')}</option>`}
-        ${models.map((m) => html`<option value=${m.id} title=${m.description || ''}>${m.label}${m.tier ? ` · ${TIER_LABEL[m.tier] || ''}` : ''}</option>`)}</select></span>
+        ${models.map((m) => html`<option value=${m.id} title=${[m.description, m.tier && TIER_LABEL[m.tier]].filter(Boolean).join(' · ')}>${m.label}${m.older ? ` (${t('이전 세대')})` : ''}</option>`)}</select></span>
       <span>${efforts.length ? html`<select class="select sm" value=${a.effort} onChange=${(e) => saveAgent(a, { effort: e.target.value })}>
         ${!efforts.includes(a.effort) && html`<option value=${a.effort}>${a.effort ? (EFFORT_LABEL[a.effort] || a.effort) : '-'}</option>`}
         ${efforts.map((ef) => html`<option value=${ef}>${EFFORT_LABEL[ef] || ef}</option>`)}</select>` : html`<span class="small muted">${t('없음')}</span>`}</span>`}
@@ -187,8 +203,9 @@ export function RoutingFields({ a, set, setMany }) {
         <div class="field"><label>${t('모델')}</label>
           ${custom ? html`<input class="input mono" value=${a.model} onInput=${(e) => set('model', e.target.value)} placeholder=${t('모델 이름(고급)')} />`
             : html`<select class="select" value=${a.model} onChange=${(e) => { const ef = effortOptions(a.provider, e.target.value); setMany({ model: e.target.value, effort: ef.includes(a.effort) ? a.effort : (ef.includes('medium') ? 'medium' : ef[0] || '') }); }}>
-                ${!models.some((m) => m.id === a.model) && html`<option value=${a.model}>${a.model || t('(CLI 기본 모델)')}</option>`}
-                ${models.map((m) => html`<option value=${m.id} title=${m.description || ''}>${m.label}${m.tier ? ` · ${TIER_LABEL[m.tier] || ''}` : ''}</option>`)}
+                ${state.providers.find((p) => p.id === a.provider)?.kind === 'cli' && html`<option value="">${t('기본 (CLI 설정을 따름)')}</option>`}
+                ${a.model && !models.some((m) => m.id === a.model) && html`<option value=${a.model}>${a.model}</option>`}
+                ${models.map((m) => html`<option value=${m.id} title=${[m.description, m.tier && TIER_LABEL[m.tier]].filter(Boolean).join(' · ')}>${m.label}${m.older ? ` (${t('이전 세대')})` : ''}</option>`)}
               </select>`}
           <div class="row small" style="gap:10px;margin-top:4px">
             <label class="row" style="gap:4px"><input type="checkbox" checked=${legacy} onChange=${(e) => setLegacy(e.target.checked)} /> ${t('구형·고정 모델')}</label>
@@ -196,7 +213,8 @@ export function RoutingFields({ a, set, setMany }) {
           </div>
         </div>
         <div class="field"><label>${t('노력(effort)')}</label>
-          ${efforts.length ? html`<div class="seg" style="flex-wrap:wrap">${efforts.map((ef) => html`<button class=${a.effort === ef ? 'on' : ''} onClick=${() => set('effort', ef)}>${EFFORT_LABEL[ef] || ef}</button>`)}</div>`
+          ${efforts.length ? html`<div class="seg" style="flex-wrap:wrap" role="group" aria-label=${t('노력(effort)')}>${efforts.map((ef) => html`<button class=${a.effort === ef ? 'on' : ''} aria-pressed=${a.effort === ef} title=${effortNote(a.provider, a.model, ef)} onClick=${() => set('effort', ef)}>${EFFORT_LABEL[ef] || ef}${effortTag(a.provider, a.model, ef)}</button>`)}</div>
+              ${a.provider === 'claude' && a.effort === 'max' && html`<div class="hint" style="color:var(--warn)">⚠ ${t('최대는 사용량을 크게 써(Claude Code 기준 3.5배 이상). 정말 어려운 일에만 써.')}</div>`}`
             : html`<div class="hint">${t('이 모델은 노력 단계를 따로 고르지 않아.')}</div>`}
         </div>
       </div>`}`;

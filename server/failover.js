@@ -1,6 +1,6 @@
 // 자동 이어받기: 한 AI의 사용량·한도가 바닥나면 작업을 멈추지 않고, 여유 있는 다른 AI가 이어받게 한다
 import path from 'node:path';
-import { resolveRoute, roleKind } from './routing.js';
+import { resolveRoute, roleKind, baseProvider, pickModel, clampEffort } from './routing.js';
 
 // 각 CLI·API 가 한도 초과 때 내는 문구(실측·공식 오류 코드 기준). 일반 오류와 구분해야 엉뚱하게 넘기지 않는다
 const QUOTA_RE = new RegExp([
@@ -216,9 +216,26 @@ export function availableCatalog(catalog, { cooldown, limits = {}, threshold = 9
  */
 export function pickFallback(agent, catalog, opts = {}) {
   const cat = availableCatalog(catalog, opts);
+  const sib = siblingAccount(agent, cat);
+  if (sib) return sib;
   const r = resolveRoute({ role: agent.role, routingProfile: agent.routingProfile || 'balanced' }, cat);
   if (!r || r.provider === agent.provider) return null;
   return r;
+}
+
+// 같은 회사 AI 의 다른 계정(지금은 Codex 추가 계정)이 쓸 수 있으면 그 계정이 같은 모델로 이어받는다
+function siblingAccount(agent, cat) {
+  const base = baseProvider(agent.provider);
+  if (base !== 'codex') return null;
+  for (const p of cat.providers || []) {
+    if (!p.loggedIn || p.id === agent.provider || baseProvider(p.id) !== base) continue;
+    const models = cat.models?.[p.id] || [];
+    const m = models.find((x) => x.id === agent.model) || pickModel(models, 'balanced', p.id);
+    if (!m) continue;
+    const effort = agent.effort ? clampEffort(agent.effort, m.efforts?.length ? m.efforts : p.efforts || []) : '';
+    return { provider: p.id, model: m.id, modelLabel: m.label || m.id, effort, reason: `account → ${p.id}/${m.id}` };
+  }
+  return null;
 }
 
 // ── 이어받기 인계서 ──

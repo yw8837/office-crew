@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { newId } from './store.js';
 import { runQuick } from './providers/util.js';
 import { tr } from './i18n.js';
@@ -18,17 +19,40 @@ const externalSkillDirs = () => [
   ['gemini', path.join(home, '.gemini', 'skills')],
 ];
 
-function parseFrontmatter(text) {
-  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+// SKILL.md 머리말(YAML 일부): 한 줄 값, 따옴표 값, 여러 줄 값(`>`·`|` 블록, 들여쓴 이어지는 줄)을 읽는다
+export function parseFrontmatter(text) {
+  const m = text.match(/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/);
   const meta = {};
   if (m) {
+    let key = null;
+    let block = null; // '>' 는 줄을 이어 붙이고 '|' 는 줄바꿈을 살린다
+    let parts = [];
+    const flush = () => {
+      if (!key) return;
+      let v = block === '|' ? parts.join('\n') : parts.filter((x) => x !== '').join(' ');
+      v = v.replace(/[ \t]+\n/g, '\n').trim();
+      const q = v.match(/^"([\s\S]*)"$/) || v.match(/^'([\s\S]*)'$/);
+      if (q) v = q[1].replace(/\\"/g, '"').replace(/''/g, "'");
+      meta[key] = v.trim();
+    };
     for (const line of m[1].split(/\r?\n/)) {
       const kv = line.match(/^([\w-]+):\s*(.*)$/);
-      if (kv) meta[kv[1]] = kv[2].replace(/^["']|["']$/g, '').trim();
+      if (kv) {
+        flush();
+        key = kv[1];
+        const head = kv[2].trim();
+        if (/^[>|][+-]?\d*$/.test(head)) { block = head[0]; parts = []; } else { block = null; parts = head ? [head] : []; }
+      } else if (key && /^\s+\S/.test(line)) parts.push(line.trim());
+      else if (key && !line.trim() && block) parts.push('');
     }
+    flush();
   }
   return { meta, body: m ? text.slice(m[0].length) : text };
 }
+
+const hasHangul = (s) => /[\uAC00-\uD7A3]/.test(String(s || ''));
+// 설명 원문 → 한글 설명을 찾는 키(앞뒤 공백 무시)
+export const descKey = (d) => crypto.createHash('sha1').update(String(d || '').trim()).digest('hex').slice(0, 16);
 
 export const safeKey = (s) => String(s || 'mcp').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'mcp';
 
@@ -49,11 +73,12 @@ export class Catalog {
         const file = path.join(dir, n, 'SKILL.md');
         try {
           const fd = fs.openSync(file, 'r');
-          const buf = Buffer.alloc(4096);
-          const len = fs.readSync(fd, buf, 0, 4096, 0);
+          // 머리말이 길어도(설명이 여러 줄) 끝까지 읽히게 앞 32KB 를 읽는다
+          const buf = Buffer.alloc(32768);
+          const len = fs.readSync(fd, buf, 0, 32768, 0);
           fs.closeSync(fd);
           const { meta } = parseFrontmatter(buf.toString('utf8', 0, len));
-          out.push({ id: `ext:${source}:${n}`, name: meta.name || n, description: (meta.description || '').slice(0, 300), source, path: file, readOnly: true });
+          out.push({ id: `ext:${source}:${n}`, name: meta.name || n, description: (meta.description || '').replace(/\s+/g, ' ').slice(0, 600), source, path: file, readOnly: true });
         } catch { /* SKILL.md 없음 */ }
       }
     }
@@ -63,7 +88,49 @@ export class Catalog {
 
   skills() {
     const app = this.store.all('skills').map((s) => ({ ...s, source: s.pluginId ? 'plugin' : 'app', readOnly: false }));
-    return [...app, ...(this.extSkills || this.scanExternalSkills())];
+    const ko = this.#koMap();
+    // 한글 설명: 설명 원문 해시로 찾는다(원문이 바뀌면 자동으로 "번역 필요"가 된다)
+    return [...app, ...(this.extSkills || this.scanExternalSkills())].map((s) => {
+      const k = !hasHangul(s.description) && ko[descKey(s.description)];
+      return k ? { ...s, descKo: k } : s;
+    });
+  }
+
+  // ── 스킬 설명 한글화: 이 PC 데이터 폴더의 skill-desc-ko.json 에만 저장(저장소·공유 없음) ──
+  #koFile() { return path.join(this.dirs.home || os.tmpdir(), 'skill-desc-ko.json'); }
+  #koMap() {
+    if (this.koCache) return this.koCache;
+    try { this.koCache = JSON.parse(fs.readFileSync(this.#koFile(), 'utf8')) || {}; } catch { this.koCache = {}; }
+    return this.koCache;
+  }
+
+  // 아직 한글 설명이 없는(원문이 한글도 아닌) 설명 목록. 같은 설명은 하나로
+  untranslatedSkills() {
+    const ko = this.#koMap();
+    const seen = new Map();
+    for (const s of this.extSkills || this.scanExternalSkills()) {
+      const d = String(s.description || '').trim();
+      if (!d || hasHangul(d)) continue;
+      const k = descKey(d);
+      if (!ko[k] && !seen.has(k)) seen.set(k, { key: k, name: s.name, description: d });
+    }
+    return [...seen.values()];
+  }
+
+  // { 해시: 한글 } 저장. 키는 지금 있는 설명의 해시만, 값은 한글이 든 짧은 글만 받는다
+  saveSkillKo(entries) {
+    const valid = new Set((this.extSkills || this.scanExternalSkills()).map((s) => descKey(String(s.description || '').trim())));
+    const ko = { ...this.#koMap() };
+    let n = 0;
+    for (const [k, v] of Object.entries(entries || {})) {
+      const text = String(v || '').replace(/\s+/g, ' ').trim().slice(0, 400);
+      if (!valid.has(k) || !hasHangul(text)) continue;
+      ko[k] = text; n++;
+    }
+    fs.mkdirSync(path.dirname(this.#koFile()), { recursive: true });
+    fs.writeFileSync(this.#koFile(), JSON.stringify(ko, null, 1));
+    this.koCache = ko;
+    return n;
   }
 
   skillContent(id) {

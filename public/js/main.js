@@ -107,7 +107,7 @@ function Sidebar() {
       ${NAV().map(([v, icon, label]) => html`<button class=${`nav${state.route.view === v ? ' on' : ''}`} onClick=${() => { go(v); if (innerWidth < 860) { state.ui.side = false; changed(); } }}><${Icon} name=${icon} />${label}</button>`)}
     </div>
     <div class="side-foot">
-      ${state.providers.filter((p) => p.kind !== 'mock').map((p) => html`<span class=${`pdot${p.loggedIn ? ' ok' : p.installed ? ' warn' : ''}`} title=${`${p.label}: ${p.checking ? t('확인 중') : p.loggedIn ? t('사용 가능') : p.installed ? t('로그인 필요') : t('미설치')}${p.account ? ` · ${p.account}` : ''}`} onClick=${() => { state.ui.settingsTab = 'accounts'; go('settings'); }}><i></i>${{ claude: 'Claude', codex: 'GPT', gemini: 'Gemini', hermes: 'Hermes', openai: 'API', acp: 'ACP' }[p.id] || p.id}</span>`)}
+      ${state.providers.filter((p) => p.kind !== 'mock').map((p) => html`<span class=${`pdot${p.loggedIn ? ' ok' : p.installed ? ' warn' : ''}`} title=${`${p.label}: ${p.checking ? t('확인 중') : p.loggedIn ? t('사용 가능') : p.installed ? t('로그인 필요') : t('미설치')}${p.account ? ` · ${p.account}` : ''}`} onClick=${() => { state.ui.settingsTab = 'accounts'; go('settings'); }}><i></i>${{ claude: 'Claude', codex: 'GPT', gemini: 'Gemini', hermes: 'Hermes', openai: 'API', acp: 'ACP' }[p.id] || (p.base === 'codex' ? `GPT·${p.accountName}` : p.id)}</span>`)}
       <span class="small" style="width:100%">${t('{n}개 CLI 사용 가능', { n: okCount })}</span>
     </div>
   </aside>`;

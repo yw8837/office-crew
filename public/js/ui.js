@@ -113,8 +113,15 @@ export function Avatar({ agent, size = 34 }) {
 }
 
 export const PROVIDER_COLORS = { claude: '#d97757', codex: '#10a37f', gemini: '#8e75ff', hermes: '#7c3aed', openai: '#0ea5e9', local: '#65a30d', acp: '#14b8a6', mock: '#64748b' };
-export const providerColor = (id) => PROVIDER_COLORS[id] || '#888';
-export const PROVIDER_SHORT = tmap(() => ({ claude: 'Claude', codex: 'GPT·Codex', gemini: 'Gemini', hermes: 'Hermes', openai: 'API', local: t('로컬'), acp: 'ACP', mock: t('데모') }));
+// Codex 추가 계정(codex-xxxx)은 기본 Codex 색·이름 + 계정 이름
+const ACCOUNT_NAMES = {};
+export function setAccountNames(providers = []) {
+  for (const k of Object.keys(ACCOUNT_NAMES)) delete ACCOUNT_NAMES[k];
+  for (const p of providers) if (p.base && p.base !== p.id && p.accountName) ACCOUNT_NAMES[p.id] = p.accountName;
+}
+export const providerColor = (id = '') => PROVIDER_COLORS[id] || PROVIDER_COLORS[String(id).replace(/^codex-[a-z0-9]+$/, 'codex')] || '#888';
+export const PROVIDER_SHORT = tmap(() => ({ claude: 'Claude', codex: 'GPT·Codex', gemini: 'Gemini', hermes: 'Hermes', openai: 'API', local: t('로컬'), acp: 'ACP', mock: t('데모'),
+  ...Object.fromEntries(Object.entries(ACCOUNT_NAMES).map(([id, name]) => [id, `GPT·${name}`])) }));
 
 export function ProviderChip({ id }) {
   return html`<span class="chip" style=${`background:${providerColor(id)}1f;color:${providerColor(id)}`}><span class="pdot-inline" style=${`background:${providerColor(id)}`}></span>${PROVIDER_SHORT[id] || id}</span>`;
@@ -131,7 +138,7 @@ export const PERM_LABEL = tmap(() => ({
   auto: [t('자동 판단'), t('CLI가 알아서 허용 여부 판단')],
   full: [t('전부 허용 ⚠'), t('모든 명령·편집 무승인 실행 (신뢰하는 작업만)')],
 }));
-export const EFFORT_LABEL = tmap(() => ({ none: t('없음'), minimal: t('미니멀'), low: t('로우'), medium: t('미디엄'), high: t('하이'), xhigh: t('X하이'), max: t('맥스'), ultra: t('울트라') }));
+export const EFFORT_LABEL = tmap(() => ({ none: t('없음'), minimal: t('최소'), low: t('낮음'), medium: t('중간'), high: t('높음'), xhigh: t('엑스트라'), max: t('최대'), ultra: t('울트라') }));
 
 export function fmtTok(n = 0) {
   if (!n) return '0';

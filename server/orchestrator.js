@@ -4,7 +4,7 @@ import path from 'node:path';
 import { newId } from './store.js';
 import { PROVIDERS } from './providers/index.js';
 import { toolCategory } from './providers/util.js';
-import { resolveRoute, roleKind, aiKey } from './routing.js';
+import { resolveRoute, roleKind, aiKey, baseProvider } from './routing.js';
 import { Cooldown, isQuotaError, nearLimit, avoidUntil, resetTime, resetFromText, availableCatalog, pickFallback, continuationPrompt, handoffFacts } from './failover.js';
 import { tr } from './i18n.js';
 
@@ -246,7 +246,7 @@ export class Orchestrator {
   async #failover(s, msg, ag, error, tried) {
     const opts = this.#foOpts({ exclude: tried });
     // 계정 단위 한도가 있는 CLI만 쉬게 표시(API 프로필·ACP 에이전트는 서로 다른 계정일 수 있어 통째로 막지 않는다)
-    if (ACCOUNT_LIMITED.has(ag.provider)) {
+    if (ACCOUNT_LIMITED.has(baseProvider(ag.provider))) {
       // 쉬는 시간: 사용량 창의 초기화 시각 → 없으면 오류 문구에 적힌 시각 → 없으면 기본 30분
       this.cooldown.mark(ag.provider, { until: resetTime(opts.limits[ag.provider], opts.threshold) || resetFromText(error), reason: error });
       this.bus.emit('cooldown', this.restingList());
@@ -302,7 +302,12 @@ export class Orchestrator {
 
   async #runAgent(ctx, stageIdx, agentId, feedback) {
     const { s, run } = ctx;
-    const routed = await this.#route(ctx, stageIdx, this.store.get('agents', agentId));
+    let base = this.store.get('agents', agentId);
+    // 세션이 정한 덮어쓰기(예: 스킬 번역은 읽기 전용으로) — 저장된 에이전트는 그대로
+    if (base && s.agentOverride && typeof s.agentOverride === 'object') base = { ...base, ...s.agentOverride };
+    // 뺀 Codex 계정을 가리키는 에이전트는 기본 Codex 로 실행한다
+    if (base && /^codex-[a-z0-9]+$/.test(base.provider || '') && !PROVIDERS[base.provider]) base = { ...base, provider: 'codex' };
+    const routed = await this.#route(ctx, stageIdx, base);
     // 라우팅(모델 목록 읽기)을 기다리는 사이에 중지됐으면 시작하지 않는다
     if (ctx.stopped) {
       this.#state(ctx.s.id, agentId, 'idle', tr('중지됨')); // 사무실에 '자동 라우팅 중…'이 남지 않게

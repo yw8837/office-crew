@@ -17,7 +17,7 @@ English · [한국어](README.ko.md) · [简体中文](README.zh-CN.md) · [日�
 </div>
 
 <p align="center">
-  <img src="docs/screens/demo.gif" alt="Office Crew demo: an AI team researching, waiting for approval and building in the live office" width="900">
+  <img src="docs/screens/demo.gif" alt="Office Crew demo: in Crew Village the AI team leaves their houses, works at the office, waits for approval and goes home when done" width="900">
 </p>
 
 Office Crew is a local workspace for running several AI agents together. It runs the **official CLIs you have installed and signed in to** (Claude Code, OpenAI Codex CLI, Gemini CLI, Nous Hermes Agent) and any ACP-compatible agent, plus OpenAI-compatible APIs and local models. You arrange the agents into a pipeline, and while they work you can watch each one move around an office and step in at any point.
@@ -26,15 +26,15 @@ Office Crew is a local workspace for running several AI agents together. It runs
 
 - **Use the subscriptions you already have.** Office Crew launches the official CLIs on your machine with their existing sign-in. It never asks for or stores your passwords.
 - **A team instead of a single chat box.** Each agent has its own model, effort level, permissions, skills and MCP connectors. Stages run in order, agents inside a stage run in parallel, and with auto-routing, reviews are cross-checked by a different AI than the one that did the build whenever possible.
-- **See and steer every step.** Characters walk to the research room, the library or the server room depending on the tool they're using, raise a hand when they need approval and sweat when something fails. You can redirect or skip any agent mid-run, pause the run before its next stage, or stop it.
+- **See and steer every step.** The agents live in Crew Village: they stay home while idle, commute to the office when work starts, and walk to the library, the lookout tower, the workshop or the plaza depending on the tool they're using. They raise a hand when they need approval and sweat when something fails. You can redirect or skip any agent mid-run, pause the run before its next stage, or stop it.
 - **Light on resources.** Zero runtime dependencies, no build step, about 65 MB of RAM when idle. The server listens on `127.0.0.1` only.
 
 ## ✨ Features
 
 ### Agents and auto-routing
 
-- **Per-agent routing:** provider, model, effort (low → max, plus xhigh where supported), permission (Read-only → Allow all), system prompt, skills, MCP connectors and avatar.
-- **Live model catalogs:** model dropdowns come from each CLI's own model catalog where the CLI provides one. They refresh automatically every 30 minutes and whenever a CLI update is detected.
+- **Per-agent routing:** provider, model, effort (the same levels each CLI offers: low, medium, high, extra high and max, plus ultra on Codex models that support it), permission (Read-only → Allow all), system prompt, skills, MCP connectors and avatar (a person, an original creature or your own image).
+- **Model lists that match the CLI:** Claude shows versions the way Claude Code does (for example Opus 5.5, Fable 5.1, Sonnet 5.5, Haiku 5.5). The aliases always follow the latest model, and the version a run actually used is remembered. Codex lists every model in its own catalog, previous generations included, in Codex's order. Your CLI's default model and effort are marked, the lists refresh every 30 minutes and whenever a CLI update is detected, and auto-routing skips previous-generation models.
 - **Auto-routing (default for new agents):** when a run starts, Office Crew picks a model and effort from the signed-in AIs it can route to (Claude Code, Codex, OpenAI-compatible APIs and local models, plus Gemini CLI for research). It decides by role (research, organize, analysis, build, review, writing) and profile (economy, balanced, best). Review agents are routed to a different AI than the builder whenever possible.
 - **Routing board:** edit every agent's AI, model, effort and permission in one table.
 
@@ -62,6 +62,7 @@ Office Crew is a local workspace for running several AI agents together. It runs
 
 - **Automatic handoff:** when an AI hits its usage limit mid-task, another AI with headroom takes the same role and finishes from where it stopped. It receives the original request, everything written so far and a handoff note the server pulled from the tool log (tools used, files changed and the last commands; a command keeps only its program, well-known subcommands and plain file names, and its other arguments, where tokens and passwords usually sit, are left out), and is told to check the current state first. A CLI that hit its limit (Claude Code, Codex, Gemini CLI, Hermes) rests until the reset time in its usage data or, without that, the time stated in the error message (30 minutes when neither says). AIs that are resting, or above a usage threshold (95% by default), are avoided before a run starts. Turn it off, change the threshold or release a resting AI on the Routing board.
 - **Billing per AI:** run Claude Code and Codex on your subscription or on an official API key (pay as you go). In subscription mode, a stray `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` (Claude) or `CODEX_API_KEY` in your environment is ignored, so you aren't billed by surprise. In API key mode with no key entered in the app, your environment's key or gateway token is used as is.
+- **Several ChatGPT accounts:** add more ChatGPT accounts under Settings → AI accounts. Each one signs in to its own Codex folder and works as its own AI with its own usage limits, so when one account hits its limit, automatic handoff moves the work to the next one.
 - **ACP agents:** plug in any agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com), such as Gemini CLI, Hermes, OpenCode, Goose or Qwen Code. Tool permission requests are answered by the agent's permission level. File reads and writes the agent asks Office Crew to do are limited to the work folder (reads also to attachments); the agent's own tools follow its own sandbox and your permission level.
 
 | Routing board with automatic handoff | Import a Claude Code or Codex session |
@@ -69,33 +70,42 @@ Office Crew is a local workspace for running several AI agents together. It runs
 | ![Routing board: every agent's AI, model, effort and permission in one table, with the automatic handoff switch](docs/screens/app-routing.png) | ![Import dialog listing Claude Code and Codex sessions grouped by project folder](docs/screens/app-import.png) |
 | Auto or manual per agent, handoff on usage limits | Pick a past conversation and keep going |
 
-### The live office
+### Schedules
 
-- An isometric office drawn in plain SVG, with no game engine. Agents walk to the **Research** room, the **Library**, the **Server Room** or the **Meeting Room** depending on the tool they're using.
+- On the days and at the time you pick, a team (or a single agent) gets the same instruction and starts working on its own, in a new session each time or continuing one session. Schedules use this PC's clock and run while the app is open.
+- A time missed while the app was closed is skipped by default, or run once when the app opens if you turn that on. If the previous run hasn't finished, that time is skipped. Approval steps wait for you under Needs you.
+
+| Schedules | Skills |
+|---|---|
+| ![Schedules page with a weekday 9:00 news digest and a paused weekly blog draft, each with Run now and an on/off switch](docs/screens/app-schedules.png) | ![Skills page with Claude, Codex, shared and app skills and a filter by source](docs/screens/app-skills.png) |
+| Days, time, team or agent, run now, on/off | Claude, Codex and shared skills in one list, filtered by source |
+
+### The live office: Crew Village
+
+- An isometric village drawn in plain SVG, with no game engine. Every agent has a house. Idle agents stay inside (the windows light up), commute to the **office** when work starts and go home after they finish. Tools send them around the village: reading to the **library**, searching to the **lookout tower**, running commands to the **workshop**, planning and long thinking to the **plaza** fountain.
 - Characters raise a hand when they need approval, sweat on errors, carry documents when handing work to the next stage, and sub-agent helpers appear when an agent delegates.
-- **Skins:** Modern, Cozy and Night, or upload your own image and place desks and spots with the built-in editor.
+- **Make it yours:** each agent can be a person, an original creature or your own image (small pixel art stays crisp), and you can replace the house with your own picture. Images stay on your machine. The office skins (Modern, Cozy, Night) and a skin made from your own floor plan are still available.
 - **Quality levels:** `full`, `lite` and `static` for low-end PCs.
 
 | Status at a glance | Handoffs |
 |---|---|
-| ![Office with English labels showing agents searching, using tools, paused, done and waiting for approval](docs/screens/office-lang-en.png) | ![Close-up of an agent carrying the build result to the next desk](docs/screens/office-handoff.png) |
-| Searching, using a tool, paused, done, needs approval | An agent carries its result to the next stage |
-| **Modern skin** | **Cozy skin** |
-| ![Modern office skin](docs/screens/office-skin-modern.png) | ![Cozy wooden office skin](docs/screens/office-skin-cozy.png) |
-| **Night skin** | **Your own image as a skin** |
-| ![Night office skin with neon accents](docs/screens/office-skin-night.png) | ![Custom skin built from an uploaded floor-plan image, with a sub-agent helper](docs/screens/office-custom-skin.png) |
+| ![Crew Village with English labels: agents reading in the library, searching at the lookout tower, waiting for approval and working at the office](docs/screens/office-lang-en.png) | ![Close-up of an agent carrying the build result to the next agent](docs/screens/office-handoff.png) |
+| Reading, searching, using a tool, needs approval | An agent carries its result to the next stage |
+| **Your own village** | **Pick a skin** |
+| ![Crew Village with a tent image as the house and two agents shown as creatures](docs/screens/office-village-custom.png) | ![Display settings listing Crew Village, the office skins and Customize village](docs/screens/app-skins.png) |
+| A tent as the house, two agents as creatures | Crew Village, the office skins and your own images |
 
 ### Desktop-app comfort
 
 - Sessions with search and pinning, image paste (Ctrl+V), drag and drop, `@agent` mentions, `/skill` commands.
 - Markdown with copy buttons, resend and edit, export a chat to `.md`, dark mode.
-- **Skills** are discovered automatically from your Claude and Codex skill folders. **MCP connectors** are injected per agent. **Plugins** bundle agents, teams, skills, connectors and skins into one JSON file you can import or export.
+- **Skills** are found automatically in your Claude, Codex and shared (`~/.agents`) skill folders. In the Korean UI their descriptions are shown in Korean (saved only on your PC; new ones can be translated by an agent you pick). When you pick an agent's skills, tabs show suggestions for its role, its own CLI's skills, the selected ones and everything, and a skill installed in several places is shown once. **MCP connectors** are injected per agent. **Plugins** bundle agents, teams, skills, connectors and skins into one JSON file you can import or export.
 - **Import and continue** existing Claude Code and Codex sessions without losing context. Claude continues on a fork, so the original history stays untouched; if a session can't be resumed, the recent conversation is passed along instead.
 - UI in Korean, English, Simplified Chinese and Japanese.
 
-| Dark mode with the Night skin | Live usage while streaming |
+| Dark mode | Live usage while streaming |
 |---|---|
-| ![Dark mode with the Night skin after a finished run](docs/screens/app-dark.png) | ![Chat with a streaming answer, an estimated token count and per-stage progress](docs/screens/app-done.png) |
+| ![Dark mode in Crew Village after a finished run](docs/screens/app-dark.png) | ![Chat with a streaming answer, an estimated token count and per-stage progress](docs/screens/app-done.png) |
 | Dark mode with a copyable code block | Token counts are estimated while streaming and replaced with real numbers at the end of the turn |
 
 ## 🚀 Quick start
@@ -109,7 +119,7 @@ npm start
 ```
 
 - The server starts at `http://127.0.0.1:4317` and opens an Edge/Chrome app window. If neither browser is found, it opens your default browser.
-- **Windows:** you can also double-click `오피스크루 실행.cmd` ("Run Office Crew").
+- **Windows:** you can also double-click `오피스크루 실행.cmd` ("Run Office Crew"), or `오피스크루 실행 (창 없이).vbs` to start it without a console window. To quit, use Settings → About → Quit Office Crew.
 - **First run:** the built-in **Demo** team is selected by default. Its agents are simulated and use no AI quota, so you can try the office, approvals and steering before connecting any AI.
 - Your data is stored in `~/.office-crew`.
 

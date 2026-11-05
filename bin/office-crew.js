@@ -57,11 +57,11 @@ function openWindow(url) {
 process.on('uncaughtException', (e) => console.error('[예외]', e?.stack || e));
 process.on('unhandledRejection', (e) => console.error('[처리 안 된 Promise]', e?.stack || e));
 
-const app = createApp({ home, port });
+const app = createApp({ home, port, onQuit: () => shutdown() });
 try {
   const p = await app.listen(port);
   const url = `http://127.0.0.1:${p}/`;
-  console.log(`\n  🏢 오피스 크루 ${VERSION} 실행 중 → ${url}\n  데이터 폴더: ${home}\n  끄려면 이 창에서 Ctrl+C\n`);
+  console.log(`\n  🏢 오피스 크루 ${VERSION} 실행 중 → ${url}\n  데이터 폴더: ${home}\n  끄려면 이 창에서 Ctrl+C(또는 앱 설정 → 정보 → 오피스 크루 끄기)\n`);
   if (!flag('no-open')) openWindow(url);
 } catch (e) {
   if (e.code === 'EADDRINUSE') {

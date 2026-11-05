@@ -131,7 +131,7 @@ function OfficePanel({ s, full }) {
   </div>`;
 }
 
-const providerColorOf = (a) => ({ claude: '#d97757', codex: '#10a37f', gemini: '#8e75ff', hermes: '#7c3aed', openai: '#0ea5e9', mock: '#64748b' }[a.provider] || '#888');
+const providerColorOf = (a) => ({ claude: '#d97757', codex: '#10a37f', gemini: '#8e75ff', hermes: '#7c3aed', openai: '#0ea5e9', mock: '#64748b' }[String(a.provider || '').replace(/^codex-[a-z0-9]+$/, 'codex')] || '#888');
 // 태그에 토큰은 office 가 따로 보여주므로 배지는 비용만
 function badgeFor(a, u) {
   return u.cost ? fmtCost(u.cost) : '';

@@ -1,6 +1,7 @@
 // 프로바이더 목록과 탐지 결과 캐시
-import claude from './claude.js';
-import codex from './codex.js';
+import claude, { observedModels, setObserveHook } from './claude.js';
+import codex, { makeCodex } from './codex.js';
+import path from 'node:path';
 import gemini from './gemini.js';
 import hermes from './hermes.js';
 import openai from './openai.js';
@@ -11,10 +12,30 @@ import { tr } from '../i18n.js';
 
 export const PROVIDERS = { claude, codex, gemini, hermes, openai, local, acp, mock };
 
+// 추가 계정 id 규칙(폴더 이름·프로바이더 id 에 들어가므로 영문·숫자만)
+export const ACCOUNT_ID = /^[a-z0-9]{4,16}$/;
+export const accountProviderId = (accId) => `codex-${accId}`;
+export const codexAccountHome = (dataHome, accId) => path.join(dataHome, 'accounts', `codex-${accId}`);
+
+// 설정의 codexAccounts 와 PROVIDERS 를 맞춘다(없어진 계정은 뺀다). 기본 프로바이더 뒤, 다른 AI 앞에 오게 순서를 다시 짠다
+export function syncCodexAccounts(accounts = [], dataHome) {
+  const want = new Map();
+  for (const a of accounts) if (ACCOUNT_ID.test(a?.id || '')) want.set(accountProviderId(a.id), a);
+  const rest = Object.entries(PROVIDERS).filter(([id]) => !id.startsWith('codex-'));
+  for (const k of Object.keys(PROVIDERS)) delete PROVIDERS[k];
+  for (const [id, p] of rest) {
+    PROVIDERS[id] = p;
+    if (id === 'codex') for (const [pid, a] of want) PROVIDERS[pid] = makeCodex({ id: pid, name: String(a.name || a.id).slice(0, 30), home: codexAccountHome(dataHome, a.id) });
+  }
+  return [...want.keys()];
+}
+
 export function providerInfo(p, detected) {
   return {
-    id: p.id, label: p.label, sub: p.sub, kind: p.kind, color: p.color,
+    id: p.id, label: p.label, sub: p.sub, kind: p.kind, color: p.color, base: p.base || p.id, accountName: p.account || '',
     efforts: p.efforts, caps: p.caps, login: p.login && { ...p.login, hint: tr(p.login.hint) }, ...(detected || {}),
+    // 추가 계정 이름(탐지 결과의 account = 로그인 표시와 섞이지 않게 따로)
+    ...(p.account ? { accountName: p.account } : {}),
   };
 }
 
@@ -28,6 +49,15 @@ export class ProviderRegistry {
     this.pending = null;
     this.modelCache = {}; // id → { at, version, list }
     this.timer = null;
+    syncCodexAccounts(store.settings?.codexAccounts || [], store.dirs?.home || '');
+    // Claude 별칭이 실제로 연결된 모델(예: opus → claude-opus-5-5)을 재시작해도 기억한다
+    Object.assign(observedModels, store.settings?.claudeSeen || {});
+    setObserveHook((alias, model) => {
+      if (!/^[a-z]+$/.test(alias) || !/^[\w.[\]-]{1,80}$/.test(model)) return;
+      store.settings.claudeSeen = { ...(store.settings.claudeSeen || {}), [alias]: model };
+      try { store.saveSettings(); } catch { /* 저장 실패해도 이번 실행엔 반영됨 */ }
+      delete this.modelCache.claude;
+    });
   }
 
   list() { return Object.values(PROVIDERS).map((p) => providerInfo(p, this.detected[p.id] || { checking: true })); }

@@ -1,5 +1,6 @@
 // Claude Code CLI 어댑터: claude -p 스트림 JSON 양방향(작업 중 지시 추가 가능)
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnCli, onLines, parseJsonLine, killTree, makeHandle, mimeOf, runQuick, authEnv } from './util.js';
@@ -7,20 +8,41 @@ import { TurnFeeder } from './feeder.js';
 import { tr } from '../i18n.js';
 
 // 별칭(opus·sonnet·haiku·fable)은 Claude Code가 항상 최신 모델로 연결해 줘서 업데이트가 자동 반영된다.
-// 실제로 연결된 전체 이름은 실행할 때(init 이벤트) 기록해 목록에 보여준다.
+// 화면에는 Claude Code 모델 고르기처럼 "Opus 5.5" 식 버전을 보여 준다. 버전은 ① 실제 실행에서 확인한 모델(설정에 기억)
+// ② Claude Code 가 서버에서 받아 둔 추가 모델 목록 ③ 이 앱이 아는 최신 버전 순으로 정한다
 const ALIASES = [
   { id: 'opus', label: 'Opus', tier: 'top' },
+  { id: 'fable', label: 'Fable', tier: 'top', premium: true },
   { id: 'sonnet', label: 'Sonnet', tier: 'balanced' },
   { id: 'haiku', label: 'Haiku', tier: 'fast' },
-  { id: 'fable', label: 'Fable', tier: 'top', premium: true },
 ];
+const KNOWN = { opus: 'claude-opus-5-5', fable: 'claude-fable-5-1', sonnet: 'claude-sonnet-5-5', haiku: 'claude-haiku-5-5' };
 const FIXED = [
   { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', tier: 'top', legacy: true },
   { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', tier: 'balanced', legacy: true },
   { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', tier: 'fast', legacy: true },
   { id: 'claude-fable-5-1', label: 'Claude Fable 5.1', tier: 'top', legacy: true },
 ];
-export const observedModels = {}; // 별칭 → 실제 모델 이름(최근 실행 기준)
+export const observedModels = {}; // 별칭 → 실제 모델 이름(최근 실행 기준). 앱이 설정에 기억해 두고 켤 때 다시 채운다
+let onObserve = null;
+export function setObserveHook(fn) { onObserve = fn; }
+
+// claude-opus-5-5 → Opus 5.5, claude-fable-5-1[1m] → Fable 5.1 (1M)
+export function claudeModelName(id = '') {
+  const m = String(id).match(/^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(\[1m\])?$/i);
+  if (!m) return String(id);
+  return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? `.${m[3]}` : ''}${m[4] ? ' (1M)' : ''}`;
+}
+
+const claudeDir = () => process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+// Claude Code 설정에서 모델 관련 값만 읽는다(계정 정보는 쓰지 않음)
+function claudePrefs() {
+  const s = readJson(path.join(claudeDir(), 'settings.json')) || {};
+  const main = readJson(process.env.CLAUDE_CONFIG_DIR ? path.join(claudeDir(), '.claude.json') : path.join(os.homedir(), '.claude.json')) || {};
+  const extra = Array.isArray(main.additionalModelOptionsCache) ? main.additionalModelOptionsCache : [];
+  return { model: typeof s.model === 'string' ? s.model : '', effort: typeof s.effortLevel === 'string' ? s.effortLevel : '', perModel: s.modelSettings || {}, extra };
+}
 
 function permArgs(p) {
   switch (p) {
@@ -70,11 +92,23 @@ export default {
 
   async models() {
     const efforts = ['low', 'medium', 'high', 'xhigh', 'max'];
+    const prefs = claudePrefs();
+    const base = (id) => String(id || '').replace(/\[1m\]$/i, '');
     const aliases = ALIASES.map((m) => {
-      const name = m.premium ? `${m.label} (${tr('최상위')})` : m.label;
-      return { ...m, efforts, label: observedModels[m.id] ? `${name} · ${tr('최신')} → ${observedModels[m.id]}` : `${name} · ${tr('최신 자동')}` };
+      // 서버가 준 추가 목록(예: claude-fable-5-1[1m])에 같은 계열이 있으면 그 버전
+      const fromCli = prefs.extra.map((x) => String(x?.value || '')).find((v) => v.startsWith(`claude-${m.id}-`));
+      const resolved = observedModels[m.id] || fromCli || KNOWN[m.id];
+      const source = observedModels[m.id] ? tr('실행에서 확인') : fromCli ? tr('Claude Code 목록') : tr('앱이 아는 최신');
+      const mine = prefs.model === m.id || base(prefs.model) === base(resolved);
+      // 네 화면(Claude Code)에선 기본 모델에 전체 노력 설정(effortLevel)이 쓰여서 그 값을 기본으로 본다
+      const myEffort = mine ? (prefs.effort || prefs.perModel?.[base(resolved)]?.effortLevel || '') : '';
+      return {
+        ...m, efforts, resolved, label: `${claudeModelName(base(resolved))}${mine ? ` (${tr('내 기본')})` : ''}`,
+        description: tr('{name} 최신 버전으로 항상 연결돼({source}: {id})', { name: m.label, source, id: resolved }),
+        defaultEffort: myEffort, recommendedEffort: 'medium', mine,
+      };
     });
-    return [...aliases, ...FIXED.map((m) => ({ ...m, efforts, label: `${m.label} (${tr('고정')})` }))];
+    return [...aliases, ...FIXED.map((m) => ({ ...m, efforts, label: `${claudeModelName(m.id)} (${tr('버전 고정')})` }))];
   },
 
   run(opts, emit) {
@@ -121,7 +155,10 @@ export default {
             sessionId = ev.session_id;
             emit({ type: 'session', id: ev.session_id });
             emit({ type: 'meta', model: ev.model });
-            if (agent.model && ev.model && agent.model !== ev.model) observedModels[agent.model] = ev.model;
+            if (agent.model && ev.model && agent.model !== ev.model && observedModels[agent.model] !== ev.model) {
+              observedModels[agent.model] = ev.model;
+              onObserve?.(agent.model, ev.model);
+            }
           } else if (ev.subtype === 'api_retry') emit({ type: 'notice', text: tr('API 재시도 중… ({n}/{max})', { n: ev.attempt ?? '', max: ev.max_retries ?? '' }) });
           break;
         case 'stream_event': {

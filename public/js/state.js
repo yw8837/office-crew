@@ -2,6 +2,7 @@
 import { useEffect, useReducer } from 'preact/hooks';
 import { get, connectEvents } from './api.js';
 import { t, setLang, getLang } from './i18n/index.js';
+import { setAccountNames } from './ui.js';
 
 export const state = {
   ready: false, error: null, connected: false,
@@ -109,6 +110,7 @@ async function resync() {
       agents: b.agents, teams: b.teams, sessions: b.sessions, settings: b.settings, providers: b.providers,
       usage: b.usage, skills: b.skills, connectors: b.connectors, plugins: b.plugins, skins: b.skins, schedules: b.schedules || [], active: new Set(b.active || []), cooldown: b.cooldown || {},
     });
+    setAccountNames(state.providers);
     applyLang();
     const keep = state.route.id;
     for (const k of Object.keys(state.sessionData)) if (k !== keep) delete state.sessionData[k];
@@ -190,7 +192,7 @@ function handle(type, d) {
       break;
     }
     case 'usage': state.usage = d; break;
-    case 'providers': state.providers = d; break;
+    case 'providers': state.providers = d; setAccountNames(d); break;
     case 'agents': state.agents = d; break;
     case 'teams': state.teams = d; break;
     case 'skills': state.skills = d; break;
@@ -198,6 +200,7 @@ function handle(type, d) {
     case 'plugins': state.plugins = d; break;
     case 'skins': state.skins = d; break;
     case 'schedules': state.schedules = d; break;
+    case 'skillKo': toast(d.saved ? t('스킬 설명 {n}개를 한글로 저장했어. 남은 것 {left}개.', { n: d.saved, left: d.missing }) : d.failed ? t('스킬 설명 번역이 끝나지 못했어. 세션을 확인해줘.') : t('번역 결과를 읽지 못했어. 세션의 답을 확인해줘.'), d.saved ? 'ok' : 'error'); break;
     case 'settings': state.settings = d; applyTheme(); applyLang(); break;
     case 'sessionsReset': resync(); break;
     default: break;
@@ -230,6 +233,7 @@ export async function boot() {
       providers: b.providers, usage: b.usage, skills: b.skills, connectors: b.connectors, plugins: b.plugins, skins: b.skins, schedules: b.schedules || [],
       active: new Set(b.active || []), cooldown: b.cooldown || {},
     });
+    setAccountNames(state.providers);
     applyTheme();
     applyLang();
     connectEvents((type, d) => {

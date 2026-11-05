@@ -4,6 +4,7 @@ import { html, Icon, Modal, Toggle, Avatar, ProviderChip, PERM_LABEL, EFFORT_LAB
 import { state, changed, toast, agentById, providerById } from '../state.js';
 import { get, post, put, del } from '../api.js';
 import { RoutingFields, routeText, PROFILE_LABEL } from './routing.js';
+import { SkillPicker, SOURCE_LABEL, skillDesc } from './skillpick.js';
 import { t } from '../i18n/index.js';
 
 const SKIN_TONES = ['#f6d5bd', '#f2c9a6', '#e3b38f', '#d9a77f', '#c98f68', '#a8714f', '#7a4e33'];
@@ -53,14 +54,7 @@ export function AgentEditor({ agent, onClose }) {
     avatar: { skin: SKIN_TONES[1], hair: HAIR[0], hairStyle: 'short', outfit: OUTFIT[Math.floor(Math.random() * OUTFIT.length)], accessory: 'none' },
     ...structuredClone(agent),
   }));
-  const [skillQ, setSkillQ] = useState('');
   const prov = providerById(a.provider);
-  // 선택한 스킬을 앞에, 나머지는 검색어로 걸러 최대 16개만
-  const q = skillQ.trim().toLowerCase();
-  const chosen = state.skills.filter((k) => a.skills.includes(k.id));
-  const rest = state.skills.filter((k) => !a.skills.includes(k.id) && (!q || `${k.name} ${k.description}`.toLowerCase().includes(q)));
-  const skillList = [...chosen, ...rest.slice(0, 16)];
-  const skillMore = Math.max(0, rest.length - 16);
   const set = (k, v) => setA((x) => ({ ...x, [k]: v }));
   const setAv = (k, v) => setA((x) => ({ ...x, avatar: { ...x.avatar, [k]: v } }));
   const setMany = (patch) => setA((x) => ({ ...x, ...patch }));
@@ -127,15 +121,12 @@ export function AgentEditor({ agent, onClose }) {
         <div class="field"><label>${t('역할 지침 (시스템 프롬프트)')}</label>
           <textarea class="textarea" style="min-height:110px" value=${a.systemPrompt} onInput=${(e) => set('systemPrompt', e.target.value)} placeholder=${t('이 에이전트가 늘 지킬 규칙·말투·산출물 형식')}></textarea></div>
         <div class="field"><label>${t('스킬 (항상 적용)')} ${a.skills.length > 0 && html`<span class="chip accent">${t('{n}개 선택', { n: a.skills.length })}</span>`}</label>
-          <input class="input" style="margin-bottom:6px" placeholder=${t('스킬 검색 ({n}개)', { n: state.skills.length })} value=${skillQ} onInput=${(e) => setSkillQ(e.target.value)} />
-          <div class="pick">${skillList.map((k) => html`<span class=${`chip${a.skills.includes(k.id) ? ' on' : ''}`} title=${k.description} onClick=${() => set('skills', a.skills.includes(k.id) ? a.skills.filter((x) => x !== k.id) : [...a.skills, k.id])}>${k.name}<span class="muted">·${k.source}</span></span>`)}
-            ${skillMore > 0 && html`<span class="small muted" style="align-self:center">${t('외 {n}개 — 검색해서 찾아', { n: skillMore })}</span>`}</div>
-          ${!state.skills.length && html`<div class="hint">${t('스킬이 없어. 스킬 메뉴에서 만들거나 가져와.')}</div>`}
+          <${SkillPicker} agent=${a} onChange=${(ids) => set('skills', ids)} />
         </div>
         ${prov?.caps?.connectors && html`<div class="field"><label>${t('커넥터 (MCP 서버)')}</label>
           <div class="pick">${state.connectors.map((c) => html`<span class=${`chip${a.connectors.includes(c.id) ? ' on' : ''}`} onClick=${() => set('connectors', a.connectors.includes(c.id) ? a.connectors.filter((x) => x !== c.id) : [...a.connectors, c.id])}>🔌 ${c.name}</span>`)}</div>
           <div class="hint">${state.connectors.length ? t('CLI에 이미 등록된 커넥터는 자동으로 같이 쓰여.') : t('앱 커넥터가 없어 — 커넥터 메뉴에서 추가해. (CLI에 이미 등록된 커넥터는 자동 사용)')}</div></div>`}
-        ${['claude', 'codex'].includes(a.provider) && html`<div class="field"><div class="row"><${Toggle} checked=${a.light} onChange=${(v) => set('light', v)} /><div><b>${t('가벼운 모드')}</b><div class="hint">${a.provider === 'claude' ? t('CLI의 개인 설정·플러그인·훅·CLAUDE.md를 끄고 실행(--safe-mode). 빠르고 토큰을 덜 써.') : t('로그인·모델 설정은 그대로 두고 플러그인·앱·브라우저·컴퓨터 사용·이미지 생성 등 무거운 기능만 꺼서 실행. 매번 붙는 설명이 줄어 토큰을 크게 아껴.')}</div></div></div></div>`}
+        ${['claude', 'codex'].includes(prov?.base || a.provider) && html`<div class="field"><div class="row"><${Toggle} checked=${a.light} title=${t('가벼운 모드')} onChange=${(v) => set('light', v)} /><div><b>${t('가벼운 모드')}</b><div class="hint">${a.provider === 'claude' ? t('CLI의 개인 설정·플러그인·훅·CLAUDE.md를 끄고 실행(--safe-mode). 빠르고 토큰을 덜 써.') : t('로그인·모델 설정은 그대로 두고 플러그인·앱·브라우저·컴퓨터 사용·이미지 생성 등 무거운 기능만 꺼서 실행. 매번 붙는 설명이 줄어 토큰을 크게 아껴.')}</div></div></div></div>`}
       </div>
       <div>
         <div class="field"><label>${t('미리보기')}</label>
@@ -329,20 +320,28 @@ export function SkillsPage() {
   const [q, setQ] = useState('');
   const rescan = async () => { try { state.skills = await get('/api/skills?rescan=1'); changed(); toast(t('다시 찾았어'), 'ok'); } catch (e) { toast(e.message, 'error'); } };
   const open = async (k) => { try { const full = await get(`/api/skills/${encodeURIComponent(k.id)}`); if (k.readOnly) setView(full); else setEdit(full); } catch (e) { toast(e.message, 'error'); } };
-  const list = state.skills.filter((k) => !q || `${k.name} ${k.description}`.toLowerCase().includes(q.toLowerCase()));
+  const [src, setSrc] = useState('');
+  const list = state.skills.filter((k) => (!src || k.source === src) && (!q || `${k.name} ${k.description} ${k.descKo || ''}`.toLowerCase().includes(q.toLowerCase())));
   const groups = [['app', t('앱 스킬')], ['plugin', t('플러그인 스킬')], ['claude', t('Claude Code 스킬')], ['codex', t('Codex 스킬')], ['agents', t('공용(.agents) 스킬')], ['gemini', t('Gemini 스킬')]];
+  const counts = {};
+  for (const k of state.skills) counts[k.source] = (counts[k.source] || 0) + 1;
   return html`<div class="page"><div class="page-inner">
     <${PageHead} title=${t('스킬')} desc=${t('자주 쓰는 지침 묶음. 입력창에서 /이름 으로 실행하거나, 에이전트에 붙여 항상 적용해.')}>
       <button class="btn" onClick=${rescan}><${Icon} name="refresh" /> ${t('다시 찾기')}</button>
       <button class="btn primary" onClick=${() => setEdit({ name: '', description: '', content: '' })}><${Icon} name="plus" /> ${t('새 스킬')}</button>
     </${PageHead}>
-    <input class="input" style="margin-bottom:12px" placeholder=${t('스킬 검색')} value=${q} onInput=${(e) => setQ(e.target.value)} />
+    <input class="input" style="margin-bottom:8px" placeholder=${t('스킬 검색')} aria-label=${t('스킬 검색')} value=${q} onInput=${(e) => setQ(e.target.value)} />
+    <div class="seg" role="group" aria-label=${t('출처')} style="margin-bottom:12px;flex-wrap:wrap">
+      <button class=${!src ? 'on' : ''} aria-pressed=${!src} onClick=${() => setSrc('')}>${t('전체')} <span class="muted">${state.skills.length}</span></button>
+      ${groups.filter(([g]) => counts[g]).map(([g]) => html`<button class=${src === g ? 'on' : ''} aria-pressed=${src === g} onClick=${() => setSrc(g)}>${SOURCE_LABEL()[g] || g} <span class="muted">${counts[g]}</span></button>`)}
+    </div>
+    <${SkillKoCard} />
     ${groups.map(([src, label]) => {
       const items = list.filter((k) => k.source === src);
       if (!items.length) return null;
       return html`<div class="section">${label} <span class="chip">${items.length}</span></div>
         <div class="list">${items.slice(0, 200).map((k) => html`<div class="li-row" style="cursor:pointer" onClick=${() => open(k)}>
-          <span>✨</span><div class="grow"><div class="t">/${k.name}</div><div class="d ellipsis">${k.description}</div></div>${k.readOnly ? html`<span class="chip">${t('읽기 전용')}</span>` : html`<span class="chip accent">${t('편집')}</span>`}
+          <span>✨</span><div class="grow"><div class="t">/${k.name}</div><div class="d ellipsis" title=${k.description}>${skillDesc(k)}</div></div>${k.readOnly ? html`<span class="chip">${t('읽기 전용')}</span>` : html`<span class="chip accent">${t('편집')}</span>`}
         </div>`)}</div>`;
     })}
     ${!list.length && html`<div class="empty">${t('스킬이 없어.')}</div>`}
@@ -350,9 +349,33 @@ export function SkillsPage() {
     ${view && html`<${Modal} title=${`/${view.name}`} onClose=${() => setView(null)} size="wide" foot=${html`
       <button class="btn" onClick=${async () => { try { await post('/api/skills', { name: view.name, description: view.description, content: view.content }); toast(t('앱 스킬로 복사했어(편집 가능)'), 'ok'); setView(null); } catch (e) { toast(e.message, 'error'); } }}><${Icon} name="copy" /> ${t('앱 스킬로 복사')}</button>
       <button class="btn primary" onClick=${() => setView(null)}>${t('닫기')}</button>`}>
-      <div class="small muted" style="margin-bottom:8px">${view.path}</div><p>${view.description}</p><pre class="raw">${view.content}</pre>
+      <div class="small muted" style="margin-bottom:8px">${view.path}</div>${view.descKo && html`<p>${view.descKo}</p>`}<p class=${view.descKo ? 'small muted' : ''}>${view.description}</p><pre class="raw">${view.content}</pre>
     </${Modal}>`}
   </div></div>`;
+}
+
+// 아직 한글 설명이 없는 스킬을 고른 에이전트(네 AI)에게 번역시키는 카드. 없으면 안 보인다
+function SkillKoCard() {
+  const [info, setInfo] = useState(null);
+  const [agentId, setAgentId] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { get('/api/skill-ko').then(setInfo).catch(() => {}); }, [state.skills]);
+  if (!info?.missing) return null;
+  const agents = state.agents.filter((a) => a.provider !== 'mock');
+  const pick = agentId || agents[0]?.id || '';
+  const run = async () => {
+    if (!pick || !confirm(t('한글 설명이 없는 스킬 {n}개 중 최대 {batch}개를 고른 에이전트가 번역해. 그 AI의 사용량을 써. 시작할까?', { n: info.missing, batch: info.batch }))) return;
+    setBusy(true);
+    try {
+      const r = await post('/api/skill-ko/translate', { agentId: pick });
+      if (r.started) { toast(t('번역을 시작했어. 끝나면 목록에 한글 설명이 붙어.'), 'ok'); (await import('../state.js')).go('session', r.sessionId); }
+    } catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
+  };
+  return html`<div class="card row wrap" style="gap:10px;margin-bottom:12px;align-items:center">
+    <span style="flex:1;min-width:220px">🌐 <b>${t('한글 설명이 없는 스킬 {n}개', { n: info.missing })}</b><div class="hint">${t('새로 깐 스킬은 영어 설명 그대로야. 고른 에이전트가 번역하고, 결과는 이 PC에만 저장돼.')}</div></span>
+    <select class="select sm" aria-label=${t('번역할 에이전트')} value=${pick} onChange=${(e) => setAgentId(e.target.value)}>${agents.map((a) => html`<option value=${a.id}>${a.emoji} ${a.name}</option>`)}</select>
+    <button class="btn primary sm" disabled=${busy || !pick} onClick=${run}>${t('한글 설명 만들기')}</button>
+  </div>`;
 }
 
 function SkillEditor({ k, onClose }) {

@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { html, Icon, Modal, Toggle, ProviderChip, providerColor, fmtTok, fmtCost, usageTotal, officeMod, EFFORT_LABEL, imageFileToDataURL } from '../ui.js';
 import { state, changed, toast, applyTheme, applyLang, agentById } from '../state.js';
-import { get, post, put, del } from '../api.js';
+import { get, post, put, patch, del } from '../api.js';
 import { PageHead } from './manage.js';
 import { Limits } from './session.js';
 import { t, LANGS, getLang } from '../i18n/index.js';
@@ -36,6 +36,23 @@ function Accounts() {
     setBusy((b) => ({ ...b, [id]: false }));
   };
   const refreshAll = async () => { setBusy({ all: true }); try { state.providers = await get('/api/providers?refresh=1'); changed(); } catch (e) { toast(e.message, 'error'); } setBusy({}); };
+  const addAccount = async () => {
+    const name = prompt(t('추가할 ChatGPT 계정 이름(예: 회사 계정)'), t('계정 {n}', { n: (state.settings.codexAccounts || []).length + 2 }));
+    if (name === null) return;
+    try {
+      const r = await post('/api/accounts/codex', { name });
+      toast(t("'{name}' 계정을 만들었어. 그 줄의 로그인을 눌러 다른 ChatGPT 계정으로 로그인해.", { name: r.name }), 'ok', 7000);
+    } catch (e) { toast(e.message, 'error'); }
+  };
+  const renameAccount = async (p) => {
+    const name = prompt(t('계정 이름'), p.accountName);
+    if (!name) return;
+    try { await patch(`/api/accounts/codex/${p.id.slice(6)}`, { name }); } catch (e) { toast(e.message, 'error'); }
+  };
+  const removeAccount = async (p) => {
+    if (!confirm(t("'{name}' 계정을 목록에서 뺄까? 이 계정을 쓰던 에이전트는 다른 AI로 바꿔야 해. 로그인 정보 폴더는 지우지 않아.", { name: p.accountName }))) return;
+    try { await del(`/api/accounts/codex/${p.id.slice(6)}`); } catch (e) { toast(e.message, 'error'); }
+  };
   const login = async (p) => {
     try {
       const r = await post(`/api/providers/${p.id}/login`);
@@ -47,7 +64,7 @@ function Accounts() {
     <div class="row" style="margin-bottom:10px"><span class="grow" style="flex:1"></span><button class="btn" disabled=${busy.all} onClick=${refreshAll}><${Icon} name="refresh" /> ${t('전부 다시 확인')}</button></div>
     <div class="list">
       ${state.providers.map((p) => html`<div class="li-row pcard">
-        <div class="plogo" style=${`background:${providerColor(p.id)}`}>${p.label.slice(0, 1)}</div>
+        <div class="plogo" style=${`background:${providerColor(p.id)}`}>${p.base === 'codex' && p.id !== 'codex' ? '+' : p.label.slice(0, 1)}</div>
         <div style="min-width:0">
           <div class="t">${p.label} ${p.version ? html`<span class="chip mono">${p.version}</span>` : ''}
             ${p.checking ? html`<span class="chip">${t('확인 중…')}</span>` : !p.installed ? html`<span class="chip err">${t('미설치')}</span>` : p.loggedIn ? html`<span class="chip ok">${t('사용 가능')}</span>` : html`<span class="chip warn">${t('로그인 필요')}</span>`}</div>
@@ -55,10 +72,14 @@ function Accounts() {
           ${p.account && html`<div class="d">👤 ${p.account}</div>`}
           ${p.note && html`<div class="d" style="color:var(--warn)">${p.note}</div>`}
           ${AUTH_PROVIDERS.includes(p.id) && html`<${AuthMode} p=${p} />`}
+          ${p.id === 'codex' && html`<div class="d">${t('ChatGPT 계정이 여러 개면 "계정 추가"로 붙여. 한 계정이 한도에 걸리면 자동 이어받기가 다음 계정으로 넘겨.')}</div>`}
           <div class="d">${t('노력 단계: {list}', { list: (p.efforts || []).map((e) => EFFORT_LABEL[e] || e).join(' · ') || t('없음') })} · ${p.caps?.steer ? t('작업 중 지시 추가 ✓') : t('지시는 턴 끝나고 반영')} · ${p.caps?.images ? t('이미지 ✓') : t('이미지는 파일 경로로')}</div>
         </div>
         <div class="row">
           ${p.login && html`<button class="btn sm" onClick=${() => login(p)}><${Icon} name="login" /> ${t('로그인')}</button>`}
+          ${p.id === 'codex' && html`<button class="btn sm" onClick=${addAccount}><${Icon} name="plus" /> ${t('계정 추가')}</button>`}
+          ${p.base === 'codex' && p.id !== 'codex' && html`<button class="btn sm ghost" title=${t('이름 바꾸기')} aria-label=${t('이름 바꾸기')} onClick=${() => renameAccount(p)}><${Icon} name="edit" /></button>
+            <button class="btn sm ghost" title=${t('계정 빼기')} aria-label=${t('계정 빼기')} onClick=${() => removeAccount(p)}><${Icon} name="trash" /></button>`}
           ${p.id === 'openai' || p.id === 'gemini' ? html`<button class="btn sm" onClick=${() => { state.ui.settingsTab = 'keys'; changed(); }}>${t('API 키')}</button>` : ''}
           <button class="btn sm ghost" disabled=${busy[p.id]} onClick=${() => refresh(p.id)}>${busy[p.id] ? html`<span class="spin"></span>` : t('다시 확인')}</button>
         </div>
@@ -339,7 +360,18 @@ export function PolicyNotice({ onOk }) {
 }
 
 function About() {
-  return html`<${PolicyNotice} /><div class="card">
+  const quit = async () => {
+    if (!confirm(t('오피스 크루를 끌까? 진행 중인 작업과 예약 작업도 멈춰. 다시 쓰려면 바로가기로 켜.'))) return;
+    try {
+      const r = await post('/api/quit');
+      if (r.ok) toast(t('오피스 크루를 껐어. 이 창은 닫아도 돼.'), 'ok', 10000);
+      else toast(t('이 방식으로 켠 서버는 여기서 끌 수 없어. 켠 터미널에서 Ctrl+C로 꺼줘.'), 'error', 8000);
+    } catch (e) { toast(e.message, 'error'); }
+  };
+  return html`<${PolicyNotice} /><div class="card row wrap" style="gap:10px;align-items:center;margin-bottom:12px">
+    <span style="flex:1;min-width:220px"><b>⏻ ${t('오피스 크루 끄기')}</b><div class="hint">${t('창 없이 켰다면 여기서 꺼. 앱 창만 닫으면 서버는 계속 켜져 있어서 예약 작업이 돌아.')}</div></span>
+    <button class="btn danger sm" onClick=${quit}>${t('끄기')}</button>
+  </div><div class="card">
     <h4>🏢 ${t('오피스 크루')} ${state.version}</h4>
     <p class="small">${t('여러 AI CLI(Claude Code·Codex·Gemini CLI·Hermes)와 OpenAI 호환 API를 한 화면에서 팀으로 묶어 쓰는 로컬 앱이야. 서버는 이 PC(127.0.0.1)에서만 열리고, 런타임 의존성이 없어 가벼워.')}</p>
     <ul class="small">

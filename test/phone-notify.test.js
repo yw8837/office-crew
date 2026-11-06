@@ -2,7 +2,7 @@
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { startTestApp } from './helpers.js';
+import { startTestApp, freePort } from './helpers.js';
 import { buildRequest, checkPhoneUrl } from '../server/notify.js';
 
 let t;
@@ -17,7 +17,8 @@ before(async () => {
     req.on('data', (c) => { body += c; });
     req.on('end', () => { got.push({ url: req.url, body: JSON.parse(body || '{}') }); res.statusCode = replyCode; res.end('ok'); });
   });
-  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const port = await freePort(); // fetch 가 막는 포트에 걸리지 않게
+  await new Promise((r) => server.listen(port, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
 });
 after(async () => { server.close(); server.closeAllConnections?.(); try { await t.close(); } catch { /* 윈도우 파일 잠금 무시 */ } });
@@ -26,7 +27,7 @@ beforeEach(() => { got = []; replyCode = 200; });
 const setup = (type, path = '/hook-secret') => Object.assign(t.app.store.settings, { phoneNotify: true, phoneType: type, phoneUrl: `${base}${path}` });
 const agent = async (name) => (await t.api('POST', '/api/agents', { name, role: '조사', provider: 'mock', permission: 'plan', routing: 'manual' })).json;
 const run = async (a, text = '알림 시험') => {
-  const s = (await t.api('POST', '/api/sessions', { teamId: null, agentId: a.id, title: '비밀 세션 제목' })).json;
+  const s = (await t.api('POST', '/api/sessions', { teamId: null, agentId: a.id })).json;
   await t.api('POST', `/api/sessions/${s.id}/messages`, { text });
   await t.waitFor(() => t.app.store.getSession(s.id).runs.at(-1)?.endedAt, 15000, '실행 끝');
   return s.id;
@@ -34,9 +35,12 @@ const run = async (a, text = '알림 시험') => {
 
 test('요청 모양: ntfy 는 주소에서 주제를 빼고 JSON, 웹훅은 흔한 서비스 필드까지', () => {
   const n = buildRequest('ntfy', 'https://ntfy.sh/my-topic', { title: '승인이 필요해', message: '세션' });
-  assert.equal(n.url, 'https://ntfy.sh');
+  assert.equal(n.url, 'https://ntfy.sh/');
   assert.deepEqual(n.body, { topic: 'my-topic', title: '승인이 필요해', message: '세션' });
   assert.throws(() => buildRequest('ntfy', 'https://ntfy.sh/', { title: 'a', message: 'b' }), /주제/);
+  const own = buildRequest('ntfy', 'https://my.host/ntfy/secret-topic?auth=TKN', { title: 'a', message: 'b' });
+  assert.equal(own.url, 'https://my.host/ntfy/?auth=TKN', '직접 올린 서버의 경로와 인증을 지킨다');
+  assert.equal(own.body.topic, 'secret-topic');
   const w = buildRequest('webhook', 'https://x.test/h', { title: 'T', message: 'M', status: 'done' });
   assert.equal(w.url, 'https://x.test/h');
   assert.deepEqual([w.body.title, w.body.status, w.body.text, w.body.content], ['T', 'done', 'T\nM', 'T\nM']);
@@ -62,7 +66,8 @@ test('작업이 끝나면 한 번만 보내고, 대화 내용은 안 보낸다',
   assert.equal(got[0].url, '/hook-secret');
   assert.equal(got[0].body.title, '작업이 끝났어');
   assert.equal(got[0].body.status, 'done');
-  assert.doesNotMatch(JSON.stringify(got[0].body), /절대 밖으로/);
+  assert.equal(got[0].body.message, '끝담당', '에이전트 이름');
+  assert.doesNotMatch(JSON.stringify(got[0].body), /절대 밖으로/, '자동 세션 제목(첫 메시지)도 안 나간다');
 });
 
 test('승인을 기다리면 알리고, 같은 대기는 한 번만, 다시 기다리면 또 알린다', async () => {
@@ -112,4 +117,33 @@ test('시험 보내기: 눌렀을 때만 보내고 실패는 알려 준다', asy
   assert.match(r.json.error, /503/);
   t.app.store.settings.phoneUrl = '';
   assert.equal((await t.api('POST', '/api/phone/test', {})).status, 400);
+});
+
+test('같은 상태는 한 번만 보내고, 멈춤은 안 보낸다', async () => {
+  setup('webhook', '/dedupe');
+  const a = await agent('중복담당');
+  const s = (await t.api('POST', '/api/sessions', { teamId: null, agentId: a.id })).json;
+  const run = { id: 'run-dedupe', status: 'done' };
+  for (let i = 0; i < 3; i++) t.app.bus.emit('run', { sessionId: s.id, run });
+  t.app.bus.emit('run', { sessionId: s.id, run: { id: 'run-stop', status: 'stopped' } });
+  await t.waitFor(() => got.length >= 1, 3000, '수신');
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(got.length, 1);
+  t.app.store.settings.phoneNotify = false;
+});
+
+test('가린 값에 덧붙이면 조용히 무시하지 않고 거부, 주제 없는 ntfy 주소도 거부, 실패는 설정에 보인다', async () => {
+  const secret = `${base}/token-abcdefgh9999`;
+  const s = (await t.api('PUT', '/api/settings', { phoneUrl: secret, phoneType: 'webhook', phoneNotify: true })).json;
+  assert.equal((await t.api('PUT', '/api/settings', { phoneUrl: `${s.phoneUrl}-changed` })).status, 400);
+  assert.equal(t.app.store.settings.phoneUrl, secret);
+  assert.equal((await t.api('PUT', '/api/settings', { phoneUrl: 'https://ntfy.sh/', phoneType: 'ntfy' })).status, 400);
+  replyCode = 500;
+  assert.equal((await t.api('POST', '/api/phone/test', {})).status, 502);
+  assert.match((await t.api('GET', '/api/bootstrap')).json.settings.phoneError, /500/);
+  assert.ok(t.events.some((e) => e.type === 'settings' && /500/.test(e.data.phoneError || '')), '화면에도 알린다');
+  replyCode = 200;
+  assert.equal((await t.api('POST', '/api/phone/test', {})).status, 200);
+  assert.equal((await t.api('GET', '/api/bootstrap')).json.settings.phoneError, '', '성공하면 지운다');
+  await t.api('PUT', '/api/settings', { phoneUrl: '', phoneNotify: false, phoneType: 'ntfy' });
 });

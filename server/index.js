@@ -21,7 +21,7 @@ import { resolveCommand } from './providers/util.js';
 import { initProcTracker, reapLeftovers, otherAppRunning } from './providers/procs.js';
 import { SessionWatch } from './watch.js';
 import { Board } from './board.js';
-import { PhoneNotify, checkPhoneUrl } from './notify.js';
+import { PhoneNotify, checkPhoneUrl, buildRequest } from './notify.js';
 import { tr, bindLang, serverLang } from './i18n.js';
 import { Scheduler, cleanSchedule } from './scheduler.js';
 
@@ -227,7 +227,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   const scheduler = new Scheduler({ store, orch, bus });
   const watch = new SessionWatch(bus);
   const board = new Board({ store, orch, bus, appHome: dirs.home });
-  const phone = new PhoneNotify({ store, bus });
+  const phone = new PhoneNotify({ store, bus, onError: () => bus.emit('settings', publicSettings()) });
   const token = loadToken(home);
   let actualPort = port;
 
@@ -235,6 +235,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     const s = structuredClone(store.settings);
     s.apiKeys = Object.fromEntries(Object.entries(s.apiKeys || {}).map(([k, v]) => [k, mask(v)]));
     s.phoneUrl = mask(s.phoneUrl); // 주소 자체가 비밀일 수 있다(웹훅 토큰, ntfy 주제)
+    s.phoneError = phone.lastError;
     s.apiProfiles = (s.apiProfiles || []).map((p) => ({ ...p, apiKey: mask(p.apiKey) }));
     s.acpAgents = (s.acpAgents || []).map((a) => ({ ...a, env: maskSecrets(a.env) }));
     return s;
@@ -561,7 +562,12 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     if ('desktopNotify' in b) b.desktopNotify = b.desktopNotify === true;
     if ('phoneNotify' in b) b.phoneNotify = b.phoneNotify === true;
     if ('phoneType' in b) b.phoneType = b.phoneType === 'webhook' ? 'webhook' : 'ntfy';
-    if ('phoneUrl' in b) b.phoneUrl = checkPhoneUrl(keep(b.phoneUrl, cur.phoneUrl || ''));
+    // 가린 값을 그대로 보내면 예전 주소 유지. 가린 값에 덧붙인 건 주소 형식 오류로 거부된다
+    if ('phoneUrl' in b) b.phoneUrl = cur.phoneUrl && b.phoneUrl === mask(cur.phoneUrl) ? cur.phoneUrl : checkPhoneUrl(b.phoneUrl);
+    if ('phoneUrl' in b || 'phoneType' in b) {
+      const url = b.phoneUrl ?? cur.phoneUrl;
+      if (url) { try { buildRequest(b.phoneType ?? cur.phoneType, url, { title: '', message: '' }); } catch (e) { throw new HttpError(400, e.message); } }
+    }
     // ACP 에이전트: 명령은 셸 없이 실행되지만 형식은 엄격히(이름·명령·인자 문자열만)
     if ('acpAgents' in b) {
       const seen = new Set();

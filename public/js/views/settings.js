@@ -303,6 +303,7 @@ function Storage() {
       <div class="hint">${t('가볍게: 반복 애니메이션을 끄고 걷기만 유지 · 정지 화면: 애니메이션 0(말풍선·이름표만 갱신). 저사양 PC·노트북 배터리 절약에 좋아.')}</div>
       <div class="row" style="margin-top:10px"><${Toggle} checked=${s.reducedMotion} onChange=${(v) => saveSettings({ reducedMotion: v })} /><span>${t('화면 전환 애니메이션 줄이기(멀미 방지)')}</span></div>
     </div>
+    <${PhoneCard} s=${s} />
     <div class="card"><h4>${t('데스크톱 알림')}</h4>
       <div class="row"><${Toggle} checked=${s.desktopNotify === true} onChange=${async (v) => {
         if (v && !(await askNotifyPermission())) { toast(t('알림이 막혀 있어. 브라우저 사이트 설정에서 알림을 허용해줘.'), 'warn'); return; }
@@ -414,4 +415,27 @@ export function UsagePage() {
       return html`<div class="li-row"><div style="width:140px" class="ellipsis"><b>${a?.name || id}</b></div><div class="grow"><div class="bar"><i style=${`width:${(usageTotal(v) / max) * 100}%;background:${providerColor(a?.provider)}`}></i></div></div><b>${fmtTok(usageTotal(v))}</b><span class="muted small">${fmtCost(v.cost)}</span></div>`;
     })}${!byA.length && html`<div class="li-row muted">${t('아직 기록이 없어.')}</div>`}</div>
   </div></div>`;
+}
+
+// 휴대폰 알림: 사용자가 정한 주소로 상태와 세션 제목만 보낸다
+function PhoneCard({ s }) {
+  const [url, setUrl] = useState(null);
+  const shown = url ?? (s.phoneUrl || '');
+  const saveUrl = async () => {
+    if (url === null) return true;
+    try { state.settings = await put('/api/settings', { phoneUrl: url }); setUrl(null); changed(); return true; } catch (e) { toast(e.message, 'error'); return false; }
+  };
+  const test = async () => {
+    if (!(await saveUrl())) return;
+    try { await post('/api/phone/test', {}); toast(t('시험 알림을 보냈어. 휴대폰을 확인해줘.'), 'ok'); } catch (e) { toast(e.message, 'error'); }
+  };
+  return html`<div class="card"><h4>${t('휴대폰 알림')}</h4>
+    <div class="row"><${Toggle} checked=${s.phoneNotify === true} onChange=${async (v) => { if (await saveUrl()) saveSettings({ phoneNotify: v }); }} /><span>${t('승인 대기·작업 끝·실패를 휴대폰으로 보내기')}</span></div>
+    <div class="field" style="margin-top:10px"><label>${t('받는 곳')}</label>
+      <div class="seg" role="group" aria-label=${t('받는 곳')} style="align-self:flex-start"><button class=${s.phoneType !== 'webhook' ? 'on' : ''} onClick=${() => saveSettings({ phoneType: 'ntfy' })}>ntfy</button><button class=${s.phoneType === 'webhook' ? 'on' : ''} onClick=${() => saveSettings({ phoneType: 'webhook' })}>${t('웹훅')}</button></div></div>
+    <div class="field"><label for="phone-url">${t('주소')}</label><input id="phone-url" class="input mono" value=${shown} placeholder=${s.phoneType === 'webhook' ? 'https://hooks.slack.com/services/…' : 'https://ntfy.sh/…'} onInput=${(e) => setUrl(e.target.value)} onBlur=${saveUrl} /></div>
+    <div class="row" style="gap:8px"><button class="btn sm" disabled=${!shown} onClick=${test}>${t('시험 보내기')}</button></div>
+    ${s.phoneError && html`<div class="notice" style="margin-top:8px">⚠️ ${t('마지막 알림을 못 보냈어: {msg}', { msg: s.phoneError })}</div>`}
+    <div class="hint" style="margin-top:8px">${t('상태와 팀·에이전트 이름만 밖으로 나가고 대화 내용과 세션 제목은 안 나가. ntfy 공개 주제는 이름을 아는 사람이면 누구나 볼 수 있으니 맞히기 어려운 이름을 써.')}</div>
+  </div>`;
 }

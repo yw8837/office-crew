@@ -24,6 +24,9 @@ export function defaultSettings() {
     stallMinutes: 30,           // 출력이 이만큼 없으면 멈춘 걸로 보고 끈다(도구가 도는 중엔 4배, 0이면 끔)
     dailyBudget: false,         // 하루 예산: 켜면 주간 한도의 일정 몫만 하루에 쓰게 조절
     dailyBudgetPercent: 13,     // 하루 몫(주간 사용률 %포인트, 1/7 ≈ 14)
+    phoneNotify: false,         // 휴대폰 알림: 사용자가 정한 주소로 상태만 보낸다
+    phoneType: 'ntfy',          // ntfy | webhook
+    phoneUrl: '',
     desktopNotify: false,       // 창이 뒤에 있을 때 승인 대기·작업 끝을 데스크톱 알림으로
     apiProfiles: [
       { id: 'openai', name: 'OpenAI API', baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-5.1' },

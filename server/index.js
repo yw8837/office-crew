@@ -20,6 +20,7 @@ import { ACP_PRESETS } from './providers/acp.js';
 import { resolveCommand } from './providers/util.js';
 import { initProcTracker, reapLeftovers, otherAppRunning } from './providers/procs.js';
 import { SessionWatch } from './watch.js';
+import { Board } from './board.js';
 import { tr, bindLang, serverLang } from './i18n.js';
 import { Scheduler, cleanSchedule } from './scheduler.js';
 
@@ -224,6 +225,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   orch.recover();
   const scheduler = new Scheduler({ store, orch, bus });
   const watch = new SessionWatch(bus);
+  const board = new Board({ store, orch, bus, appHome: dirs.home });
   const token = loadToken(home);
   let actualPort = port;
 
@@ -245,7 +247,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     version: VERSION, home, agents: store.all('agents'), teams: store.all('teams'), sessions: store.listSessions(),
     settings: publicSettings(), providers: providers.list(), usage: usage.snapshot(), skills: catalog.skills(),
     connectors: publicConnectors(), plugins: store.all('plugins'), skins: store.all('skins'),
-    active: [...orch.ctx.keys()], cooldown: orch.restingList(), schedules: scheduler.list(),
+    active: [...orch.ctx.keys()], cooldown: orch.restingList(), schedules: scheduler.list(), tasks: board.list(),
   }));
 
   // 프로바이더
@@ -358,6 +360,14 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   route('DELETE', '/api/teams/([\\w-]+)', async (req, url, [id]) => { store.remove('teams', id); bus.emit('teams', store.all('teams')); return { ok: true }; });
 
   // 예약 작업
+  // 칸반 보드
+  route('GET', '/api/tasks', () => board.list());
+  route('POST', '/api/tasks', async (req) => board.save(await readJson(req)));
+  route('PUT', '/api/tasks/([\\w-]+)', async (req, url, [id]) => board.save(await readJson(req), id));
+  route('DELETE', '/api/tasks/([\\w-]+)', async (req, url, [id]) => board.remove(id));
+  route('POST', '/api/tasks/([\\w-]+)/start', async (req, url, [id]) => board.start(id));
+  route('POST', '/api/tasks/([\\w-]+)/close', async (req, url, [id]) => board.setClosed(id, true));
+  route('POST', '/api/tasks/([\\w-]+)/reopen', async (req, url, [id]) => board.setClosed(id, false));
   route('GET', '/api/schedules', () => scheduler.list());
   route('POST', '/api/schedules', async (req) => scheduler.save(cleanSchedule({ ...(await readJson(req)), id: undefined }, null, store)));
   route('PUT', '/api/schedules/([\\w-]+)', async (req, url, [id]) => {
@@ -784,7 +794,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   }
 
   return {
-    server, store, bus, orch, providers, catalog, usage, token, dirs, scheduler, watch,
+    server, store, bus, orch, providers, catalog, usage, token, dirs, scheduler, watch, board,
     listen(p = port, host = HOST) {
       return new Promise((resolve, reject) => {
         server.once('error', reject);

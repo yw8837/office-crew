@@ -7,7 +7,7 @@ import { setAccountNames } from './ui.js';
 export const state = {
   ready: false, error: null, connected: false,
   version: '', home: '',
-  agents: [], teams: [], sessions: [], settings: {}, providers: [], usage: {}, skills: [], connectors: [], plugins: [], skins: [], schedules: [], watch: [],
+  agents: [], teams: [], sessions: [], settings: {}, providers: [], usage: {}, skills: [], connectors: [], plugins: [], skins: [], schedules: [], watch: [], tasks: [],
   active: new Set(),
   sessionData: {}, // id → 전체 세션
   live: {}, // sessionId → agentId → 상태
@@ -108,7 +108,7 @@ async function resync() {
     const b = await get('/api/bootstrap');
     Object.assign(state, {
       agents: b.agents, teams: b.teams, sessions: b.sessions, settings: b.settings, providers: b.providers,
-      usage: b.usage, skills: b.skills, connectors: b.connectors, plugins: b.plugins, skins: b.skins, schedules: b.schedules || [], active: new Set(b.active || []), cooldown: b.cooldown || {},
+      usage: b.usage, skills: b.skills, connectors: b.connectors, plugins: b.plugins, skins: b.skins, schedules: b.schedules || [], tasks: b.tasks || [], active: new Set(b.active || []), cooldown: b.cooldown || {},
     });
     setAccountNames(state.providers);
     applyLang();
@@ -202,6 +202,7 @@ function handle(type, d) {
     case 'skins': state.skins = d; break;
     case 'schedules': state.schedules = d; break;
     case 'watch': state.watch = d; break;
+    case 'tasks': state.tasks = d; break;
     case 'skillKo': toast(d.saved ? t('스킬 설명 {n}개를 한글로 저장했어. 남은 것 {left}개.', { n: d.saved, left: d.missing }) : d.failed ? t('스킬 설명 번역이 끝나지 못했어. 세션을 확인해줘.') : t('번역 결과를 읽지 못했어. 세션의 답을 확인해줘.'), d.saved ? 'ok' : 'error'); break;
     case 'settings': state.settings = d; applyTheme(); applyLang(); break;
     case 'sessionsReset': resync(); break;
@@ -256,7 +257,7 @@ export async function boot() {
     const b = await get('/api/bootstrap');
     Object.assign(state, {
       version: b.version, home: b.home, agents: b.agents, teams: b.teams, sessions: b.sessions, settings: b.settings,
-      providers: b.providers, usage: b.usage, skills: b.skills, connectors: b.connectors, plugins: b.plugins, skins: b.skins, schedules: b.schedules || [],
+      providers: b.providers, usage: b.usage, skills: b.skills, connectors: b.connectors, plugins: b.plugins, skins: b.skins, schedules: b.schedules || [], tasks: b.tasks || [],
       active: new Set(b.active || []), cooldown: b.cooldown || {},
     });
     setAccountNames(state.providers);

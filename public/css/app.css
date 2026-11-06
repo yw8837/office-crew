@@ -405,3 +405,13 @@ pre.raw { background: var(--code-bg); padding: 10px 12px; border-radius: 10px; f
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* 칸반 보드 */
+.kanban { display: grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap: 12px; align-items: start; overflow-x: auto; padding-bottom: 8px; }
+.kcol { background: var(--panel-2, var(--panel)); border: 1px solid var(--border); border-radius: 14px; padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 180px; }
+.kcol.over { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.kcol h4 { margin: 2px 4px 4px; }
+.kcard { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 6px; cursor: grab; }
+.kcard .nm { font-weight: 700; cursor: pointer; overflow-wrap: anywhere; }
+.kcard .desc { font-size: 12px; color: var(--muted, inherit); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; }
+@media (max-width: 860px) { .kanban { grid-template-columns: repeat(4, minmax(220px, 80vw)); } }

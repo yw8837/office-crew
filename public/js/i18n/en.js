@@ -1084,4 +1084,6 @@ export default {
   "주소": "Address",
   "시험 보내기": "Send a test",
   "상태와 세션 제목만 밖으로 나가고 대화 내용은 안 나가. ntfy 공개 주제는 이름을 아는 사람이면 누구나 볼 수 있으니 맞히기 어려운 이름을 써.": "Only the status and session title leave your PC, never the conversation. A public ntfy topic can be read by anyone who knows its name, so pick a hard one to guess.",
+  "예약 실행이 멈춰서 끝냈어. 다음 회차는 정상으로 돌아.": "The scheduled run stalled, so it was ended. The next run goes as usual.",
+  "일하는 중에는 맡길 대상과 폴더를 못 바꿔. 끝난 뒤에 바꿔줘.": "You can't change the assignee or folder while it's working. Change them after it finishes.",
 };

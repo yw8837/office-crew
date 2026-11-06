@@ -1069,4 +1069,5 @@ export default {
   "카드에 고른 팀이 없어졌어.": "The team picked for this card is gone.",
   "카드에 고른 에이전트가 없어졌어.": "The agent picked for this card is gone.",
   "예약 실행이 멈춰서 끝냈어. 다음 회차는 정상으로 돌아.": "The scheduled run stalled, so it was ended. The next run goes as usual.",
+  "일하는 중에는 맡길 대상과 폴더를 못 바꿔. 끝난 뒤에 바꿔줘.": "You can't change the assignee or folder while it's working. Change them after it finishes.",
 };

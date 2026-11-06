@@ -7,7 +7,6 @@ import { newId } from './store.js';
 import { tr } from './i18n.js';
 
 const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
-const ACTIVE = new Set(['running', 'pending', 'queued']);
 
 export function cleanTask(x = {}, { store, appHome } = {}, prev = null) {
   const title = String(x.title || '').trim().slice(0, 120);
@@ -44,21 +43,18 @@ export class Board {
     this.timer.unref?.();
   }
 
+  // 세션 파일을 읽지 않고 정한다(카드가 쌓여도 실행 이벤트마다 파일을 다시 읽지 않게)
   columnOf(t) {
     if (t.closedAt) return 'done';
-    const s = t.sessionId ? this.store.getSession(t.sessionId) : null;
-    if (!s) return 'todo';
-    if (this.orch.ctx.has(s.id)) {
-      const st = s.runs.at(-1)?.status;
-      return st === 'waiting' || st === 'paused' ? 'check' : 'doing';
-    }
-    const last = s.runs.at(-1);
-    return last && ACTIVE.has(last.status) ? 'doing' : 'check';
+    if (!t.sessionId || !this.store.hasSession(t.sessionId)) return 'todo';
+    const ctx = this.orch.ctx.get(t.sessionId);
+    if (!ctx) return 'check'; // 실행이 끝났다(끝남·오류·중지, 재시작으로 끊김 포함)
+    return ['waiting', 'paused'].includes(ctx.run?.status) ? 'check' : 'doing';
   }
 
   list() {
     return this.store.all('tasks').map((t) => ({
-      ...t, column: this.columnOf(t), sessionId: t.sessionId && this.store.getSession(t.sessionId) ? t.sessionId : null,
+      ...t, column: this.columnOf(t), sessionId: t.sessionId && this.store.hasSession(t.sessionId) ? t.sessionId : null,
       working: !!t.sessionId && this.orch.ctx.has(t.sessionId), // 승인을 기다리는 동안도 실행은 안 끝났다
     })).sort((a, b) => a.createdAt - b.createdAt);
   }
@@ -72,6 +68,10 @@ export class Board {
   save(body, id = null) {
     const prev = id ? this.#get(id) : null;
     const t = cleanTask(body, { store: this.store, appHome: this.appHome }, prev);
+    // 일하는 중에 대상·폴더를 바꾸면 카드와 실제로 도는 세션이 달라진다
+    if (prev?.sessionId && this.orch.ctx.has(prev.sessionId) && (t.teamId !== prev.teamId || t.agentId !== prev.agentId || t.cwd !== prev.cwd)) {
+      throw bad(tr('일하는 중에는 맡길 대상과 폴더를 못 바꿔. 끝난 뒤에 바꿔줘.'), 409);
+    }
     this.store.upsert('tasks', t);
     this.#changed();
     return t;
@@ -103,8 +103,15 @@ export class Board {
     sess.taskId = t.id;
     this.store.saveSessionNow(sess);
     this.bus.emit('session', this.store.sessionMeta(sess));
+    try {
+      this.orch.send(sess.id, { text: t.detail.trim() ? `${t.title}\n\n${t.detail}` : t.title });
+    } catch (e) {
+      // 시작하지 못했으면 빈 세션을 남기지 않는다
+      this.store.deleteSession(sess.id);
+      this.bus.emit('sessionDeleted', { id: sess.id });
+      throw e;
+    }
     this.store.upsert('tasks', { id, sessionId: sess.id, closedAt: null });
-    this.orch.send(sess.id, { text: t.detail.trim() ? `${t.title}\n\n${t.detail}` : t.title });
     this.#changed();
     return { sessionId: sess.id };
   }

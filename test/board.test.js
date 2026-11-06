@@ -80,10 +80,46 @@ test('수정해도 실행 기록은 클라이언트 값으로 안 바뀐다', as
   assert.deepEqual([fake.title, fake.sessionId, fake.closedAt, fake.createdAt], ['바꾼 제목', null, null, c.createdAt]);
 });
 
-test('재시작 뒤에도 카드가 남는다', async () => {
+test('카드는 파일로 저장된다', async () => {
   const c = await card({ title: '저장 카드' });
-  t.app.store.saveNow?.('tasks');
   await new Promise((r) => setTimeout(r, 600));
   const file = path.join(t.root, 'home', 'tasks.json');
   assert.ok(JSON.parse(fs.readFileSync(file, 'utf8')).some((x) => x.id === c.id));
+});
+
+test('칸을 정할 때 세션 파일을 읽지 않는다(카드가 쌓여도 느려지지 않게)', async () => {
+  const c = await card({ title: '읽기 안 함 카드' });
+  const r = (await t.api('POST', `/api/tasks/${c.id}/start`, {})).json;
+  await ended(r.sessionId);
+  const store = t.app.store;
+  const real = store.getSession;
+  let reads = 0;
+  store.getSession = function counted(...a) { reads++; return real.apply(this, a); };
+  try {
+    t.app.board.list();
+    assert.equal(reads, 0);
+  } finally { store.getSession = real; }
+});
+
+test('일하는 중에는 대상과 폴더를 못 바꾸고, 제목은 바꿀 수 있다', async () => {
+  const other = (await t.api('POST', '/api/agents', { name: '다른담당', role: '조사', provider: 'codex', model: 'gpt-6.1-sol', permission: 'plan', routing: 'manual' })).json;
+  const c = await card({ title: '수정 제한 카드', detail: 'SLOW' });
+  const r = (await t.api('POST', `/api/tasks/${c.id}/start`, {})).json;
+  assert.equal((await t.api('PUT', `/api/tasks/${c.id}`, { title: '수정 제한 카드', detail: 'SLOW', agentId: other.id })).status, 409);
+  assert.equal((await t.api('PUT', `/api/tasks/${c.id}`, { title: '새 제목', detail: 'SLOW', agentId: agent.id })).status, 200);
+  await ended(r.sessionId);
+  assert.equal((await t.api('PUT', `/api/tasks/${c.id}`, { title: '새 제목', agentId: other.id })).status, 200, '끝나면 바꿀 수 있다');
+});
+
+test('맡기기가 실패하면 빈 세션을 남기지 않고 카드는 할 일에 남는다', async () => {
+  const c = await card({ title: '시작 실패 카드' });
+  const orch = t.app.orch;
+  const real = orch.send;
+  const before = t.app.store.listSessions().length;
+  orch.send = () => { throw new Error('시작 실패 시험'); };
+  try {
+    assert.notEqual((await t.api('POST', `/api/tasks/${c.id}/start`, {})).status, 200);
+  } finally { orch.send = real; }
+  assert.equal(t.app.store.listSessions().length, before);
+  assert.equal(await columnOf(c.id), 'todo');
 });

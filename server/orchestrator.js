@@ -568,7 +568,7 @@ export class Orchestrator {
   // ── 프로젝트 기억(설정에서 켰을 때만) ──
   // 어느 기억을 쓸지: 세션에 정한 작업 폴더(없으면 기본 작업 폴더). 폴더를 안 정한 세션은 세션마다 다른 빈 폴더에서 돌지만
   // 기억은 하나를 같이 쓴다(그러지 않으면 세션을 넘는 기억이 생기지 않는다)
-  #memoryFolder(s) {
+  memoryFolder(s) {
     const gone = s.cwd && s.importedFrom && !fs.existsSync(s.cwd);
     return (!gone && s.cwd) || this.store.settings.defaultCwd || '';
   }
@@ -576,7 +576,7 @@ export class Orchestrator {
   // 끝난 메시지를 작업 폴더의 기억에 넣는다. 실패해도 실행에는 영향을 주지 않는다
   #remember(s, m) {
     if (!this.memory || !this.store.settings.memory || !m?.text?.trim()) return;
-    this.memory.of(this.#memoryFolder(s))
+    this.memory.of(this.memoryFolder(s))
       .then((mem) => mem.add(m.text, { sessionId: s.id, messageId: m.id, agentId: m.agentId || '', role: m.role, provider: m.provider || '', at: m.createdAt || Date.now(), title: s.title || '' }))
       .catch(() => { /* 기억 저장 실패는 조용히 넘긴다 */ });
   }
@@ -591,7 +591,7 @@ export class Orchestrator {
     if (ctx.recalled?.has(agent.id)) return none;
     (ctx.recalled ||= new Set()).add(agent.id);
     try {
-      const mem = await this.memory.of(this.#memoryFolder(s));
+      const mem = await this.memory.of(this.memoryFolder(s));
       if (!mem.stats().chunks) return none;
       const n = Math.max(0, Number(this.store.settings.historyTurns) || 0) * 2;
       const recent = new Set(s.messages.slice(-Math.max(n, 2)).map((m) => m.id));

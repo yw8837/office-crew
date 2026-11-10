@@ -113,6 +113,31 @@ test('작업 폴더를 안 정한 세션들은 기억 하나를 같이 쓴다', 
   assert.ok(!lastPrompt().includes(FACT), '폴더를 정한 프로젝트의 기억은 안 섞인다');
 });
 
+test('기억 보기: 목록·세션별 크기·검색(원문과 출처), 폴더 이름이 아닌 값은 열지 않는다', async () => {
+  const list = (await t.api('GET', '/api/memory')).json;
+  assert.equal(list.on, true);
+  const shopMem = list.projects.find((p) => p.cwd === shop);
+  assert.ok(shopMem && shopMem.chunks >= 2 && shopMem.chars > 0, '상점 폴더의 기억이 목록에 있다');
+  assert.ok(list.projects.some((p) => p.cwd === '' && p.key === 'none'), '폴더 없는 세션들의 기억도 있다');
+
+  const sess = t.app.store.listSessions().find((x) => t.app.store.getSession(x.id)?.cwd === shop);
+  const stat = (await t.api('GET', `/api/sessions/${sess.id}/memory`)).json;
+  assert.deepEqual([stat.on, stat.key, stat.cwd], [true, shopMem.key, shop]);
+  assert.ok(stat.chunks >= 2 && stat.chars > 0);
+
+  const found = (await t.api('GET', `/api/memory/search?key=${shopMem.key}&q=${encodeURIComponent('결제 서버 관리 포트')}`)).json;
+  const hit = found.hits.find((h) => h.text === FACT);
+  assert.ok(hit, '원문 그대로 찾는다');
+  assert.equal(hit.sessionExists, true);
+  assert.ok(hit.sessionTitle && hit.at > 0 && hit.role === 'user', '출처(세션·시각·누가)');
+  assert.equal((await t.api('GET', `/api/memory/search?key=${shopMem.key}&q=${encodeURIComponent('화성 탐사 로봇 배터리 수명')}`)).json.hits.length, 0, '한 번도 안 나온 말은 못 찾는다');
+
+  for (const bad of ['..', '../sessions', 'C:', 'none/../..', 'zzzzzzzzzzzzzzzz', '']) {
+    assert.equal((await t.api('GET', `/api/memory/search?key=${encodeURIComponent(bad)}&q=x`)).status, 404, `키 ${JSON.stringify(bad)}`);
+  }
+  assert.equal((await t.api('GET', '/api/sessions/nope/memory')).status, 404);
+});
+
 test('끄면 다시 넣지 않는다(쌓인 기억은 그대로 남는다)', async () => {
   // 앞 테스트의 답이 아직 저장되는 중일 수 있다(저장은 실행을 붙잡지 않게 뒤에서 한다). 다 들어간 뒤에 센다
   await new Promise((r) => setTimeout(r, 400));

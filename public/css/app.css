@@ -447,3 +447,16 @@ pre.raw { background: var(--code-bg); padding: 10px 12px; border-radius: 10px; f
 .right-body { padding-bottom: 52px; }
 .composer-wrap { padding-bottom: 50px; }
 @media (max-width: 859px) { .usage-dock.pill .ud-today { display: none; } }
+
+/* 프로젝트 기억: 세션 상태 줄의 표시와 기억 화면 */
+.mem-badge { border: 1px solid var(--border-2); background: var(--panel); color: var(--text); border-radius: 99px; padding: 2px 10px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.mem-badge:hover { border-color: var(--accent); }
+.mem-projects { display: flex; flex-wrap: wrap; gap: 8px; }
+.mem-proj { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); color: var(--text); cursor: pointer; max-width: 320px; text-align: left; }
+.mem-proj b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.mem-proj.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.mem-results { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.mem-hit { border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); padding: 10px 12px; }
+.mem-src { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); margin-bottom: 6px; }
+.mem-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; font-size: 13.5px; }
+@media (max-width: 859px) { .runbar .mem-badge { display: none; } }

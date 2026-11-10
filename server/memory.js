@@ -196,7 +196,7 @@ export class ProjectMemory {
   async #reindexFrom(from) {
     for (let g = from; g < this.meta.chunks; g++) {
       const c = await this.chunk(g);
-      if (c) this.#post(g, c.text);
+      if (c) { this.#post(g, c.text); this.meta.chars += c.text.length; }
       if (this.pendingChunks >= FLUSH_CHUNKS * 8) await this.#flush();
     }
     await this.#flush();
@@ -208,7 +208,7 @@ export class ProjectMemory {
       await this.open();
       await fsp.rm(this.idxDir, { recursive: true, force: true });
       await fsp.mkdir(this.idxDir, { recursive: true });
-      this.pending = new Map(); this.pendingChunks = 0; this.meta.indexed = 0;
+      this.pending = new Map(); this.pendingChunks = 0; this.meta.indexed = 0; this.meta.chars = 0;
       await this.#reindexFrom(0);
     });
   }
@@ -313,6 +313,34 @@ export class MemoryStore {
       if (cwd) fsp.writeFile(path.join(this.root, key, 'project.json'), JSON.stringify({ cwd })).catch(() => {});
     }
     return m;
+  }
+
+  // 폴더 이름(키)으로 열기. 화면에서 고른 기억을 볼 때 쓴다. 키 모양이 아니면 열지 않는다(경로를 넘겨받지 않는다)
+  async byKey(key) {
+    if (!/^(?:[0-9a-f]{16}|none)$/.test(String(key))) return null;
+    let m = this.open.get(key);
+    if (!m) {
+      try { await fsp.access(path.join(this.root, key, 'loc.bin')); } catch { return null; }
+      m = new ProjectMemory(path.join(this.root, key));
+      this.open.set(key, m);
+      await m.open();
+    }
+    return m;
+  }
+
+  // 쌓인 기억 목록: [{ key, cwd, chunks, chars }] (cwd 가 빈 것은 작업 폴더를 안 정한 세션들의 기억)
+  async list() {
+    let names;
+    try { names = await fsp.readdir(this.root); } catch { return []; }
+    const out = [];
+    for (const key of names) {
+      const m = await this.byKey(key);
+      if (!m || !m.stats().chunks) continue;
+      let cwd = '';
+      try { cwd = JSON.parse(await fsp.readFile(path.join(this.root, key, 'project.json'), 'utf8')).cwd || ''; } catch { /* 폴더 없는 기억 */ }
+      out.push({ key, cwd, ...m.stats() });
+    }
+    return out.sort((a, b) => b.chars - a.chars);
   }
 
   async close() { await Promise.all([...this.open.values()].map((m) => m.close().catch(() => {}))); this.open.clear(); }

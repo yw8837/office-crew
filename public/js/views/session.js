@@ -6,6 +6,7 @@ import { state, changed, toast, agentById, teamById, latestRun, onServerEvent, l
 import { post, patch, upload, uploadUrl } from '../api.js';
 import { renderMarkdown } from '../markdown.js';
 import { t, getLang, locale, tmap } from '../i18n/index.js';
+import { MemoryBadge } from './memory.js';
 
 export const sessionAgents = (s) => {
   if (!s) return [];
@@ -299,7 +300,7 @@ function RunBar({ s, run }) {
   const active = run && ['running', 'paused', 'waiting'].includes(run.status) && !run.endedAt;
   const u = sessionUsage(s);
   const usageText = `${u.estimated ? '~' : ''}${t('{n} 토큰', { n: fmtTok(usageTotal(u)) })} ${fmtCost(u.cost)}`;
-  if (!run) return html`<div class="runbar"><span class="muted small">${t('아직 실행 없음')}</span><span class="grow"></span><span class="small muted">${t('세션 사용량 {usage}', { usage: usageText })}</span></div>`;
+  if (!run) return html`<div class="runbar"><span class="muted small">${t('아직 실행 없음')}</span><span class="grow"></span><${MemoryBadge} s=${s} /><span class="small muted">${t('세션 사용량 {usage}', { usage: usageText })}</span></div>`;
   const ctl = (action) => post(`/api/sessions/${s.id}/control`, { action }).catch((e) => toast(e.message, 'error'));
   return html`<div class="runbar">
     <div class="stages">
@@ -309,6 +310,7 @@ function RunBar({ s, run }) {
       </span>`)}
       ${!active && html`<span class=${`chip ${run.status === 'done' ? 'ok' : run.status === 'error' ? 'err' : 'warn'}`} style="margin-left:6px">${{ done: t('완료'), error: t('오류'), stopped: t('중지됨') }[run.status] || run.status}</span>`}
     </div>
+    <${MemoryBadge} s=${s} />
     <span class="small muted hide-sm" title=${u.estimated ? t('작성 중인 출력은 글자 수로 추정(~)') : ''}>${t('세션 {usage}', { usage: usageText })}</span>
     ${active && html`
       ${run.status === 'paused' || run.pauseRequested

@@ -15,6 +15,7 @@ import { BoardPage } from './views/board.js';
 import { MemoryPage } from './views/memory.js';
 import { ImportModal } from './views/import.js';
 import { t, setLang } from './i18n/index.js';
+import { installContextMenu } from './contextmenu.js';
 
 const NAV = () => [
   ['agents', 'bot', t('에이전트')], ['board', 'board', t('칸반 보드')], ['routing', 'spark', t('라우팅')], ['teams', 'users', t('팀 배치')], ['schedules', 'clock', t('예약 작업')], ['watch', 'eye', t('세션 구경')], ['memory', 'book', t('기억')], ['connectors', 'plug', t('커넥터')], ['skills', 'file', t('스킬')],
@@ -192,6 +193,7 @@ function App() {
 if (innerWidth < 860) state.ui.side = false;
 setLang(navigator.language); // 설정을 받기 전(부팅·연결 오류 화면)엔 브라우저 언어
 render(html`<${App} />`, document.getElementById('app'));
+installContextMenu();
 boot();
 
 // Ctrl+휠로 화면 전체가 커졌다 작아지는 것을 막는다(마을은 휠만으로 확대·축소한다). Ctrl +/-/0 은 그대로 둔다

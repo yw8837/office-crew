@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Usage at a glance: a small indicator stays in the bottom-right corner on every page. It shows each AI's fullest limit window and today's tokens, and opens into the limit bars, reset times and today's totals. Today's tokens move while work runs; the limit percentages are the last values a CLI reported, so they update when a run happens.
+
+### Changed
+- Staying in the session: the Settings button in an agent's panel now opens the agent editor over the session instead of switching to the Agents page, so saving or closing leaves you where you were. The editor says that an agent is shared by every session that uses it.
+- Going back: on Settings, Routing and the other pages, a "Back to session" button names the session you were in, and Esc returns to it. The earlier back button never appeared, because the app forgot the open session as soon as you left it.
+
 ### Security
 - Chat: a link whose address held a second address (for example `[x](http://a(http://b/onmouseover=...)`) could break out of the link and add an event handler, so hovering over it ran script inside the app page. Text an agent read from a web page, or an imported conversation, could carry such a link. Links and code spans are now set aside while the rest of the line is formatted, so later steps can no longer rewrite a tag that was already made. The page still allows inline scripts in its content security policy; tightening that is a separate change.
 

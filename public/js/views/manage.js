@@ -24,10 +24,8 @@ export function PageHead({ title, desc, children }) {
 
 // ── 에이전트 ──
 export function AgentsPage() {
+  // 세션 화면 등 다른 곳에서 여는 편집 창(state.ui.editAgent)은 앱 뼈대(main.js)가 어느 화면에서든 띄운다
   const [edit, setEdit] = useState(null);
-  useEffect(() => {
-    if (state.ui.editAgent) { setEdit(agentById(state.ui.editAgent) || null); state.ui.editAgent = null; }
-  });
   const groups = {};
   for (const a of state.agents) (groups[a.provider] ||= []).push(a);
   return html`<div class="page"><div class="page-inner">
@@ -99,6 +97,7 @@ export function AgentEditor({ agent, onClose }) {
     <button class="btn" onClick=${tryIt} title=${t('저장하고 이 에이전트와 새 세션 열기')}><${Icon} name="msg" /> ${t('저장 후 대화해보기')}</button>
     <button class="btn" onClick=${onClose}>${t('취소')}</button>
     <button class="btn primary" disabled=${!a.name.trim()} onClick=${save}>${isNew ? t('만들기') : t('저장')}</button>`}>
+    ${!isNew && html`<div class="small muted" style="margin-bottom:10px">${t('에이전트는 모든 세션이 같이 써. 여기서 바꾸면 이 에이전트를 쓰는 다른 세션에도 적용돼.')}</div>`}
     <div style="display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:22px">
       <div>
         <div class="grid3">

@@ -532,7 +532,7 @@ function Inspector({ s, agentId }) {
         <button class="btn primary sm" disabled=${!note.trim()} onClick=${ask}><${Icon} name="send" /> ${running ? t('지시 보내기') : t('보내기')}</button>
         ${running && html`<button class="btn sm" onClick=${() => ctl('skip')} title=${t('이 에이전트만 멈추고 다음으로')}><${Icon} name="skip" /> ${t('건너뛰기')}</button>`}
         <span class="grow"></span>
-        <button class="btn sm ghost" onClick=${() => { state.ui.editAgent = a.id; state.route = { view: 'agents', id: null }; changed(); }}><${Icon} name="gear" /> ${t('설정')}</button>
+        <button class="btn sm ghost" title=${t('이 화면을 떠나지 않고 모델·노력·권한을 바꿔')} onClick=${() => { state.ui.editAgent = a.id; changed(); }}><${Icon} name="gear" /> ${t('설정')}</button>
       </div>
     </div>
   </div>`;

@@ -200,3 +200,15 @@ test('내 PC 모델과 나눈 대화는 클라우드 AI 에게 안 넘기고, �
   assert.doesNotMatch(lastPrompt(), /옆 이야기/, '같은 실행의 재시도엔 안 넣는다');
   await t.api('POST', `/api/sessions/${s2.id}/control`, { action: 'stop' });
 });
+
+test('새로 맡은 대화에 앞 대화를 넣을 때도 내 PC 모델과 나눈 대화는 클라우드 AI 에게 안 넘긴다', async () => {
+  const a = await agent('새담당');
+  const s = (await t.api('POST', '/api/sessions', { teamId: null, agentId: a.id })).json;
+  const sess = t.app.store.getSession(s.id);
+  sess.messages.push({ id: 'm-l1', role: 'agent', agentId: 'other', text: '로컬앞대화', status: 'done', runId: 'old', provider: 'local', createdAt: Date.now() });
+  sess.messages.push({ id: 'm-c1', role: 'agent', agentId: 'other', text: '클라우드앞대화', status: 'done', runId: 'old', provider: 'codex', createdAt: Date.now() });
+  await say(s.id, '@새담당 처음 맡아');
+  const p = lastPrompt();
+  assert.match(p, /클라우드앞대화/);
+  assert.doesNotMatch(p, /로컬앞대화/);
+});

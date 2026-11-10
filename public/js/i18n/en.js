@@ -1087,4 +1087,6 @@ export default {
   "일하는 중에는 맡길 대상과 폴더를 못 바꿔. 끝난 뒤에 바꿔줘.": "You can't change the assignee or folder while it's working. Change them after it finishes.",
   "상태와 팀·에이전트 이름만 밖으로 나가고 대화 내용과 세션 제목은 안 나가. ntfy 공개 주제는 이름을 아는 사람이면 누구나 볼 수 있으니 맞히기 어려운 이름을 써.": "Only the status and the team or agent name leave your PC, never the conversation or the session title. A public ntfy topic can be read by anyone who knows its name, so pick a hard one to guess.",
   "마지막 알림을 못 보냈어: {msg}": "The last notification wasn't sent: {msg}",
+  "최근에 움직인 {max}개만 보여 줘. {n}개는 숨겨져 있어.": "Showing the {max} most recent. {n} more are hidden.",
+  "http 주소는 내용이 암호화되지 않고 오가. 가능하면 https 주소를 써.": "An http address sends the notification unencrypted. Use https if you can.",
 };

@@ -11,6 +11,7 @@ const TICK_MS = 1000;
 const SCAN_EVERY = 5; // 새 파일 찾기는 5번에 한 번
 const RECENT_MS = 10 * 60 * 1000; // 이보다 오래 안 바뀐 파일은 안 따라간다
 export const ACTIVE_MS = 90 * 1000; // 이 안에 기록이 있으면 일하는 중
+const TOOL_ACTIVE_MS = 30 * 60 * 1000; // 마지막 기록이 도구 실행이면 빌드·테스트처럼 조용히 오래 걸릴 수 있어 더 기다린다
 const VIEW_TTL = 60 * 1000; // 화면에서 이만큼 소식이 없으면 멈춘다
 const FIRST_TAIL = 64 * 1024; // 처음 볼 때 끝에서 읽는 양
 const READ_MAX = 512 * 1024; // 한 번에 읽는 최대량
@@ -133,8 +134,8 @@ export class SessionWatch {
     let projects = [];
     try { projects = await fsp.readdir(claudeRoot()); } catch { /* 없으면 Claude 안 씀 */ }
     await Promise.all(projects.map((d) => addDir(path.join(claudeRoot(), d), 'claude', (n) => n.endsWith('.jsonl') && !n.startsWith('agent-'))));
-    // Codex 는 날짜 폴더라 오늘과 어제만 본다(자정을 넘겨 도는 세션 포함)
-    for (const back of [0, 1]) {
+    // Codex 는 날짜 폴더라 최근 사흘만 본다(자정을 넘겨 도는 세션 포함)
+    for (const back of [0, 1, 2]) {
       const d = new Date(this.now() - back * 86400e3);
       const dir = path.join(defaultCodexHome(), 'sessions', String(d.getFullYear()), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0'));
       await addDir(dir, 'codex', (n) => /^rollout-.*\.jsonl$/.test(n));
@@ -218,10 +219,13 @@ export class SessionWatch {
     } finally { this.busy = false; }
   }
 
+  // 보여 주지 못한 세션 수(한 번에 SHOW_MAX 개까지만 보여 준다)
+  hidden() { return Math.max(0, this.files.size - SHOW_MAX); }
+
   snapshot() {
     const now = this.now();
     return [...this.files.values()].sort((a, b) => b.at - a.at).slice(0, SHOW_MAX).map((f) => {
-      const active = now - f.at < ACTIVE_MS;
+      const active = now - f.at < (f.tool && !['done', 'idle', 'thinking', 'typing'].includes(f.state) ? TOOL_ACTIVE_MS : ACTIVE_MS);
       const working = active && !['done', 'idle'].includes(f.state);
       return {
         id: `${f.source}-${f.id}`, source: f.source, project: baseName(f.cwd) || f.source, model: f.model,

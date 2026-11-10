@@ -1,5 +1,5 @@
 // 터미널 세션 구경: 터미널에서 돌리는 Claude Code·Codex 세션이 사무실에서 움직인다(사용량 0, 기록 파일만 읽음)
-import { useEffect, useRef } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { html, ago, officeMod, STATE_LABEL } from '../ui.js';
 import { state, changed, uiLang } from '../state.js';
 import { get } from '../api.js';
@@ -24,6 +24,7 @@ const skinValue = () => {
 };
 
 export function WatchPage() {
+  const [hidden, setHidden] = useState(0);
   const host = useRef(null);
   const office = useRef(null);
   const list = state.watch || [];
@@ -35,7 +36,7 @@ export function WatchPage() {
   // 보고 있는 동안만 서버가 파일을 읽는다(20초마다 "보는 중"이라고 알린다)
   useEffect(() => {
     let alive = true;
-    const ping = () => get('/api/watch').then((d) => { if (alive) { state.watch = d; changed(); } }).catch(() => {});
+    const ping = () => get('/api/watch').then((d) => { if (alive) { state.watch = d; changed(); } return get('/api/watch/hidden'); }).then((h) => { if (alive && h) setHidden(h.hidden); }).catch(() => {});
     ping();
     const timer = setInterval(ping, 20000);
     return () => { alive = false; clearInterval(timer); };
@@ -63,6 +64,7 @@ export function WatchPage() {
       ${!mod && html`<div class="empty">${t('사무실 그래픽을 불러오는 중…')}</div>`}
       <div class="office-host" ref=${host}></div>
     </div>
+    ${hidden > 0 && html`<div class="hint" style="margin-bottom:8px">${t('최근에 움직인 {max}개만 보여 줘. {n}개는 숨겨져 있어.', { max: list.length, n: hidden })}</div>`}
     ${list.length === 0 && html`<div class="card"><b>${t('최근 10분 안에 움직인 세션이 없어.')}</b><div class="hint">${t('터미널에서 Claude Code나 Codex를 돌리면 여기에 나타나. 기록 형식은 CLI 버전에 따라 바뀔 수 있어서, 모르는 내용은 건너뛰어.')}</div></div>`}
     ${list.map((w) => html`<div class="card" key=${w.id} style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <span class=${`chip${w.state === 'error' ? ' warn' : ''}`} style=${`border-color:${COLOR[w.source] || '#888'}`}>${w.source === 'codex' ? 'Codex' : 'Claude'}</span>

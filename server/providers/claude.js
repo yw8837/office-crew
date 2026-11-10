@@ -16,11 +16,12 @@ const ALIASES = [
   { id: 'sonnet', label: 'Sonnet', tier: 'balanced' },
   { id: 'haiku', label: 'Haiku', tier: 'fast' },
 ];
-const KNOWN = { opus: 'claude-opus-5-5', fable: 'claude-fable-5-1', sonnet: 'claude-sonnet-5-5', haiku: 'claude-haiku-5-5' };
+const KNOWN = { opus: 'claude-opus-5-5', fable: 'claude-fable-5-2', sonnet: 'claude-sonnet-5-5', haiku: 'claude-haiku-5-5' };
 const FIXED = [
   { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', tier: 'top', legacy: true },
   { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', tier: 'balanced', legacy: true },
   { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', tier: 'fast', legacy: true },
+  { id: 'claude-fable-5-2', label: 'Claude Fable 5.2', tier: 'top', legacy: true },
   { id: 'claude-fable-5-1', label: 'Claude Fable 5.1', tier: 'top', legacy: true },
 ];
 export const observedModels = {}; // 별칭 → 실제 모델 이름(최근 실행 기준). 앱이 설정에 기억해 두고 켤 때 다시 채운다

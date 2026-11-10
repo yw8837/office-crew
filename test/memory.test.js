@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
-import { ProjectMemory, MemoryStore, tokenize, split, projectKey, CHUNK_CHARS } from '../server/memory.js';
+import { ProjectMemory, MemoryStore, tokenize, queryTerms, split, projectKey, CHUNK_CHARS } from '../server/memory.js';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'oc-mem-'));
 const rm = (d) => { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* 윈도우 파일 잠금 무시 */ } };
@@ -21,6 +21,24 @@ test('낱말 나누기: 영문은 낱말, 한글·한자·가나는 두 글자�
   assert.deepEqual(tokenize('Deploy 서버를 재시작'), ['deploy', '서버', '버를', '재시', '시작']);
   assert.deepEqual(tokenize('orchestrator.js:42 수'), ['orchestrator', 'js', '42', '수']);
   assert.ok(tokenize('データベース設計').includes('デー'));
+});
+
+test('찾을 때는 조사·어미·물음말을 걸러 낸다(저장할 때는 그대로)', () => {
+  assert.deepEqual(queryTerms('결제 서버 관리 포트가 몇 번이었지?'), ['결제', '서버', '관리', '포트']);
+  assert.deepEqual(queryTerms('How do I deploy the payment server again?'), ['deploy', 'payment', 'server']);
+  assert.ok(tokenize('포트가 몇 번이었지').includes('트가'), '색인에는 원문 그대로 들어간다');
+});
+
+test('기억이 아주 작을 때도 찾는다: 핵심 낱말이 모든 조각에 나오고, 질문의 꾸밈말은 기억에 없는 경우', async () => {
+  const dir = tmp();
+  const m = new ProjectMemory(dir);
+  await m.add('우리 상점의 결제 서버 관리 포트는 8443번이야. 기억해 둬.', { messageId: 'said', role: 'user' });
+  await m.add('## 조사 결과 — 우리 상점의 결제 서버 관리 포트는 8443번이야.', { messageId: 'answer', role: 'agent' });
+  await m.add('결제 서버 관리 포트가 몇 번이었지?', { messageId: 'ask', role: 'user' });
+  const r = await m.search('결제 서버 관리 포트가 몇 번이었지?', { exclude: (c) => c.messageId === 'ask' });
+  assert.deepEqual(r.hits.map((h) => h.messageId).sort(), ['answer', 'said']);
+  assert.equal((await m.search('우주선 발사 궤도 계산 일정 알려줘')).hits.length, 0, '작은 기억에서도 없는 건 비운다');
+  rm(dir);
 });
 
 test('조각 나누기: 문단 경계를 쓰고, 어떤 조각도 상한을 넘지 않고, 글자를 잃지 않는다', () => {

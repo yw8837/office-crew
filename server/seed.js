@@ -12,6 +12,8 @@ export function defaultSettings() {
     defaultAgentId: 'demo-researcher',
     defaultCwd: '',             // 비우면 세션마다 ~/.office-crew/workspaces/<세션id>
     historyTurns: 8,            // 기억(resume) 못 하는 모델에 넣어줄 최근 대화 수
+    memory: false,              // 프로젝트 기억: 끝난 대화를 작업 폴더별로 쌓고, 실행을 시작할 때 관련 조각을 넣는다
+    memoryBudget: 2000,         // 실행마다 넣는 기억의 최대 글자 수
     sendOnEnter: true,
     apiKeys: { gemini: '', anthropic: '', openai: '' }, // anthropic=Claude Code용, openai=Codex용(API 키 모드일 때만 씀)
     authMode: { claude: 'login', codex: 'login' },     // login=구독 로그인 | apikey=API 키(사용한 만큼 과금)

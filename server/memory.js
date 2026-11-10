@@ -40,6 +40,26 @@ export function tokenize(text) {
   return out;
 }
 
+// 찾을 때만 쓰는 낱말 고르기(저장·색인은 tokenize 그대로).
+// 질문에는 조사·어미·물음말 같은 꾸밈말이 섞인다("포트가 몇 번이었지"). 기억이 작을 땐 이런 말이 기억에 한 번도 안 나와
+// 가장 무거운 낱말로 계산되고, 정작 핵심 낱말을 다 맞힌 조각이 관련 없다고 밀려난다. 그래서 질문 쪽에서 걸러 낸다.
+const JOSA1 = new Set('가이은는을를에의로도와과만야'.split(''));
+const JOSA2 = new Set(['에서', '으로', '에게', '까지', '부터', '이다', '이야', '이고', '이랑', '하고', '처럼', '보다', '한테', '라고', '이라']);
+const STOP = new Set(['이었', '었지', '였지', '했지', '인지', '는지', '어떻', '떻게', '하는', '하고', '해서', '해줘', '알려', '려줘', '뭐였', '무엇', '이야', '거야', '그리', '리고',
+  '지만', '니다', '습니', '합니', '있다', '있어', '없어', '없다', '이다', '입니', '에서', '으로', '한다', '했다', '된다', '됐다', '같은', '같이', '대해', '대한', '어디', '언제', '누가', '얼마',
+  '몇', '뭐', '왜', '좀', '그', '이', '저', '것', '수', '때', '번이', '뭐야', '뭐지', '줘요', '세요', '주세', '어요', '아요', '는데', '은데', '인데', '라고', '다고', '냐고',
+  'the', 'is', 'are', 'was', 'were', 'what', 'when', 'where', 'who', 'how', 'why', 'which', 'do', 'does', 'did', 'to', 'of', 'in', 'on', 'for', 'and', 'or', 'it', 'this', 'that',
+  'with', 'about', 'me', 'my', 'we', 'our', 'you', 'please', 'tell', 'can', 'could', 'be', 'an', 'at', 'as', 'by', 'from', 'has', 'have', 'had', 'again']);
+export function queryTerms(text) {
+  // 어절 끝의 조사를 떼고 나눈다: "포트가" → 포트, "서버에서" → 서버
+  const trimmed = String(text || '').replace(/[぀-ヿ㐀-鿿가-힣]+/g, (run) => {
+    if (run.length >= 4 && JOSA2.has(run.slice(-2))) return run.slice(0, -2);
+    if (run.length >= 3 && JOSA1.has(run.slice(-1))) return run.slice(0, -1);
+    return run;
+  });
+  return [...new Set(tokenize(trimmed).filter((w) => !STOP.has(w)))];
+}
+
 // 긴 글을 조각으로: 문단·줄 경계를 먼저 쓰고, 그래도 길면 글자 수로 자른다
 export function split(text, max = CHUNK_CHARS) {
   const parts = [];
@@ -224,7 +244,7 @@ export class ProjectMemory {
     await this.open();
     await this.queue;
     const N = this.meta.chunks;
-    const terms = [...new Set(tokenize(query))].slice(0, QUERY_TERMS);
+    const terms = queryTerms(query).slice(0, QUERY_TERMS);
     if (!N || !terms.length) return { hits: [], chars: 0, terms: terms.length, scanned: 0 };
     const lists = await Promise.all(terms.map((t) => this.#postings(t)));
     const score = new Map(), cover = new Map(), rare = new Map(), count = new Map();

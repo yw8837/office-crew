@@ -101,6 +101,20 @@ test('첫 실행 기본 데이터는 OS 언어로 만들어지고, 번역된 역
       assert.equal(roleKind(a.role), kind);
       assert.equal(roleKind(app.store.get('agents', 'builder').role), 'build', `${lang} 빌드 역할`);
       assert.equal(roleKind(app.store.get('agents', 'auto-review').role), 'review', `${lang} 검수 역할`);
+      // 데모 에이전트는 역할이 번역돼 저장돼도 도구 단계를 밟는다(마을에서 도서관·작업장으로 걸어가는 장면이 여기서 나온다)
+      const { default: mock } = await import('../server/providers/mock.js');
+      for (const [id, min] of [['demo-researcher', 2], ['demo-organizer', 1], ['demo-analyst', 1], ['demo-builder', 3]]) {
+        const agent = app.store.get('agents', id);
+        const tools = new Set();
+        let text = '';
+        const run = mock.run({ agent, prompt: 'plan a small launch', settings: { mockSpeed: 0.001 } }, (ev) => {
+          if (ev.type === 'tool') tools.add(ev.id);
+          if (ev.type === 'text') text += ev.text;
+        });
+        await run.done;
+        assert.ok(tools.size >= min, `${lang} ${id}(${agent.role}): 도구 ${tools.size}개, ${min}개 이상이어야 한다`);
+        assert.ok(text.includes('plan a small launch') && !text.includes(agent.name), `${lang} ${id}: 역할별 답변이 아니라 대체 답변이 나왔다`);
+      }
     } finally {
       await app.close();
       fs.rmSync(home, { recursive: true, force: true });

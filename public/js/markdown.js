@@ -4,19 +4,23 @@ import { t } from './i18n/index.js';
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
 function inline(s) {
-  // s 는 이미 이스케이프된 문자열
-  const codes = [];
-  s = s.replace(/`([^`\n]+)`/g, (_, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });
+  // s 는 이미 이스케이프된 문자열.
+  // 만든 태그(코드·링크)는 자리표시자로 빼 두었다가 맨 끝에 되돌린다. 그러지 않으면 뒤 단계(자동 링크·굵게)가
+  // 이미 만든 href="…" 속을 다시 바꿔 따옴표가 깨지고 on… 속성이 생긴다(링크에 마우스만 올려도 스크립트 실행)
+  const held = [];
+  const hold = (html) => { held.push(html); return `\u0000${held.length - 1}\u0000`; };
+  s = s.replace(/\u0000/g, '');
+  s = s.replace(/`([^`\n]+)`/g, (_, c) => hold(`<code>${c}</code>`));
   s = s.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (m, text, url) => {
     const u = url.replace(/&amp;/g, '&');
     if (!/^(https?:|mailto:)/i.test(u)) return m;
-    return `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+    return `${hold(`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">`)}${text}${hold('</a>')}`;
   });
-  s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (m, pre, url) => `${pre}<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
+  s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)\u0000]+)/g, (m, pre, url) => `${pre}${hold(`<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`)}`);
   s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
   s = s.replace(/(^|[^*\w])\*([^*\n]+)\*(?=[^*\w]|$)/g, '$1<em>$2</em>');
   s = s.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
-  s = s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[Number(i)]}</code>`);
+  s = s.replace(/\u0000(\d+)\u0000/g, (_, i) => held[Number(i)] ?? '');
   return s;
 }
 

@@ -9,6 +9,10 @@ test('XSS: 태그·이벤트 속성·javascript 링크는 무력화', () => {
     '<img src=x onerror=alert(1)>',
     '[클릭](javascript:alert(1))',
     '[x](https://ok.example/"onmouseover="alert(1))',
+    // 링크 주소 안에 또 주소: 자동 링크가 이미 만든 href 속을 다시 바꾸면 따옴표가 깨져 on… 속성이 생겼다
+    '[x](http://a(http://b/onmouseover=document.title=1//)',
+    '[y](https://a.example/(https://b.example/onfocus=alert(1)/autofocus/)',
+    '[z](https://x.example/**굵게**) 와 https://ok.example/**y**',
     '`<b>코드</b>`',
     '```\n<script>alert(2)</script>\n```',
     '> <iframe src="https://evil"></iframe>',
@@ -21,6 +25,13 @@ test('XSS: 태그·이벤트 속성·javascript 링크는 무력화', () => {
   assert.ok(!/<svg/i.test(out), 'svg 태그');
   assert.ok(!/href="javascript:/i.test(out), 'javascript 링크');
   assert.ok(!/\son\w+="/i.test(out.replace(/&quot;/g, '')), '이벤트 속성');
+  // 태그마다 속성을 뜯어 본다: a 태그의 속성은 href·target·rel 뿐이고, href 값 안에 태그나 따옴표가 없다
+  const tags = out.match(/<a\b[^>]*>/g) || [];
+  assert.ok(tags.length >= 4, `링크 ${tags.length}개`);
+  for (const tag of tags) {
+    assert.match(tag, /^<a href="[^"<>]*" target="_blank" rel="noopener noreferrer">$/, `링크 태그 모양: ${tag}`);
+  }
+  assert.ok(!/<a\b[^>]*<a\b/.test(out), '링크 안에 링크');
 });
 
 test('기본 문법: 제목·목록·표·코드·링크', () => {

@@ -460,3 +460,6 @@ pre.raw { background: var(--code-bg); padding: 10px 12px; border-radius: 10px; f
 .mem-src { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); margin-bottom: 6px; }
 .mem-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; font-size: 13.5px; }
 @media (max-width: 859px) { .runbar .mem-badge { display: none; } }
+/* 긴 대화: 앞부분은 눌러서 더 불러온다 */
+.chat-more { align-self: center; margin: 4px auto 12px; display: block; padding: 6px 14px; border: 1px solid var(--border-2); border-radius: 99px; background: var(--panel); color: var(--text); font-size: 12.5px; cursor: pointer; }
+.chat-more:hover { border-color: var(--accent); }

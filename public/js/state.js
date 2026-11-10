@@ -252,9 +252,12 @@ export function applyTheme() {
 }
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
 
+let connectedOnce = false;
+let bootAt = 0;
 export async function boot() {
   try {
     const b = await get('/api/bootstrap');
+    bootAt = Date.now();
     Object.assign(state, {
       version: b.version, home: b.home, agents: b.agents, teams: b.teams, sessions: b.sessions, settings: b.settings,
       providers: b.providers, usage: b.usage, skills: b.skills, connectors: b.connectors, plugins: b.plugins, skins: b.skins, schedules: b.schedules || [], tasks: b.tasks || [],
@@ -270,8 +273,11 @@ export async function boot() {
     }, (ok) => {
       const was = state.connected;
       state.connected = ok;
-      // 재연결되면 전체를 다시 받아 빠진 이벤트를 메운다
-      if (ok && !was && state.ready) resync();
+      // 재연결되면 전체를 다시 받아 빠진 이벤트를 메운다.
+      // 처음 연결은 방금 받은 것과 같으므로 다시 받지 않는다(같은 걸 두 번 받아 켤 때 느려졌다). 연결이 3초 넘게 걸렸으면 그 사이를 메우려고 받는다
+      const first = !connectedOnce;
+      connectedOnce = connectedOnce || ok;
+      if (ok && !was && state.ready && (!first || Date.now() - bootAt > 3000)) resync();
       changed();
     });
     const last = localStorage.getItem('ui.session');

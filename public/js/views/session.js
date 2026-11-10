@@ -257,19 +257,28 @@ function AttThumb({ a, onRemove, uploading }) {
   </div>`;
 }
 
+const CHAT_WINDOW = 40; // 한 번에 그리는 메시지 수
 function Chat({ s, run }) {
   const ref = useRef(null);
   const stick = useRef(true);
   const last = s.messages[s.messages.length - 1];
+  // 긴 대화는 최근 것만 그린다(전부 그리면 화면이 무거워진다). 위의 버튼으로 더 불러온다
+  const [shown, setShown] = useState(CHAT_WINDOW);
+  const grow = useRef(0); // 더 불러오기 직전의 전체 높이(불러온 뒤 보던 자리를 지키려고)
+  const hidden = Math.max(0, s.messages.length - shown);
+  const visible = hidden ? s.messages.slice(hidden) : s.messages;
+  const showMore = () => { grow.current = ref.current?.scrollHeight || 0; stick.current = false; setShown((n) => n + CHAT_WINDOW); };
   useEffect(() => {
     const el = ref.current;
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
+    if (el && grow.current) { el.scrollTop += el.scrollHeight - grow.current; grow.current = 0; }
+    else if (el && stick.current) el.scrollTop = el.scrollHeight;
   });
-  useEffect(() => { stick.current = true; const el = ref.current; if (el) el.scrollTop = el.scrollHeight; }, [s.id]);
+  useEffect(() => { setShown(CHAT_WINDOW); stick.current = true; const el = ref.current; if (el) el.scrollTop = el.scrollHeight; }, [s.id]);
   const onScroll = (e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; };
   return html`<div class="chat" ref=${ref} onScroll=${onScroll}>
     <div class="chat-inner">
-      ${s.messages.length === 0 ? html`<${Welcome} s=${s} />` : s.messages.map((m) => html`<${Message} key=${m.id} m=${m} />`)}
+      ${hidden > 0 && html`<button class="chat-more" onClick=${showMore}>${t('이전 대화 {n}개 더 보기', { n: Math.min(hidden, CHAT_WINDOW) })} <span class="muted">${t('(남은 {n}개)', { n: hidden })}</span></button>`}
+      ${s.messages.length === 0 ? html`<${Welcome} s=${s} />` : visible.map((m) => html`<${Message} key=${m.id} m=${m} />`)}
       ${/* 승인·오류 카드는 결과 바로 아래(채팅 흐름 안)에 둬서 결과를 가리지 않게 */ ''}
       <${Gate} s=${s} run=${run} inline=${true} />
       ${last && html`<div style="height:4px"></div>`}

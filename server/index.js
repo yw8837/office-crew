@@ -536,6 +536,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   route('GET', '/api/cooldown', () => orch.restingList());
   // 터미널 세션 구경: 화면이 보고 있다고 알릴 때마다 지금 상태를 준다(파일만 읽는다)
   route('GET', '/api/watch', async () => { watch.view(); await watch.tick(); return watch.snapshot(); });
+  route('GET', '/api/watch/hidden', () => ({ hidden: watch.hidden() }));
   // ACP 표준 에이전트 프리셋(이 PC에 명령이 있는지 함께)
   route('GET', '/api/acp/presets', () => ACP_PRESETS.map((p) => ({ ...p, npx: p.command === 'npx', installed: p.command !== 'npx' && !!resolveCommand(p.command) })));
   route('DELETE', '/api/cooldown/([\\w-]+)', async (req, url, [id]) => {

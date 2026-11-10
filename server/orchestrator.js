@@ -432,7 +432,7 @@ export class Orchestrator {
         const nextProv = PROVIDERS[next.provider];
         // 이어받는 AI 기준으로 프롬프트를 다시 만든다(이미지 지원 여부 등). 이어가는 대화가 없으니 앞 대화도 넣는다
         const basePrompt = this.#prompt(ctx, stageIdx, next, feedback, nextProv);
-        const nextPrompt = nextProv.caps.resume ? this.#withHistory(basePrompt, s, msg) : basePrompt;
+        const nextPrompt = nextProv.caps.resume ? this.#withHistory(basePrompt, s, msg, next.provider) : basePrompt;
         cur = prepare(next);
         Object.assign(msg, { provider: next.provider, model: next.model, effort: next.effort, failover: true });
         this.bus.emit('messageMeta', { sessionId: s.id, messageId: msg.id, model: next.model, provider: next.provider, effort: next.effort });
@@ -529,10 +529,12 @@ export class Orchestrator {
   }
 
   // 이어갈 대화가 없을 때 세션의 최근 대화(모든 에이전트)를 프롬프트 앞에 붙인다
-  #withHistory(prompt, s, currentMsg) {
+  // receiver: 이 글을 받을 AI. 내 PC 모델과 나눈 대화는 클라우드 AI로 넘기지 않는다
+  #withHistory(prompt, s, currentMsg, receiver = currentMsg?.provider) {
     const n = Math.max(0, Number(this.store.settings.historyTurns) || 0) * 2;
     const list = s.messages.filter((m) => m !== currentMsg && m.id !== s.runs.at(-1)?.userMessageId && m.status !== 'queued'
-      && (m.role === 'user' || (m.role === 'agent' && (!currentMsg || m.runId !== currentMsg.runId))) && m.text).slice(-n);
+      && (m.role === 'user' || (m.role === 'agent' && (!currentMsg || m.runId !== currentMsg.runId))) && m.text
+      && (m.provider !== 'local' || receiver === 'local')).slice(-n);
     if (!list.length) return prompt;
     const who = (m) => (m.role === 'user' ? tr('사용자') : (this.store.get('agents', m.agentId)?.name || 'AI'));
     return `${tr('[이전 대화]')}\n${list.map((m) => `${who(m)}: ${m.text.slice(0, 2000)}`).join('\n')}\n\n${prompt}`;

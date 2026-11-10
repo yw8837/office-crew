@@ -75,7 +75,7 @@ test('오래 조용하면 쉬는 중, 끝난 세션은 끝남으로 보인다', 
   append(f, toolUse('Read', { file_path: 'b.js' }, 'C:\\work\\old'));
   await w.tick();
   assert.equal(w.snapshot().find((x) => x.project === 'old').state, 'reading');
-  now += ACTIVE_MS + 1000;
+  now += 30 * 60000 + 1000; // 마지막 줄이 도구 실행이라 30분까지 기다린다
   const idle = w.snapshot().find((x) => x.project === 'old');
   assert.deepEqual([idle.state, idle.active, idle.detail], ['idle', false, '']);
   fs.rmSync(f);
@@ -180,9 +180,37 @@ test('상태·일하는 중 여부가 바뀌면 알린다(시간이 지나 쉬�
   append(f, toolUse('Bash', { command: 'ls' }, 'C:\\work\\tell'));
   w.ticks = 1; await w.tick();
   assert.equal(seen.length, n + 1, '상태 변화');
-  now += ACTIVE_MS + 5000;
+  now += 30 * 60000 + 5000; // 마지막 줄이 도구 실행
   w.ticks = 1; await w.tick();
   assert.equal(seen.length, n + 2, '쉬는 중으로 바뀜');
   assert.equal(seen.at(-1).find((x) => x.project === 'tell').state, 'idle');
   fs.rmSync(f);
+});
+
+test('마지막 줄이 도구 실행이면 90초가 지나도 30분까지는 일하는 중으로 본다', async () => {
+  let now = Date.now();
+  const w = new SessionWatch(null, { now: () => now });
+  const f = claudeFile('C--work-build', 'abababab-0000-4000-8000-000000000007');
+  append(f, toolUse('Bash', { command: 'npm run build' }, '/home/me/build'));
+  await w.tick();
+  now += ACTIVE_MS + 60000;
+  const s = w.snapshot().find((x) => x.project === 'build');
+  assert.deepEqual([s.state, s.active], ['running', true]);
+  now += 30 * 60000;
+  assert.equal(w.snapshot().find((x) => x.project === 'build').state, 'idle');
+  fs.rmSync(f);
+});
+
+test('12개 넘게 움직이면 숨긴 수를 알려 준다', async () => {
+  const w = new SessionWatch(null);
+  const files = [];
+  for (let i = 0; i < 14; i++) {
+    const f = claudeFile('C--work-many', `cdcdcdcd-0000-4000-8000-${String(i).padStart(12, '0')}`);
+    append(f, toolUse('Read', { file_path: `${i}.js` }, '/home/me/many'));
+    files.push(f);
+  }
+  await w.tick();
+  assert.equal(w.snapshot().length, 12);
+  assert.ok(w.hidden() >= 2);
+  for (const f of files) fs.rmSync(f);
 });

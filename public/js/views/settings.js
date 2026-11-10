@@ -434,6 +434,7 @@ function PhoneCard({ s }) {
     <div class="field" style="margin-top:10px"><label>${t('받는 곳')}</label>
       <div class="seg" role="group" aria-label=${t('받는 곳')} style="align-self:flex-start"><button class=${s.phoneType !== 'webhook' ? 'on' : ''} onClick=${() => saveSettings({ phoneType: 'ntfy' })}>ntfy</button><button class=${s.phoneType === 'webhook' ? 'on' : ''} onClick=${() => saveSettings({ phoneType: 'webhook' })}>${t('웹훅')}</button></div></div>
     <div class="field"><label for="phone-url">${t('주소')}</label><input id="phone-url" class="input mono" value=${shown} placeholder=${s.phoneType === 'webhook' ? 'https://hooks.slack.com/services/…' : 'https://ntfy.sh/…'} onInput=${(e) => setUrl(e.target.value)} onBlur=${saveUrl} /></div>
+    ${/^http:\/\//i.test(shown) && html`<div class="notice" style="margin-bottom:8px">⚠️ ${t('http 주소는 내용이 암호화되지 않고 오가. 가능하면 https 주소를 써.')}</div>`}
     <div class="row" style="gap:8px"><button class="btn sm" disabled=${!shown} onClick=${test}>${t('시험 보내기')}</button></div>
     ${s.phoneError && html`<div class="notice" style="margin-top:8px">⚠️ ${t('마지막 알림을 못 보냈어: {msg}', { msg: s.phoneError })}</div>`}
     <div class="hint" style="margin-top:8px">${t('상태와 팀·에이전트 이름만 밖으로 나가고 대화 내용과 세션 제목은 안 나가. ntfy 공개 주제는 이름을 아는 사람이면 누구나 볼 수 있으니 맞히기 어려운 이름을 써.')}</div>

@@ -14,6 +14,7 @@ import('./office/index.js').then((m) => { officeMod.m = m; changed(); }).catch((
 const P = {
   plus: 'M12 5v14M5 12h14',
   search: 'M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14zM20 20l-4-4',
+  book: 'M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3V4zM5 17a3 3 0 0 1 3-3h11M9 8h6',
   send: 'M5 12h13M13 6l6 6-6 6',
   stop: 'M7 7h10v10H7z',
   clip: 'M20 11.5 12.4 19a5 5 0 0 1-7.1-7.1l8-8a3.4 3.4 0 0 1 4.8 4.8l-8 8a1.7 1.7 0 0 1-2.4-2.4l7.3-7.3',

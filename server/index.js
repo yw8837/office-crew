@@ -22,7 +22,7 @@ import { initProcTracker, reapLeftovers, otherAppRunning } from './providers/pro
 import { SessionWatch } from './watch.js';
 import { Board } from './board.js';
 import { PhoneNotify, checkPhoneUrl, buildRequest } from './notify.js';
-import { MemoryStore } from './memory.js';
+import { MemoryStore, projectKey } from './memory.js';
 import { tr, bindLang, serverLang } from './i18n.js';
 import { Scheduler, cleanSchedule } from './scheduler.js';
 
@@ -539,6 +539,25 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   // 터미널 세션 구경: 화면이 보고 있다고 알릴 때마다 지금 상태를 준다(파일만 읽는다)
   route('GET', '/api/watch', async () => { watch.view(); await watch.tick(); return watch.snapshot(); });
   route('GET', '/api/watch/hidden', () => ({ hidden: watch.hidden() }));
+  // 프로젝트 기억 보기: 목록, 한 세션이 쓰는 기억의 크기, 검색(원문 조각과 출처). 읽기만 한다
+  route('GET', '/api/memory', async () => ({ on: store.settings.memory === true, projects: await memory.list() }));
+  route('GET', '/api/sessions/([\\w-]+)/memory', async (req, url, [id]) => {
+    const s = store.getSession(id);
+    if (!s) throw new HttpError(404, tr('세션 없음'));
+    const cwd = orch.memoryFolder(s);
+    const m = await memory.of(cwd);
+    return { on: store.settings.memory === true, key: projectKey(cwd), cwd, ...m.stats() };
+  });
+  route('GET', '/api/memory/search', async (req, url) => {
+    const m = await memory.byKey(url.searchParams.get('key') || '');
+    if (!m) throw new HttpError(404, tr('그 기억이 없어.'));
+    const q = String(url.searchParams.get('q') || '').slice(0, 500);
+    const r = await m.search(q, { budget: 12000, limit: 20 });
+    return { ...r, hits: r.hits.map((h) => {
+      const sess = store.getSession(h.sessionId);
+      return { ...h, sessionExists: !!sess, sessionTitle: sess?.title || h.title, who: h.role === 'user' ? '' : (store.get('agents', h.agentId)?.name || '') };
+    }) };
+  });
   // ACP 표준 에이전트 프리셋(이 PC에 명령이 있는지 함께)
   route('GET', '/api/acp/presets', () => ACP_PRESETS.map((p) => ({ ...p, npx: p.command === 'npx', installed: p.command !== 'npx' && !!resolveCommand(p.command) })));
   route('DELETE', '/api/cooldown/([\\w-]+)', async (req, url, [id]) => {

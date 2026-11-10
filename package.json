@@ -1,6 +1,6 @@
 {
   "name": "office-crew",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Run the AI CLIs you already use (Claude Code, Codex, Gemini CLI, Hermes, ACP agents) plus APIs and local models as one team, and watch them work in a live office.",
   "type": "module",
   "bin": {

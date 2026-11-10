@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-10
+
 ### Added
 - Crew Village, the new default office skin: idle agents stay inside their own house (the windows light up), commute to the office building when work starts, and go home after they finish. Tools still send them places: reading to the library, searching to the lookout tower, running commands to the workshop, planning and long thinking to the plaza fountain. Approvals and errors are handled at the desk. The office skins (Modern, Cozy, Night) are still available.
 - Agent look: besides a person, an agent can be an original creature (three shapes, any body color) or your own image. Uploaded images are shrunk to 256px on the long side and stored only on your machine; small pixel art is scaled up crisply. Only PNG, JPEG, WEBP and GIF are accepted.
@@ -108,6 +110,7 @@ First public release.
 ### Licensing
 - Dual license: AGPL-3.0-only, or a commercial license (see `COMMERCIAL-LICENSE.md`).
 
-[Unreleased]: https://github.com/yw8837/office-crew/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/yw8837/office-crew/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/yw8837/office-crew/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/yw8837/office-crew/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/yw8837/office-crew/releases/tag/v1.0.0

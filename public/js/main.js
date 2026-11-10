@@ -2,10 +2,11 @@
 import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { html, Icon, ago } from './ui.js';
-import { state, useStore, boot, go, changed, toast, currentSession } from './state.js';
+import { state, useStore, boot, go, changed, toast, currentSession, agentById } from './state.js';
 import { post, patch, put, del } from './api.js';
 import { SessionView, RightPanel } from './views/session.js';
-import { AgentsPage, TeamsPage, ConnectorsPage, SkillsPage, PluginsPage } from './views/manage.js';
+import { AgentsPage, AgentEditor, TeamsPage, ConnectorsPage, SkillsPage, PluginsPage } from './views/manage.js';
+import { UsageDock } from './views/usagedock.js';
 import { SettingsPage, UsagePage, PolicyNotice } from './views/settings.js';
 import { RoutingPage } from './views/routing.js';
 import { SchedulesPage } from './views/schedules.js';
@@ -27,6 +28,9 @@ export async function newSession(extra = {}) {
     if (innerWidth < 860) state.ui.side = false;
   } catch (e) { toast(e.message, 'error'); }
 }
+
+// 마지막으로 보던 세션(설정·라우팅 같은 다른 화면에 가 있어도 기억한다). 지워졌으면 없음
+const lastSession = () => state.sessions.find((x) => x.id === state.currentId) || null;
 
 const openImport = () => { state.ui.importOpen = true; changed(); };
 const closeImport = () => { state.ui.importOpen = false; changed(); };
@@ -138,6 +142,9 @@ function App() {
       else if ((e.ctrlKey || e.metaKey) && e.key === '.') { e.preventDefault(); state.ui.right = !state.ui.right; changed(); }
       else if ((e.ctrlKey || e.metaKey) && e.key === '/') { e.preventDefault(); state.ui.side = !state.ui.side; changed(); }
       else if (e.key === 'Escape' && state.ui.inspector && !document.querySelector('.backdrop')) { state.ui.inspector = null; changed(); }
+      // 설정·라우팅 같은 다른 화면에서 Esc: 보던 세션으로 돌아간다(창이 떠 있거나 글을 쓰는 중이면 그쪽이 먼저)
+      else if (e.key === 'Escape' && state.route.view !== 'session' && lastSession() && !document.querySelector('.backdrop')
+        && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '')) { go('session', lastSession().id); }
     };
     addEventListener('keydown', k);
     return () => removeEventListener('keydown', k);
@@ -148,6 +155,7 @@ function App() {
 
   const s = currentSession();
   const v = state.route.view;
+  const back = v !== 'session' ? lastSession() : null;
   const sideOpen = state.ui.side !== false;
   let main;
   if (v === 'session') main = s ? html`<${SessionView} s=${s} />` : (state.route.id ? html`<div class="boot">${t('불러오는 중…')}</div>` : html`<${Home} />`);
@@ -167,11 +175,13 @@ function App() {
     <${Sidebar} />
     <div class="side-scrim" onClick=${() => { state.ui.side = false; changed(); }}></div>
     <main class="main">
-      ${v !== 'session' && html`<div class="top" style="min-height:48px"><button class="icon-btn" title=${t('사이드바')} onClick=${() => { state.ui.side = !sideOpen; changed(); }}><${Icon} name="sidebar" /></button>${s && html`<button class="btn sm ghost" onClick=${() => go('session', s.id)}>← ${s.title}</button>`}</div>`}
+      ${v !== 'session' && html`<div class="top" style="min-height:48px"><button class="icon-btn" title=${t('사이드바')} onClick=${() => { state.ui.side = !sideOpen; changed(); }}><${Icon} name="sidebar" /></button>${back && html`<button class="btn sm back-to-session" title=${t('보던 세션으로 돌아가기 (Esc)')} onClick=${() => go('session', back.id)}>← ${t('세션으로 돌아가기')}<span class="bts-title">${back.title}</span><span class="kbd">Esc</span></button>`}</div>`}
       ${main}
     </main>
     ${v === 'session' && s && state.ui.right && html`<${RightPanel} s=${s} />`}
     ${state.ui.importOpen && html`<${ImportModal} onClose=${closeImport} onImported=${(id) => { closeImport(); go('session', id); toast(t('불러왔어. 이어서 말하면 같은 대화로 계속돼.'), 'ok'); }} />`}
+    ${state.ui.editAgent && agentById(state.ui.editAgent) && html`<${AgentEditor} key=${state.ui.editAgent} agent=${agentById(state.ui.editAgent)} onClose=${() => { state.ui.editAgent = null; changed(); }} />`}
+    ${v !== 'usage' && html`<${UsageDock} />`}
     ${!state.connected && html`<div class="conn-lost">${t('서버 연결 끊김 — 다시 연결 중…')}</div>`}
     <div class="toasts">${state.ui.toasts.map((x) => html`<div class=${`toast ${x.kind}`}>${x.text}</div>`)}</div>
   </div>`;

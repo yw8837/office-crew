@@ -1089,4 +1089,11 @@ export default {
   "마지막 알림을 못 보냈어: {msg}": "The last notification wasn't sent: {msg}",
   "최근에 움직인 {max}개만 보여 줘. {n}개는 숨겨져 있어.": "Showing the {max} most recent. {n} more are hidden.",
   "http 주소는 내용이 암호화되지 않고 오가. 가능하면 https 주소를 써.": "An http address sends the notification unencrypted. Use https if you can.",
+  "에이전트는 모든 세션이 같이 써. 여기서 바꾸면 이 에이전트를 쓰는 다른 세션에도 적용돼.": "Agents are shared by every session. A change here applies to the other sessions that use this agent too.",
+  "이 화면을 떠나지 않고 모델·노력·권한을 바꿔": "Change the model, effort and permission without leaving this screen",
+  "보던 세션으로 돌아가기 (Esc)": "Back to the session you were in (Esc)",
+  "세션으로 돌아가기": "Back to session",
+  "사용량 펼치기": "Show usage",
+  "사용량 접기": "Hide usage",
+  "오늘 {n}": "Today {n}",
 };

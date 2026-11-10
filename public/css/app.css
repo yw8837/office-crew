@@ -415,3 +415,32 @@ pre.raw { background: var(--code-bg); padding: 10px 12px; border-radius: 10px; f
 .kcard .nm { font-weight: 700; cursor: pointer; overflow-wrap: anywhere; }
 .kcard .desc { font-size: 12px; color: var(--muted, inherit); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; }
 @media (max-width: 860px) { .kanban { grid-template-columns: repeat(4, minmax(220px, 80vw)); } }
+
+/* 다른 화면에서 보던 세션으로 돌아가는 버튼 */
+.back-to-session { gap: 8px; border-color: var(--border-2); background: var(--panel); font-weight: 600; max-width: min(520px, 70vw); }
+.back-to-session .bts-title { font-weight: 400; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.back-to-session .kbd { flex: none; }
+
+/* 사용량 표시(오른쪽 아래 고정) */
+.usage-dock { position: fixed; right: 14px; bottom: 12px; z-index: 45; font-size: 12.5px; }
+.usage-dock.pill { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-radius: 99px; border: 1px solid var(--border-2); background: var(--panel); color: var(--text); box-shadow: var(--shadow); cursor: pointer; max-width: calc(100vw - 28px); }
+.usage-dock.pill:hover { border-color: var(--accent); }
+.usage-dock.pill svg { width: 15px; height: 15px; flex: none; color: var(--muted); }
+.usage-dock .ud-p { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.usage-dock .ud-p i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.usage-dock .ud-p.mid i { background: var(--warn); }
+.usage-dock .ud-p.high i { background: var(--err); }
+.usage-dock .ud-p.high b { color: var(--err); }
+.usage-dock .ud-today { color: var(--muted); white-space: nowrap; }
+.usage-dock.open { width: min(320px, calc(100vw - 28px)); max-height: min(70vh, 520px); display: flex; flex-direction: column; border: 1px solid var(--border-2); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow-lg); }
+.usage-dock .ud-head { display: flex; align-items: center; gap: 6px; padding: 8px 8px 6px 12px; border-bottom: 1px solid var(--border); }
+.usage-dock .ud-head b { display: inline-flex; align-items: center; gap: 6px; }
+.usage-dock .ud-head svg { width: 15px; height: 15px; }
+.usage-dock .ud-head .grow { flex: 1; }
+.usage-dock .ud-body { overflow: auto; padding: 8px 12px 12px; }
+.usage-dock .ud-sec { font-weight: 700; margin: 8px 0 4px; }
+.usage-dock .ud-sec:first-child { margin-top: 0; }
+/* 알약이 오른쪽 패널 맨 아래 내용과 입력창 오른쪽 끝을 가리지 않게 자리를 비운다 */
+.right-body { padding-bottom: 52px; }
+.composer-wrap { padding-bottom: 50px; }
+@media (max-width: 859px) { .usage-dock.pill .ud-today { display: none; } }

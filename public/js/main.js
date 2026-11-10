@@ -191,3 +191,6 @@ if (innerWidth < 860) state.ui.side = false;
 setLang(navigator.language); // 설정을 받기 전(부팅·연결 오류 화면)엔 브라우저 언어
 render(html`<${App} />`, document.getElementById('app'));
 boot();
+
+// Ctrl+휠로 화면 전체가 커졌다 작아지는 것을 막는다(마을은 휠만으로 확대·축소한다). Ctrl +/-/0 은 그대로 둔다
+addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });

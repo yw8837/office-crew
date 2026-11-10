@@ -1041,5 +1041,9 @@ export default {
   "{n}분 동안 아무 출력이 없어서 멈춘 걸로 보고 껐어. 다시 시도하거나 건너뛰어줘.": "There was no output for {n} min, so it was treated as stalled and stopped. Retry or skip it.",
   "멈춘 실행으로 볼 시간(분)": "Treat a run as stalled after (minutes)",
   "출력이 이만큼 없으면 CLI를 끄고 오류로 돌려. 도구가 도는 중엔 4배까지 기다려. 0이면 끄기.": "With no output for this long, the CLI is stopped and the run goes to the error step. It waits up to four times as long while a tool is running. 0 turns this off.",
+  "세션 구경": "Watch sessions",
+  "터미널에서 돌리는 Claude Code·Codex 세션을 마을에서 봐. 기록 파일만 읽어서 사용량은 0이고, 이 화면을 보는 동안만 읽어.": "Watch the Claude Code and Codex sessions you run in a terminal. It only reads their log files, so it uses no AI usage, and only while this page is open.",
+  "최근 10분 안에 움직인 세션이 없어.": "No session has moved in the last 10 minutes.",
+  "터미널에서 Claude Code나 Codex를 돌리면 여기에 나타나. 기록 형식은 CLI 버전에 따라 바뀔 수 있어서, 모르는 내용은 건너뛰어.": "Run Claude Code or Codex in a terminal and it shows up here. The log format can change between CLI versions, so anything unknown is skipped.",
   "예약 실행이 멈춰서 끝냈어. 다음 회차는 정상으로 돌아.": "The scheduled run stalled, so it was ended. The next run goes as usual.",
 };

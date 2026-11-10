@@ -9,9 +9,9 @@ import { defaultCodexHome } from './providers/codex.js';
 
 const TICK_MS = 1000;
 const SCAN_EVERY = 5; // 새 파일 찾기는 5번에 한 번
-const RECENT_MS = 10 * 60 * 1000; // 이보다 오래 안 바뀐 파일은 안 따라간다
 export const ACTIVE_MS = 90 * 1000; // 이 안에 기록이 있으면 일하는 중
 const TOOL_ACTIVE_MS = 30 * 60 * 1000; // 마지막 기록이 도구 실행이면 빌드·테스트처럼 조용히 오래 걸릴 수 있어 더 기다린다
+const RECENT_MS = TOOL_ACTIVE_MS; // 이보다 오래 안 바뀐 파일은 안 따라간다(도구 대기보다 짧으면 기다리는 중에 화면에서 사라진다)
 const VIEW_TTL = 60 * 1000; // 화면에서 이만큼 소식이 없으면 멈춘다
 const FIRST_TAIL = 64 * 1024; // 처음 볼 때 끝에서 읽는 양
 const READ_MAX = 512 * 1024; // 한 번에 읽는 최대량

@@ -81,6 +81,19 @@ test('오래 조용하면 쉬는 중, 끝난 세션은 끝남으로 보인다', 
   fs.rmSync(f);
 });
 
+test('도구 실행 중 15분 조용한 세션도 새로 찾기(스캔)에서 빠지지 않고 일하는 중으로 보인다', async () => {
+  const w = new SessionWatch(null);
+  const f = claudeFile('C--work-build', 'bbbbbbbb-0000-4000-8000-000000000015');
+  const quiet = Date.now() - 15 * 60000;
+  append(f, { ...toolUse('Bash', { command: 'npm test' }, 'C:\\work\\build'), timestamp: iso(quiet) });
+  fs.utimesSync(f, quiet / 1000, quiet / 1000);
+  await w.tick(); // 첫 tick 은 스캔부터 한다
+  const s = w.snapshot().find((x) => x.project === 'build');
+  assert.ok(s, '15분 조용한 도구 실행 세션이 목록에 있어야 한다');
+  assert.deepEqual([s.state, s.active], ['running', true]);
+  fs.rmSync(f);
+});
+
 test('Codex 세션은 오늘 폴더에서 찾고 첫 줄에서 프로젝트 이름을 읽는다', async () => {
   const d = new Date();
   const dir = path.join(process.env.CODEX_HOME, 'sessions', String(d.getFullYear()), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0'));

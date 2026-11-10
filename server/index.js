@@ -22,6 +22,7 @@ import { initProcTracker, reapLeftovers, otherAppRunning } from './providers/pro
 import { SessionWatch } from './watch.js';
 import { Board } from './board.js';
 import { PhoneNotify, checkPhoneUrl, buildRequest } from './notify.js';
+import { MemoryStore } from './memory.js';
 import { tr, bindLang, serverLang } from './i18n.js';
 import { Scheduler, cleanSchedule } from './scheduler.js';
 
@@ -222,7 +223,8 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   usage.init();
   const catalog = new Catalog(store, dirs);
   const providers = new ProviderRegistry(store);
-  const orch = new Orchestrator({ store, bus, usage, catalog, dirs, providers });
+  const memory = new MemoryStore(path.join(dirs.home, 'memory'));
+  const orch = new Orchestrator({ store, bus, usage, catalog, dirs, providers, memory });
   orch.recover();
   const scheduler = new Scheduler({ store, orch, bus });
   const watch = new SessionWatch(bus);
@@ -813,7 +815,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   }
 
   return {
-    server, store, bus, orch, providers, catalog, usage, token, dirs, scheduler, watch, board, phone,
+    server, store, bus, orch, providers, catalog, usage, token, dirs, scheduler, watch, board, phone, memory,
     listen(p = port, host = HOST) {
       return new Promise((resolve, reject) => {
         server.once('error', reject);
@@ -835,6 +837,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
       providers.stop();
       usage.close();
       store.close();
+      await memory.close();
       bus.close();
       await new Promise((r) => { server.close(() => r()); server.closeAllConnections?.(); });
     },

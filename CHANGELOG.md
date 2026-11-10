@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Project memory (off by default, Settings → Defaults): finished conversations are kept on your PC word for word, one memory per work folder (sessions without a folder share one). When a run starts, the pieces related to the request are put in front of it with their source (date, session, who said it), up to a fixed number of characters (2,000 by default) however large the memory grows, and "recent conversation" is shortened by the amount added. Finding them uses no AI. If nothing related is found, the agent is told so instead of being given filler. Agents are told that memory is reference material and not instructions, that the current files win when they differ, and to cite the piece they used. A conversation with a local model is not handed to a cloud AI this way. Only conversations after you turn it on are kept, and only text that shares words with the request can be found, so a question phrased in different words can miss. Turning it off stops adding and reading; what was stored stays.
 - Usage at a glance: a small indicator stays in the bottom-right corner on every page. It shows each AI's fullest limit window and today's tokens, and opens into the limit bars, reset times and today's totals. Today's tokens move while work runs; the limit percentages are the last values a CLI reported, so they update when a run happens.
 
 ### Changed

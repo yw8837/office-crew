@@ -3,8 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { makeHandle } from './util.js';
 import { tr } from '../i18n.js';
+import { roleKind } from '../routing.js';
 
-// 역할 키(조사·정리·분석·빌드)는 기본 데모 에이전트의 역할과 맞추는 값이라 그대로, 보이는 문구만 설정 언어로
+// 역할 키(조사·정리·분석·빌드)는 그대로, 보이는 문구만 설정 언어로.
+// 에이전트의 역할 이름은 첫 실행 때 OS 언어로 저장되므로(Research, 調査 …) 역할 종류로 바꿔서 키를 찾는다
+const KEY = { research: '조사', organize: '정리', analysis: '분석', build: '빌드' };
+const roleKey = (role) => KEY[roleKind(role)] || role;
 const resultFile = () => tr('데모-결과.md');
 const PLANS = () => ({
   조사: [[tr('웹 검색'), { query: tr('관련 자료 검색') }, 1600], [tr('자료 읽기'), { file: 'reference.md' }, 1200]],
@@ -54,7 +58,7 @@ export default {
       emit({ type: 'thinking', text: `${tr('요청을 읽고 할 일을 정리하는 중…')}\n` });
       await wait(900);
       let n = 0;
-      for (const [name, input, ms] of PLANS()[agent.role] || []) {
+      for (const [name, input, ms] of PLANS()[roleKey(agent.role)] || []) {
         if (stopped) break;
         const id = `t${++n}`;
         emit({ type: 'tool', id, name, input, status: 'running' });
@@ -64,7 +68,7 @@ export default {
         }
         emit({ type: 'tool', id, name, status: 'done', output: tr('{name} 완료(데모)', { name }) });
       }
-      const body = answer(agent.role, agent.name, prompt);
+      const body = answer(roleKey(agent.role), agent.name, prompt);
       for (let i = 0; i < body.length && !stopped;) {
         const step = 2 + Math.floor(Math.random() * 5);
         const piece = body.slice(i, i + step);

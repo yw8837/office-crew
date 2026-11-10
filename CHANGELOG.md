@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Demo team on a non-Korean PC: when Office Crew was first started on an English, Chinese or Japanese system, the demo agents used no tools (so they never walked to the library, lookout tower or workshop) and gave a generic answer. The demo looked up its script by the Korean role name, while the role was saved in the system language. It now recognizes the translated role names.
+
 ## [1.2.0] - 2026-11-10
 
 ### Added

@@ -1130,4 +1130,6 @@ export default {
   "사무실 펼치기": "Show the office",
   "접기": "Hide",
   "드래그해서 높이 조절 · 두 번 누르면 기본 크기": "Drag to resize · double-click for the default size",
+  "이전 대화 {n}개 더 보기": "Show {n} earlier messages",
+  "(남은 {n}개)": "({n} not shown)",
 };

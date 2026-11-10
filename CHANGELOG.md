@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Usage at a glance: a small indicator stays in the bottom-right corner on every page. It shows each AI's fullest limit window and today's tokens, and opens into the limit bars, reset times and today's totals. Today's tokens move while work runs; the limit percentages are the last values a CLI reported, so they update when a run happens.
 
 ### Changed
+- Session page: the office picture takes less room. Its default height is now about 30% of the window (200 to 300 px) instead of 46%, so the conversation gets most of the page. A Hide button on the picture switches to chat only, a thin "Show the office" bar brings it back, and the resize handle is easier to grab; double-clicking it returns to the default height. A height you set by dragging earlier is kept.
 - Staying in the session: the Settings button in an agent's panel now opens the agent editor over the session instead of switching to the Agents page, so saving or closing leaves you where you were. The editor says that an agent is shared by every session that uses it.
 - Going back: on Settings, Routing and the other pages, a "Back to session" button names the session you were in, and Esc returns to it. The earlier back button never appeared, because the app forgot the open session as soon as you left it.
 

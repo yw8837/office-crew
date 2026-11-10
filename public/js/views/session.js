@@ -51,10 +51,12 @@ onServerEvent((type, d) => {
 });
 
 // ── 사무실 패널 ──
-function OfficePanel({ s, full }) {
+// 사무실 기본 높이: 화면의 30%쯤, 200~300px 사이(대화가 주인공이라 절반을 넘지 않게)
+const officeDefaultH = () => Math.max(200, Math.min(300, Math.round(innerHeight * 0.3)));
+function OfficePanel({ s, full, onCollapse }) {
   const host = useRef(null);
   const officeRef = useRef(null);
-  const [height, setHeight] = useState(() => Number(localStorage.getItem('ui.officeH')) || Math.max(340, Math.round(innerHeight * 0.46)));
+  const [height, setHeight] = useState(() => Number(localStorage.getItem('ui.officeH')) || officeDefaultH());
   const agents = sessionAgents(s);
   const key = agents.map((a) => `${a.id}:${a.name}:${a.model}:${avatarKey(a.avatar)}`).join('|');
   const mod = officeMod.m;
@@ -117,6 +119,7 @@ function OfficePanel({ s, full }) {
     addEventListener('pointermove', mv);
     addEventListener('pointerup', up);
   };
+  const resetHeight = () => { localStorage.removeItem('ui.officeH'); setHeight(officeDefaultH()); };
 
   return html`<div class=${`office-wrap${full ? ' full' : ''}`} style=${full ? '' : `height:${height}px`}>
     ${!mod && html`<div class="empty">${t('사무실 그래픽을 불러오는 중…')}</div>`}
@@ -126,8 +129,9 @@ function OfficePanel({ s, full }) {
         ${(mod?.SKINS || []).map((k) => html`<option value=${k.id}>${mod.skinName ? mod.skinName(k, uiLang()) : k.name}</option>`)}
         ${state.skins.map((k) => html`<option value=${k.id}>${k.type === 'village' ? '🏡' : '🖼'} ${k.name}</option>`)}
       </select>
+      ${!full && onCollapse && html`<button class="btn sm" onClick=${onCollapse} title=${t('사무실 접기 (채팅만 보기)')} aria-label=${t('사무실 접기 (채팅만 보기)')}><${Icon} name="up" size=${14} /> ${t('접기')}</button>`}
     </div>
-    ${!full && html`<div class="resizer" onPointerDown=${startDrag} title=${t('드래그해서 높이 조절')}></div>`}
+    ${!full && html`<div class="resizer" onPointerDown=${startDrag} onDblClick=${resetHeight} title=${t('드래그해서 높이 조절 · 두 번 누르면 기본 크기')}></div>`}
   </div>`;
 }
 
@@ -678,9 +682,11 @@ function TopBar({ s }) {
 export function SessionView({ s }) {
   const run = latestRun(s);
   const vm = state.settings.viewMode || 'split';
+  const setView = (v) => { state.settings.viewMode = v; changed(); import('../api.js').then(({ put }) => put('/api/settings', { viewMode: v })).catch(() => {}); };
   return html`<div class="session">
     <${TopBar} s=${s} />
-    ${vm !== 'chat' && html`<${OfficePanel} s=${s} full=${vm === 'office'} />`}
+    ${vm !== 'chat' && html`<${OfficePanel} s=${s} full=${vm === 'office'} onCollapse=${() => setView('chat')} />`}
+    ${vm === 'chat' && html`<button class="office-reopen" onClick=${() => setView('split')}><${Icon} name="down" size=${14} /> ${t('사무실 펼치기')}</button>`}
     ${vm !== 'office' && html`<${Chat} s=${s} run=${run} />`}
     ${vm === 'office' && html`<${Gate} s=${s} run=${run} />`}
     <${RunBar} s=${s} run=${run} />

@@ -1106,4 +1106,8 @@ export default {
   "프로젝트 기억": "Project memory",
   "끝난 대화를 작업 폴더별로 내 PC에 원문 그대로 쌓아 두고, 실행을 시작할 때 요청과 관련된 조각만 정해진 양만큼 넣어 줘. 찾는 데 AI를 쓰지 않고, 넣은 만큼 \"최근 대화\"를 줄여서 전체 양을 맞춰. 켠 뒤의 대화부터 쌓여. 낱말이 겹치는 내용만 찾을 수 있어.": "Keeps finished conversations on your PC, word for word, one memory per work folder. When a run starts, only the pieces related to the request are added, up to a fixed amount. No AI is used to find them, and \"recent conversation\" is shortened by the amount added. Only conversations after you turn this on are kept. It can only find text that shares words with the request.",
   "실행마다 넣는 기억의 최대 글자 수": "Most characters of memory added per run",
+  "사무실 접기 (채팅만 보기)": "Hide the office (chat only)",
+  "사무실 펼치기": "Show the office",
+  "접기": "Hide",
+  "드래그해서 높이 조절 · 두 번 누르면 기본 크기": "Drag to resize · double-click for the default size",
 };

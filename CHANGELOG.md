@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Usage at a glance: a small indicator stays in the bottom-right corner on every page. It shows each AI's fullest limit window and today's tokens, and opens into the limit bars, reset times and today's totals. Today's tokens move while work runs; the limit percentages are the last values a CLI reported, so they update when a run happens.
 
 ### Changed
+- Session page: the office picture takes less room. Its default height is now about 30% of the window (200 to 300 px) instead of 46%, so the conversation gets most of the page. A Hide button on the picture switches to chat only, a thin "Show the office" bar brings it back, and the resize handle is easier to grab; double-clicking it returns to the default height. A height you set by dragging earlier is kept.
+- Ctrl + mouse wheel no longer zooms the whole app page, which used to happen by accident while scrolling or zooming the office picture. Ctrl with +, - and 0 still changes the page zoom.
 - Staying in the session: the Settings button in an agent's panel now opens the agent editor over the session instead of switching to the Agents page, so saving or closing leaves you where you were. The editor says that an agent is shared by every session that uses it.
 - Going back: on Settings, Routing and the other pages, a "Back to session" button names the session you were in, and Esc returns to it. The earlier back button never appeared, because the app forgot the open session as soon as you left it.
 
@@ -20,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Chat: a link whose address held a second address (for example `[x](http://a(http://b/onmouseover=...)`) could break out of the link and add an event handler, so hovering over it ran script inside the app page. Text an agent read from a web page, or an imported conversation, could carry such a link. Links and code spans are now set aside while the rest of the line is formatted, so later steps can no longer rewrite a tag that was already made. The page still allows inline scripts in its content security policy; tightening that is a separate change.
 
 ### Fixed
+- Claude model list: Fable 5.2 was missing. When Claude Code hadn't reported which version the Fable alias points to, the list showed Fable 5.1, and 5.2 couldn't be picked by name. The alias now falls back to Fable 5.2, and both 5.2 and 5.1 can be picked directly. A version Claude Code reports, or one a run actually used, still wins over this built-in fallback.
 - Demo team on a non-Korean PC: when Office Crew was first started on an English, Chinese or Japanese system, the demo agents used no tools (so they never walked to the library, lookout tower or workshop) and gave a generic answer. The demo looked up its script by the Korean role name, while the role was saved in the system language. It now recognizes the translated role names.
 
 ## [1.2.0] - 2026-11-10

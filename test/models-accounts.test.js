@@ -25,6 +25,26 @@ test('Claude 모델 이름: Claude Code 처럼 버전으로', () => {
   assert.equal(claudeModelName('custom-model'), 'custom-model');
 });
 
+test('Claude 모델 목록: Claude Code 쪽 정보가 없을 때 앱이 아는 최신 버전을 보여 주고, 그 버전을 직접 고를 수도 있다', async () => {
+  const dir = tmp('claude-bare');
+  const prev = process.env.CLAUDE_CONFIG_DIR;
+  const seen = { ...observedModels };
+  for (const k of Object.keys(observedModels)) delete observedModels[k];
+  process.env.CLAUDE_CONFIG_DIR = dir;
+  try {
+    const list = await claude.models();
+    const by = (id) => list.find((m) => m.id === id);
+    assert.equal(by('fable').resolved, 'claude-fable-5-2');
+    assert.match(by('fable').label, /^Fable 5\.2/);
+    assert.match(by('opus').label, /^Opus 5\.5/);
+    for (const id of ['claude-fable-5-2', 'claude-fable-5-1', 'claude-opus-5-5']) assert.ok(by(id), `${id} 를 직접 고를 수 있다`);
+  } finally {
+    Object.assign(observedModels, seen);
+    if (prev === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('Claude 모델 목록: 내 기본(settings.json)·서버가 준 추가 목록·실행에서 확인한 버전을 반영', async () => {
   const dir = tmp('claude');
   const prev = process.env.CLAUDE_CONFIG_DIR;

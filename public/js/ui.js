@@ -40,6 +40,7 @@ const P = {
   check: 'M5 12l5 5L20 7',
   x: 'M6 6l12 12M18 6 6 18',
   down: 'M6 9l6 6 6-6',
+  up: 'M6 15l6-6 6 6',
   refresh: 'M20 11a8 8 0 0 0-14.9-3M4 4v4h4M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4',
   upload: 'M12 16V4M7 9l5-5 5 5M4 20h16',
   download: 'M12 4v12M7 11l5 5 5-5M4 20h16',

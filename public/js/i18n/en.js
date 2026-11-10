@@ -1126,4 +1126,8 @@ export default {
   "세션은 지워졌지만 기억에는 남아 있어.": "The session was deleted, but this stays in memory.",
   "지워진 세션": "Deleted session",
   "그 기억이 없어.": "That memory does not exist.",
+  "사무실 접기 (채팅만 보기)": "Hide the office (chat only)",
+  "사무실 펼치기": "Show the office",
+  "접기": "Hide",
+  "드래그해서 높이 조절 · 두 번 누르면 기본 크기": "Drag to resize · double-click for the default size",
 };

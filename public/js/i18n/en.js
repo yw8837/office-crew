@@ -1142,7 +1142,6 @@ export default {
   "{name} 설정 열기": "Open settings for {name}",
   "{name} 상태 보기": "Show status of {name}",
   "새로 고침": "Reload",
-  "회의 사용량이 상한({cap} 토큰)에 닿아서 남은 바퀴를 건너뛰고 결론으로 넘어가.": "The meeting reached its usage limit ({cap} tokens), so the remaining rounds are skipped and it moves to the conclusion.",
   "회의에서 나온 의견이 없어.": "No opinions came out of the meeting.",
   "회의 {r}바퀴에서 {names}의 답을 받지 못했어. 나머지 의견으로 이어가.": "No answer from {names} in round {r} of the meeting. Continuing with the other opinions.",
   "회의 끝": "Meeting over",
@@ -1189,4 +1188,6 @@ export default {
   "회의 끝내기": "End meeting",
   "지금까지 나온 의견으로 진행자가 바로 결론을 내": "The chair concludes now from the opinions given so far",
   "(쓰는 도중에 끊긴 글이야)": "(this text was cut off while it was being written)",
+  "회의에서 쓴 양(약 {used} 토큰)이 상한({cap} 토큰)에 닿아서 남은 바퀴를 건너뛰고 결론으로 넘어가.": "The meeting used about {used} tokens and reached its limit ({cap} tokens), so the remaining rounds are skipped and it moves to the conclusion.",
+  "상한은 새로 읽고 쓴 토큰에, 앞 대화를 다시 읽은 토큰의 10분의 1을 더해서 세. 대화가 긴 세션에서는 한 바퀴에 수십만 토큰이 들 수 있어.": "The limit counts newly read and written tokens, plus one tenth of the tokens re-read from the earlier conversation. In a session with a long conversation, one round can take several hundred thousand tokens.",
 };

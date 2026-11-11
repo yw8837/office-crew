@@ -235,12 +235,13 @@ function TeamEditor({ team, onClose }) {
           </div>
           <div class="field" style="margin-bottom:6px"><label>${t('이 단계 지시 (선택)')}</label><input class="input" value=${st.instruction} onInput=${(e) => setStage(i, 'instruction', e.target.value)} placeholder=${t('예: 출처 링크를 꼭 붙여')} /></div>
           <div class="row"><${Toggle} checked=${st.approve} onChange=${(v) => setStage(i, 'approve', v)} /><span class="small">${t('이 단계가 끝나면 내 승인을 기다리기 (수정 요청 가능)')}</span></div>
-          ${st.agentIds.length > 1 && html`<div class="row" style="margin-top:6px"><${Toggle} checked=${!!st.meeting} onChange=${(v) => setStage(i, 'meeting', v ? { rounds: 2, chairId: st.agentIds[0], tokenCap: 300000 } : null)} /><span class="small">${t('회의로 진행하기 (각자 의견 → 서로 검토 → 진행자가 결론)')}</span></div>`}
+          ${st.agentIds.length > 1 && html`<div class="row" style="margin-top:6px"><${Toggle} checked=${!!st.meeting} onChange=${(v) => setStage(i, 'meeting', v ? { rounds: 2, chairId: st.agentIds[0], tokenCap: 1000000 } : null)} /><span class="small">${t('회의로 진행하기 (각자 의견 → 서로 검토 → 진행자가 결론)')}</span></div>`}
           ${st.agentIds.length > 1 && st.meeting && html`<div class="meet-opts">
             <label>${t('바퀴 수')}<select class="select" value=${st.meeting.rounds || 2} onChange=${(e) => setStage(i, 'meeting', { ...st.meeting, rounds: Number(e.target.value) })}>${[1, 2, 3].map((n) => html`<option value=${n}>${t('{r}바퀴', { r: n })}</option>`)}</select></label>
             <label>${t('진행자')}<select class="select" value=${st.agentIds.includes(st.meeting.chairId) ? st.meeting.chairId : st.agentIds[0]} onChange=${(e) => setStage(i, 'meeting', { ...st.meeting, chairId: e.target.value })}>${st.agentIds.map((id) => html`<option value=${id}>${state.agents.find((a) => a.id === id)?.name || id}</option>`)}</select></label>
-            <label>${t('사용량 상한 (토큰, 0이면 없음)')}<input class="input" type="number" min="0" step="50000" value=${st.meeting.tokenCap ?? 300000} onInput=${(e) => setStage(i, 'meeting', { ...st.meeting, tokenCap: Math.max(0, Number(e.target.value) || 0) })} /></label>
+            <label>${t('사용량 상한 (토큰, 0이면 없음)')}<input class="input" type="number" min="0" step="100000" value=${st.meeting.tokenCap ?? 1000000} onInput=${(e) => setStage(i, 'meeting', { ...st.meeting, tokenCap: Math.max(0, Number(e.target.value) || 0) })} /></label>
             <div class="small muted">${t('첫 바퀴는 서로의 글을 보지 않고 각자 써. 그다음 바퀴부터 남의 의견을 보고 검토하고, 마지막에 진행자가 결론을 내. 다음 단계에는 결론만 넘어가.')}</div>
+            <div class="small muted">${t('상한은 새로 읽고 쓴 토큰에, 앞 대화를 다시 읽은 토큰의 10분의 1을 더해서 세. 대화가 긴 세션에서는 한 바퀴에 수십만 토큰이 들 수 있어.')}</div>
           </div>`}
         </div>
         <div style="display:flex;flex-direction:column;gap:2px">

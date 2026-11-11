@@ -1255,4 +1255,5 @@ export default {
   "\"자료 3건이면 충분하다\"는 가정이야.": "The assumption that \"three sources are enough\".",
   "새 부품 없이 되는지 먼저 확인할게.": "I'll check first whether it works without new parts.",
   "범위가 작다면 이번 주 안에 만들 수 있어.": "If the scope is small, I can build it this week.",
+  "에이전트 상태": "Agent status",
 };

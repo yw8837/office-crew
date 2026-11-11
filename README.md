@@ -52,6 +52,8 @@ Office Crew is a local workspace for running several AI agents together. It runs
 - **Real-time usage:** tokens per message, agent and session (estimated while streaming, exact once the turn ends), cost when the CLI reports it, and account limits (Claude 5-hour and weekly %, Codex weekly %).
 - **Needs you:** the top of the sidebar collects sessions that need you (approvals, decisions after an error, paused runs, failures and results you haven't opened yet). Click one to jump straight to it. Results and failures leave the list once opened; approvals, decisions and paused runs stay until handled.
 - **Evidence-based review:** review agents are told to judge only by evidence they checked themselves (files, command and test output) and to list anything they couldn't check. A review done by the same AI that built the result is flagged as weaker than a cross-check.
+- **Meetings:** a stage with two or more agents can run as a meeting. In the first round everyone writes an opinion at the same time without seeing the others; in later rounds each reads the others' opinions and reviews them; then the chair you picked writes the conclusion, and only that conclusion goes to the next stage. You set the rounds (1 to 3), the chair and a usage limit, and you can end the meeting early. A meeting of three agents with two rounds normally makes seven AI calls.
+- **Hire from the chat:** a short message such as "hire another research agent" shows a proposal card instead of starting a run. Nothing is created until you press Hire. The new agent copies an existing agent with the same role (model, permission, instructions, skills and connectors) and can be added to that stage of the session's team, which changes the team for every session that uses it. The request is recognized by word rules, not by an AI, so a request worded another way can be missed.
 
 | Team editor | Approval gate |
 |---|---|
@@ -70,6 +72,12 @@ Office Crew is a local workspace for running several AI agents together. It runs
 | ![Routing board: every agent's AI, model, effort and permission in one table, with the automatic handoff switch](docs/screens/app-routing.png) | ![Import dialog listing Claude Code and Codex sessions grouped by project folder](docs/screens/app-import.png) |
 | Auto or manual per agent, handoff on usage limits | Pick a past conversation and keep going |
 
+### Project memory
+
+- **Off by default** (Settings → Defaults). When it is on, finished conversations are kept on your PC word for word, one memory per work folder; sessions without a folder share one.
+- When a run starts, the pieces related to the request are put in front of it with their source (date, session, who said it), up to a fixed number of characters (2,000 by default) however large the memory grows. Finding them uses no AI. If nothing related is found, the agent is told so.
+- The **Memory** page lists what is stored for each folder and lets you search it. Only text that shares words with the request can be found, so a question phrased in different words can miss. A local model's replies are not handed to a cloud AI this way; what you typed in that conversation still can be.
+
 ### Schedules
 
 - On the days and at the time you pick, a team (or a single agent) gets the same instruction and starts working on its own, in a new session each time or continuing one session. Schedules use this PC's clock and run while the app is open.
@@ -84,6 +92,7 @@ Office Crew is a local workspace for running several AI agents together. It runs
 
 - An isometric village drawn in plain SVG, with no game engine. Every agent has a house. Idle agents stay inside (the windows light up), commute to the **office** when work starts and go home after they finish. Tools send them around the village: reading to the **library**, searching to the **lookout tower**, running commands to the **workshop**, planning and long thinking to the **plaza** fountain.
 - Characters raise a hand when they need approval, sweat on errors, carry documents when handing work to the next stage, and sub-agent helpers appear when an agent delegates.
+- **Readable when small:** when the picture is too low to show the whole village at a readable size, it zooms to where the agents are working. Name tags show a status mark and the name (model, tokens and cost appear when you select the agent or point at its tag); the mark uses a shape as well as a color (thinking, tool, waiting for approval, error, done). A row of chips along the bottom gives each agent's name and state, with the ones that need you first. During a meeting the participants gather at the plaza (at the meeting room in the office skins).
 - **Make it yours:** each agent can be a person, an original creature or your own image (small pixel art stays crisp), and you can replace the house with your own picture. Images stay on your machine. The office skins (Modern, Cozy, Night) and a skin made from your own floor plan are still available.
 - **Quality levels:** `full`, `lite` and `static` for low-end PCs.
 
@@ -101,6 +110,9 @@ Office Crew is a local workspace for running several AI agents together. It runs
 - Markdown with copy buttons, resend and edit, export a chat to `.md`, dark mode.
 - **Skills** are found automatically in your Claude, Codex and shared (`~/.agents`) skill folders. In the Korean UI their descriptions are shown in Korean (saved only on your PC; new ones can be translated by an agent you pick). When you pick an agent's skills, tabs show suggestions for its role, its own CLI's skills, the selected ones and everything, and a skill installed in several places is shown once. **MCP connectors** are injected per agent. **Plugins** bundle agents, teams, skills, connectors and skins into one JSON file you can import or export.
 - **Import and continue** existing Claude Code and Codex sessions without losing context. Claude continues on a fork, so the original history stays untouched; if a session can't be resumed, the recent conversation is passed along instead.
+- **Right-click menu:** copy or quote a message or selected text, give an agent an instruction, open its settings or show its status. Text boxes keep the browser's own menu.
+- **Usage at a glance:** a small indicator in the bottom-right corner shows each AI's fullest limit window and today's tokens on every page except Usage.
+- **Long chats stay light:** a long conversation draws its latest 40 messages, with a button to bring back earlier ones.
 - UI in Korean, English, Simplified Chinese and Japanese.
 
 | Dark mode | Live usage while streaming |

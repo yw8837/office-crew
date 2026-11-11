@@ -56,7 +56,7 @@ export function itemsFor(target) {
   if (link) items.push({ label: t('링크 주소 복사'), run: () => copy(link.href) });
 
   const msg = target.closest?.('.msg');
-  if (msg && !msg.classList.contains('system')) {
+  if (msg && !msg.classList.contains('system') && !msg.classList.contains('proposal')) {
     const body = (msg.querySelector('.msg-body') || msg).innerText.trim();
     if (body) {
       if (items.length) items.push(null);

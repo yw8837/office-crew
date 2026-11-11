@@ -11,6 +11,7 @@ import { Bus } from './bus.js';
 import { Usage } from './usage.js';
 import { Catalog } from './catalog.js';
 import { Orchestrator, normMeeting } from './orchestrator.js';
+import { uniqueName, STAGE_MAX } from './hire.js';
 import { ProviderRegistry, PROVIDERS, syncCodexAccounts, accountProviderId, codexAccountHome } from './providers/index.js';
 import { defaultCodexHome } from './providers/codex.js';
 import { resolveRoute } from './routing.js';
@@ -482,7 +483,55 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
       const f = path.join(dirs.uploads, `${String(aid).replace(/[^\w-]/g, '')}.json`);
       try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; }
     }).filter(Boolean);
-    return orch.send(id, { text: b.text || '', attachments: atts, mention: b.mention || null, mode: b.mode || 'queue' });
+    // 사람이 채팅에서 보낸 말: 영입해 달라는 말이면 제안 카드를 낸다
+    return orch.send(id, { text: b.text || '', attachments: atts, mention: b.mention || null, mode: b.mode || 'queue', detect: true });
+  });
+  // 영입 제안 처리: accept(에이전트를 만들고, 고르면 팀 단계에 넣는다) · dismiss(취소) · send(제안이 아니었으니 그 말로 실행한다)
+  route('POST', '/api/sessions/([\\w-]+)/proposals/([\\w-]+)', async (req, url, [id, mid]) => {
+    // 본문을 먼저 읽는다. 그 뒤로는 기다리는 곳이 없어서, 같은 제안을 두 곳에서 동시에 눌러도 한 번만 처리된다
+    const b = await readJson(req);
+    const s = store.getSession(id);
+    if (!s) throw new HttpError(404, tr('세션 없음'));
+    const p = s.messages.find((m) => m.id === mid && m.role === 'proposal');
+    if (!p) throw new HttpError(404, tr('그 제안이 없어.'));
+    if (p.status !== 'open') throw new HttpError(409, tr('이미 처리한 제안이야.'));
+    const done = (status, extra = {}) => {
+      Object.assign(p, { status, ...extra, resolvedAt: Date.now() });
+      store.saveSession(s, 50);
+      bus.emit('message', { sessionId: id, message: p });
+    };
+    if (b.action === 'dismiss') { done('dismissed'); return { ok: true }; }
+    if (b.action === 'send') {
+      const r = orch.sendProposed(id, p.userMessageId); // 실패하면 제안을 열린 채로 둔다
+      done('sent');
+      return r;
+    }
+    if (b.action !== 'accept') throw new HttpError(400, tr('모르는 동작: {action}', { action: String(b.action) }));
+    const base = typeof p.draft?.baseId === 'string' ? store.get('agents', p.draft.baseId) : null;
+    if (!base) throw new HttpError(409, tr('본뜰 에이전트가 지워졌어. 에이전트 화면에서 직접 만들어줘.'));
+    // 본뜬 에이전트와 같은 설정(AI·모델·권한·지침·스킬·커넥터). 이름·역할만 카드에서 받은 값으로
+    const { id: _id, pluginId: _plugin, avatar: _avatar, ...copy } = base;
+    const name = uniqueName(typeof b.name === 'string' && b.name.trim() ? b.name : p.draft.name, store.all('agents'));
+    const role = (typeof b.role === 'string' && b.role.trim() ? b.role : String(p.draft.role || '')).replace(/\s+/g, ' ').trim();
+    const agent = store.upsert('agents', cleanAgent({ ...copy, name, role }), 'agent');
+    bus.emit('agents', store.all('agents'));
+    // 팀에 넣기: 고른 경우에만. 그사이 팀·단계가 지워졌거나 단계가 꽉 찼으면 넣지 않고 이유를 알려 준다
+    let placed = null;
+    let notPlaced = null;
+    if (b.addToStage !== false && p.target) {
+      const team = store.get('teams', p.target.teamId);
+      const stage = team?.stages.find((x) => x.id === p.target.stageId);
+      if (!stage) notPlaced = 'gone';
+      else if (stage.agentIds.length >= STAGE_MAX) notPlaced = 'full';
+      else {
+        store.upsert('teams', { ...team, stages: team.stages.map((x) => (x.id === stage.id ? { ...x, agentIds: [...x.agentIds, agent.id] } : x)) });
+        bus.emit('teams', store.all('teams'));
+        placed = { teamId: team.id, teamName: team.name, stageLabel: stage.label };
+      }
+    }
+    // hiredAgentId: 이 메시지가 그 에이전트의 발언은 아니라서 agentId 로 적지 않는다(발언 수·마지막 출력에 섞이지 않게)
+    done('accepted', { hiredAgentId: agent.id, placed, notPlaced });
+    return { ok: true, agent, placed, notPlaced };
   });
   route('POST', '/api/sessions/([\\w-]+)/control', async (req, url, [id]) => orch.control(id, await readJson(req)));
   route('POST', '/api/sessions/([\\w-]+)/open-folder', async (req, url, [id]) => {

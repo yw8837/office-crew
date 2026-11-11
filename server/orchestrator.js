@@ -4,6 +4,7 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { newId } from './store.js';
 import { PROVIDERS } from './providers/index.js';
+import { detectHire, draftHire } from './hire.js';
 import { toolCategory } from './providers/util.js';
 import { resolveRoute, roleKind, aiKey, baseProvider } from './routing.js';
 import { Cooldown, isQuotaError, nearLimit, avoidUntil, resetTime, resetFromText, availableCatalog, pickFallback, continuationPrompt, handoffFacts } from './failover.js';
@@ -69,7 +70,8 @@ export class Orchestrator {
   }
 
   // ── 메시지 보내기 ──
-  send(sessionId, { text = '', attachments = [], mention = null, mode = 'queue' }) {
+  // detect: 영입해 달라는 말이면 제안 카드를 낸다. 사람이 채팅에서 보낸 말에만 켠다(예약 작업·칸반 카드는 언제나 그대로 실행)
+  send(sessionId, { text = '', attachments = [], mention = null, mode = 'queue', detect = false }) {
     const s = this.store.getSession(sessionId);
     if (!s) throw Object.assign(new Error(tr('세션을 찾을 수 없어.')), { status: 404 });
     text = String(text);
@@ -88,6 +90,12 @@ export class Orchestrator {
       this.control(sessionId, { action: 'steer', text, agentId: mention });
       return { steered: true };
     }
+    // 에이전트를 영입해 달라는 말이면 일을 시작하지 않고 제안 카드를 낸다(에이전트는 사용자가 카드에서 영입을 눌러야 생긴다)
+    if (detect && !mention && !attachments.length) {
+      const intent = detectHire(text);
+      const made = intent && draftHire(this.store, s, intent);
+      if (made) return this.#propose(s, text, made);
+    }
     const userMsg = {
       id: newId('m'), role: 'user', text, mention, createdAt: Date.now(), status: ctx ? 'queued' : 'done',
       attachments: attachments.map((a) => ({ id: a.id, name: a.name, mime: a.mime, size: a.size, path: a.path })),
@@ -98,6 +106,36 @@ export class Orchestrator {
     this.store.saveSession(s, 50);
     this.bus.emit('message', { sessionId, message: userMsg });
     this.bus.emit('session', this.store.sessionMeta(s));
+    if (ctx) { ctx.queue.push(userMsg); return { queued: true, messageId: userMsg.id }; }
+    this.#start(s, userMsg);
+    return { started: true, messageId: userMsg.id };
+  }
+
+  // 영입 제안: 사용자 말은 대화에 남기되 실행은 시작하지 않는다. 제안 메시지는 에이전트에게 넘기는 대화·기억에 들어가지 않는다(role 이 다르고 text 가 비어 있다)
+  #propose(s, text, { draft, target }) {
+    const userMsg = { id: newId('m'), role: 'user', text, mention: null, createdAt: Date.now(), status: 'done', attachments: [], hire: true };
+    const card = { id: newId('m'), role: 'proposal', kind: 'hire', status: 'open', text: '', request: text, userMessageId: userMsg.id, draft, target, createdAt: Date.now() };
+    s.messages.push(userMsg, card);
+    if ((s.title === '새 세션' || s.title === tr('새 세션')) && text.trim()) s.title = text.trim().replace(/\s+/g, ' ').slice(0, 40);
+    this.store.saveSession(s, 50);
+    this.bus.emit('message', { sessionId: s.id, message: userMsg });
+    this.bus.emit('message', { sessionId: s.id, message: card });
+    this.bus.emit('session', this.store.sessionMeta(s));
+    return { proposed: true, messageId: card.id };
+  }
+
+  // 제안 카드의 '그대로 보내기': 새 메시지를 만들지 않고, 대화에 이미 있는 그 말로 실행한다(같은 말이 두 번 남지 않게)
+  sendProposed(sessionId, userMessageId) {
+    const s = this.store.getSession(sessionId);
+    if (!s) throw Object.assign(new Error(tr('세션을 찾을 수 없어.')), { status: 404 });
+    const userMsg = s.messages.find((m) => m.id === userMessageId && m.role === 'user');
+    if (!userMsg) throw Object.assign(new Error(tr('보낼 내용이 없어.')), { status: 400 });
+    delete userMsg.hire;
+    const ctx = this.ctx.get(sessionId);
+    userMsg.status = ctx ? 'queued' : 'done';
+    this.#remember(s, userMsg);
+    this.store.saveSession(s, 50);
+    this.bus.emit('message', { sessionId, message: userMsg });
     if (ctx) { ctx.queue.push(userMsg); return { queued: true, messageId: userMsg.id }; }
     this.#start(s, userMsg);
     return { started: true, messageId: userMsg.id };
@@ -660,7 +698,7 @@ export class Orchestrator {
     const n = Math.max(0, Number(this.store.settings.historyTurns) || 0) * 2;
     // 지금 작성 중인 답(이어받기 때의 앞부분)은 빼고(이어받기 지시에 따로 들어감)
     const list = s.messages.filter((m) => m !== currentMsg && m.id !== s.runs.at(-1)?.userMessageId && m.status !== 'queued' && m.status !== 'streaming'
-      && (m.role === 'user' || (m.role === 'agent' && m.agentId === agentId)) && m.text);
+      && (m.role === 'user' || (m.role === 'agent' && m.agentId === agentId)) && m.text && !m.hire);
     return list.slice(-n).map((m) => ({ role: m.role, text: m.text.slice(0, 8000) }));
   }
 
@@ -670,7 +708,7 @@ export class Orchestrator {
   #withHistory(prompt, s, currentMsg, receiver = currentMsg?.provider, reserve = 0) {
     const n = Math.max(0, Number(this.store.settings.historyTurns) || 0) * 2;
     const list = s.messages.filter((m) => m !== currentMsg && m.id !== s.runs.at(-1)?.userMessageId && m.status !== 'queued'
-      && (m.role === 'user' || (m.role === 'agent' && (!currentMsg || m.runId !== currentMsg.runId))) && m.text
+      && (m.role === 'user' || (m.role === 'agent' && (!currentMsg || m.runId !== currentMsg.runId))) && m.text && !m.hire
       && (m.provider !== 'local' || receiver === 'local')).slice(-n);
     let total = list.reduce((sum, m) => sum + Math.min(m.text.length, 2000), 0);
     while (reserve > 0 && list.length > 1 && total > n * 2000 - reserve) total -= Math.min(list.shift().text.length, 2000);
@@ -689,7 +727,7 @@ export class Orchestrator {
     const last = s.messages.findLastIndex((m) => m.role === 'agent' && m.agentId === agent.id && m.runId !== run.id && m.text);
     if (!n || last < 0) return prompt;
     const missed = s.messages.slice(last + 1).filter((m) => m.text && m.runId !== run.id && m.id !== run.userMessageId && m.status !== 'queued'
-      && (m.role === 'user' || (m.role === 'agent' && m.agentId !== agent.id))
+      && (m.role === 'user' || (m.role === 'agent' && m.agentId !== agent.id)) && !m.hire
       && (m.provider !== 'local' || agent.provider === 'local')).slice(-n);
     if (!missed.length) return prompt;
     const who = (m) => (m.role === 'user' ? tr('사용자') : (this.store.get('agents', m.agentId)?.name || 'AI'));

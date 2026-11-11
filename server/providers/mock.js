@@ -34,6 +34,45 @@ function answer(role, name, prompt) {
   return (lines[role] || [tr('## {name}의 답변', { name }), '', tr('요청 "{t}"을(를) 처리했어 (데모 응답).', { t })]).join('\n');
 }
 
+// ── 회의 차례 ──
+// 회의 단계의 프롬프트에는 차례마다 정해진 형식 문구가 들어 있다. 그 문구로 차례를 알아보고 같은 형식의 짧은 답을 낸다
+// (그러지 않으면 데모 팀으로 회의를 돌렸을 때 "조사 결과" 같은 엉뚱한 글이 나온다)
+function meetingPhase(prompt) {
+  if (prompt.includes(tr('[회의 — 결론 내기]'))) return 'conclude';
+  if (prompt.includes(tr('가장 약한 가정: 누구의 무엇이고 왜'))) return 'review';
+  if (prompt.includes(tr('내가 틀렸다고 볼 기준: 무엇이 확인되면 이 주장을 버릴지'))) return 'opinion';
+  return null;
+}
+const OPINIONS = () => ({
+  조사: [tr('자료로 확인된 수요가 가장 큰 안으로 가자.'), tr('자료 3건이 같은 방향을 가리키고, 비슷한 사례가 2건 있어.'), tr('반대되는 자료가 2건 넘게 나오면 버릴게.'), tr('중간')],
+  정리: [tr('한 문장으로 설명되는 가장 단순한 안으로 가자.'), tr('설명이 짧을수록 전달이 쉽고, 준비할 것도 적어.'), tr('설명에 세 문장이 넘게 필요해지면 버릴게.'), tr('중간')],
+  분석: [tr('위험이 가장 작은 안을 작게 먼저 해 보자.'), tr('되돌리기 쉽고, 틀려도 드는 비용이 작아.'), tr('작게 해 봤는데 효과가 안 보이면 버릴게.'), tr('높음')],
+  빌드: [tr('지금 있는 것으로 이번 주 안에 만들 수 있는 안으로 가자.'), tr('새로 들일 것이 없고, 시험해 보기도 쉬워.'), tr('새로 만들 부품이 둘 넘게 필요해지면 버릴게.'), tr('중간')],
+});
+const REVIEWS = () => ({
+  조사: [tr('작게 먼저 해 보자는 의견이야. 틀려도 손해가 작아.'), tr('"한 문장이면 충분하다"는 가정이야. 처음 보는 사람에게도 통하는지 몰라.'), tr('자료 3건 중 2건은 출처가 같아서 하나로 셀게.'), tr('수요가 확인된 안을 작게 시작하는 데 동의해.')],
+  정리: [tr('자료로 수요를 확인했다는 의견이야.'), tr('"이번 주 안에 된다"는 가정이야. 시험할 시간이 빠져 있어.'), tr('단순한 안이 곧 좋은 안은 아니라는 점을 받아들일게.'), tr('수요가 확인된 안 쪽으로 바꿨어.')],
+  분석: [tr('근거를 숫자로 댄 의견이야.'), tr('"다들 원한다"는 가정이야. 확인한 사람이 아직 적어.'), tr('범위를 절반으로 줄일게.'), tr('작게 먼저 해 보는 쪽으로 바꿨어.')],
+  빌드: [tr('위험이 작은 것부터 하자는 의견이야.'), tr('"자료 3건이면 충분하다"는 가정이야.'), tr('새 부품 없이 되는지 먼저 확인할게.'), tr('범위가 작다면 이번 주 안에 만들 수 있어.')],
+});
+function meetingAnswer(phase, role) {
+  if (phase === 'opinion') {
+    const [claim, why, wrong, sure] = OPINIONS()[role] || OPINIONS().분석;
+    return [`- **${tr('주장')}**: ${claim}`, `- **${tr('근거')}**: ${why}`, `- **${tr('내가 틀렸다고 볼 기준')}**: ${wrong}`, `- **${tr('확신')}**: ${sure}`].join('\n');
+  }
+  if (phase === 'review') {
+    const [best, weak, fix, now] = REVIEWS()[role] || REVIEWS().분석;
+    return [`- **${tr('가장 설득력 있는 점')}**: ${best}`, `- **${tr('가장 약한 가정')}**: ${weak}`, `- **${tr('내 의견에서 고칠 점')}**: ${fix}`, `- **${tr('지금 내 입장')}**: ${now}`].join('\n');
+  }
+  return [
+    `## ${tr('회의 결론')}`, '',
+    `- **${tr('결정')}**: ${tr('합침. 수요가 확인된 안을, 가장 작은 범위로 먼저 만든다.')}`,
+    `- **${tr('근거')}**: ${tr('자료가 같은 방향이고, 작게 시작하면 되돌리기 쉬워.')}`,
+    `- **${tr('남은 이견')}**: ${tr('범위를 어디까지 줄일지는 의견이 갈렸어.')}`,
+    `- **${tr('다음 할 일')}**: ${tr('조사 담당은 반대 자료를 확인하고, 빌드 담당은 첫 화면을 만들어.')}`,
+  ].join('\n');
+}
+
 export default {
   id: 'mock', get label() { return tr('데모'); }, get sub() { return tr('가상 에이전트 · 사용량 0'); }, kind: 'mock', color: '#64748b',
   efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -58,7 +97,9 @@ export default {
       emit({ type: 'thinking', text: `${tr('요청을 읽고 할 일을 정리하는 중…')}\n` });
       await wait(900);
       let n = 0;
-      for (const [name, input, ms] of PLANS()[roleKey(agent.role)] || []) {
+      const phase = meetingPhase(prompt);
+      // 회의 중에는 도구를 쓰지 않는다(파일을 고치지 말라는 회의 지시와 같게)
+      for (const [name, input, ms] of (phase ? [] : PLANS()[roleKey(agent.role)] || [])) {
         if (stopped) break;
         const id = `t${++n}`;
         emit({ type: 'tool', id, name, input, status: 'running' });
@@ -68,7 +109,8 @@ export default {
         }
         emit({ type: 'tool', id, name, status: 'done', output: tr('{name} 완료(데모)', { name }) });
       }
-      const body = answer(roleKey(agent.role), agent.name, prompt);
+      if (phase && !stopped) await wait(1200); // 읽고 생각하는 시간
+      const body = phase ? meetingAnswer(phase, roleKey(agent.role)) : answer(roleKey(agent.role), agent.name, prompt);
       for (let i = 0; i < body.length && !stopped;) {
         const step = 2 + Math.floor(Math.random() * 5);
         const piece = body.slice(i, i + step);

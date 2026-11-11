@@ -229,3 +229,30 @@ test('사용량 세기: 새로 읽고 쓴 양은 그대로, 캐시로 다시 읽
   assert.equal(meetingSpend(null), 0);
   assert.equal(meetingSpend({}), 0);
 });
+
+test('데모(가짜 AI) 팀으로 회의하면 차례에 맞는 짧은 답이 나오고, 회의 중에는 도구를 쓰지 않는다', async () => {
+  const speed = t.app.store.settings.mockSpeed;
+  t.app.store.settings.mockSpeed = 0.02;
+  try {
+    const mk = async (name, role) => (await t.api('POST', '/api/agents', { name, role, provider: 'mock', model: 'mock-fast', routing: 'manual' })).json;
+    const a = await mk('데모 하나', '조사'), b = await mk('데모 둘', '분석'), c = await mk('데모 셋', '빌드');
+    const tm = await team('데모 회의 팀', [{ label: '회의', agentIds: [a.id, b.id, c.id], meeting: { rounds: 2, chairId: b.id } }, { label: '빌드', agentIds: [c.id] }]);
+    const s = await session(tm.id);
+    await say(s.id, '새 기능 이름을 정하자');
+    const mm = meetMsgs(s.id);
+    assert.equal(mm.length, 7);
+    const of = (phase) => mm.filter((m) => m.meeting.phase === phase);
+    for (const m of of('opinion')) { assert.match(m.text, /\*\*주장\*\*/); assert.match(m.text, /\*\*내가 틀렸다고 볼 기준\*\*/); assert.doesNotMatch(m.text, /조사 결과|빌드 결과/); }
+    assert.equal(new Set(of('opinion').map((m) => m.text)).size, 3, '역할마다 다른 의견');
+    for (const m of of('review')) assert.match(m.text, /\*\*가장 약한 가정\*\*/);
+    assert.equal(new Set(of('review').map((m) => m.text)).size, 3, '검토도 역할마다 다르다');
+    assert.match(of('conclude')[0].text, /^## 회의 결론/);
+    assert.match(of('conclude')[0].text, /\*\*남은 이견\*\*/);
+    assert.ok(mm.every((m) => !m.blocks.some((x) => x.kind === 'tool')), '회의 중에는 도구를 쓰지 않는다');
+    // 회의가 아닌 단계는 예전처럼 도구를 쓰고 역할에 맞는 글을 낸다
+    const after = t.app.store.getSession(s.id).messages.filter((m) => m.runId === runs(s.id).at(-1).id && !m.meeting && m.role === 'agent');
+    assert.equal(after.length, 1);
+    assert.match(after[0].text, /빌드 결과/);
+    assert.ok(after[0].blocks.some((x) => x.kind === 'tool'));
+  } finally { t.app.store.settings.mockSpeed = speed; }
+});

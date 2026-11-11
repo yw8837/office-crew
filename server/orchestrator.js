@@ -15,15 +15,24 @@ const FORCE_END_MS = 5000; // 멈춘 CLI를 끄라고 한 뒤 이만큼 기다�
 const ACCOUNT_LIMITED = new Set(['claude', 'codex', 'gemini', 'hermes']); // 계정 단위 사용량 한도가 있는 CLI
 const MAX_PREV = 12000; // 이전 단계 결과 1개당 최대 글자
 const MEET_MAX = 1500; // 회의에서 다른 참석자에게 넘기는 의견 한 건의 최대 글자 수
+const MEET_CAP = 1000000; // 회의 사용량 상한 기본값(meetingSpend 기준)
 
 // 회의 단계 설정 정리: 참석자가 둘 이상일 때만 회의다. 바퀴 1~3(기본 2), 진행자는 참석자 중 한 명(기본 첫 번째),
-// 사용량 상한은 토큰(기본 300,000, 0 = 없음). 값이 없거나 숫자가 아니면 기본값을 쓴다
+// 사용량 상한은 토큰(기본 1,000,000, 0 = 없음). 값이 없거나 숫자가 아니면 기본값을 쓴다
 export function normMeeting(meeting, agentIds) {
   const ids = [...new Set((agentIds || []).map(String))];
   if (!meeting || ids.length < 2) return null;
   const m = typeof meeting === 'object' ? meeting : {};
   const num = (v, d, lo, hi) => { const n = v === null || v === undefined || v === '' ? NaN : Math.round(Number(v)); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
-  return { rounds: num(m.rounds, 2, 1, 3), chairId: ids.includes(String(m.chairId)) ? String(m.chairId) : ids[0], tokenCap: num(m.tokenCap, 300000, 0, 5000000) };
+  return { rounds: num(m.rounds, 2, 1, 3), chairId: ids.includes(String(m.chairId)) ? String(m.chairId) : ids[0], tokenCap: num(m.tokenCap, MEET_CAP, 0, 20000000) };
+}
+
+// 회의 사용량 세기: 새로 읽은 글(입력 + 캐시에 새로 쓴 것)과 쓴 글(출력)은 그대로, 캐시에서 다시 읽은 글은 10분의 1로 센다.
+// Claude 는 새로 읽은 글 대부분이 '캐시 쓰기'로 잡혀서 입력만 세면 거의 0이 되고, Codex 는 이어 가는 대화 전체가 입력으로 잡힌다.
+// 둘을 같은 저울에 올리려는 값이고 요금표와 똑같지는 않다
+export function meetingSpend(u) {
+  if (!u) return 0;
+  return (u.input || 0) + (u.cacheWrite || 0) + (u.output || 0) + Math.round((u.cacheRead || 0) / 10);
 }
 
 export class Orchestrator {
@@ -227,7 +236,7 @@ export class Orchestrator {
     const chair = ids.includes(st.meeting.chairId) ? st.meeting.chairId : ids[0];
     const from = s.messages.length; // 이번 시도에서 만든 메시지만 센다(다시 시도 전에 쓴 양은 빼고)
     const spent = () => s.messages.slice(from).filter((m) => m.runId === run.id && m.stageIndex === stageIdx && m.meeting)
-      .reduce((sum, m) => sum + (m.usage?.input || 0) + (m.usage?.output || 0), 0);
+      .reduce((sum, m) => sum + meetingSpend(m.usage), 0);
     const progress = (now) => { st.meetingNow = now; this.#emitRun(ctx); };
     const log = []; // [{ round, outs: [{ agent, text }] }]
     ctx.meet = new Map();
@@ -242,7 +251,7 @@ export class Orchestrator {
           if (d.action === 'stop' || ctx.stopped || ctx.concludeNow) break;
         }
         if (r > 1 && tokenCap && spent() >= tokenCap) {
-          this.#systemNote(s, tr('회의 사용량이 상한({cap} 토큰)에 닿아서 남은 바퀴를 건너뛰고 결론으로 넘어가.', { cap: tokenCap.toLocaleString('en-US') }));
+          this.#systemNote(s, tr('회의에서 쓴 양(약 {used} 토큰)이 상한({cap} 토큰)에 닿아서 남은 바퀴를 건너뛰고 결론으로 넘어가.', { used: spent().toLocaleString('en-US'), cap: tokenCap.toLocaleString('en-US') }));
           break;
         }
         const prev = log.at(-1)?.outs || [];

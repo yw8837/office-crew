@@ -3,7 +3,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { startTestApp } from './helpers.js';
 import { PROVIDERS } from '../server/providers/index.js';
-import { normMeeting } from '../server/orchestrator.js';
+import { normMeeting, meetingSpend } from '../server/orchestrator.js';
 
 let t;
 before(async () => { t = await startTestApp(); });
@@ -29,7 +29,7 @@ test('팀 저장: 회의는 둘 이상일 때만, 바퀴는 1~3, 진행자는 �
   ]);
   assert.equal(tm.stages[0].meeting, null, '한 명이면 회의가 아니다');
   assert.deepEqual(tm.stages[1].meeting, { rounds: 3, chairId: a.id, tokenCap: 0 });
-  assert.deepEqual(tm.stages[2].meeting, { rounds: 2, chairId: a.id, tokenCap: 300000 });
+  assert.deepEqual(tm.stages[2].meeting, { rounds: 2, chairId: a.id, tokenCap: 1000000 });
   assert.equal(tm.stages[3].meeting, null);
 });
 
@@ -92,7 +92,7 @@ test('사용량 상한: 닿으면 남은 바퀴를 건너뛰고 결론으로 간
   await say(s.id, '점심 메뉴를 정하자');
   const mm = meetMsgs(s.id);
   assert.deepEqual(mm.map((m) => m.meeting.phase), ['opinion', 'opinion', 'conclude']);
-  assert.ok(t.app.store.getSession(s.id).messages.some((m) => m.role === 'system' && /회의 사용량이 상한/.test(m.text)), '건너뛴 이유를 알린다');
+  assert.ok(t.app.store.getSession(s.id).messages.some((m) => m.role === 'system' && /회의에서 쓴 양\(약 [\d,]+ 토큰\)이 상한\(1 토큰\)에 닿아서/.test(m.text)), '건너뛴 이유와 쓴 양을 알린다');
   assert.equal(runs(s.id).at(-1).status, 'done');
 });
 
@@ -142,7 +142,7 @@ test('중지: 회의 중에 멈추면 결론을 쓰지 않고 끝난다', async 
 // ── 코드 검토에서 나온 경우들 ──
 
 test('설정 정리: 값이 없으면 기본값, 같은 사람 둘은 회의가 아니다(저장·플러그인·실행이 같은 규칙)', () => {
-  assert.deepEqual(normMeeting({ rounds: null, tokenCap: '' }, ['a', 'b']), { rounds: 2, chairId: 'a', tokenCap: 300000 });
+  assert.deepEqual(normMeeting({ rounds: null, tokenCap: '' }, ['a', 'b']), { rounds: 2, chairId: 'a', tokenCap: 1000000 });
   assert.deepEqual(normMeeting({ rounds: 2.6, tokenCap: 0, chairId: 'b' }, ['a', 'b']), { rounds: 3, chairId: 'b', tokenCap: 0 });
   assert.equal(normMeeting({ rounds: 2 }, ['a', 'a']), null);
   assert.equal(normMeeting(null, ['a', 'b']), null);
@@ -197,7 +197,8 @@ test('수정 요청으로 회의를 다시 돌 때: 상한은 이번 시도에�
   const s0 = await session(probe.id);
   await say(s0.id, '한 건의 양을 재자');
   const u = meetMsgs(s0.id)[0].usage;
-  const one = u.input + u.output;
+  const one = meetingSpend(u);
+  assert.ok(one > u.input + u.output, '캐시로 다시 읽은 양도 일부 센다');
   assert.ok(one > 0, '가짜 CLI가 사용량을 알려 준다');
 
   // 상한 = 3건: 1바퀴(2건) 뒤에는 통과, 2바퀴(4건) 뒤에는 닿아서 3바퀴를 건너뛴다 → 의견 2 + 검토 2 + 결론 1
@@ -218,4 +219,13 @@ test('수정 요청으로 회의를 다시 돌 때: 상한은 이번 시도에�
   assert.ok(ps.every((p) => p.includes('결론에 비용 비교표를 넣어')), '의견·검토·결론 차례 모두에 수정 요청이 들어간다');
   await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'approve' });
   await ended(s.id);
+});
+
+test('사용량 세기: 새로 읽고 쓴 양은 그대로, 캐시로 다시 읽은 양은 10분의 1(실제 실행에서 본 숫자)', () => {
+  // Claude: 새로 읽은 글이 캐시 쓰기로 잡힌다. 입력만 세면 1,082 가 되어 상한이 걸리지 않았다
+  assert.equal(meetingSpend({ input: 2, cacheWrite: 177613, cacheRead: 16701, output: 1080 }), 180365);
+  // Codex: 이어 가는 대화 전체가 입력으로 잡힌다
+  assert.equal(meetingSpend({ input: 241723, cacheWrite: 0, cacheRead: 3968, output: 269 }), 242389);
+  assert.equal(meetingSpend(null), 0);
+  assert.equal(meetingSpend({}), 0);
 });

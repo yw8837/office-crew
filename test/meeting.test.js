@@ -245,6 +245,7 @@ test('데모(가짜 AI) 팀으로 회의하면 차례에 맞는 짧은 답이 �
     for (const m of of('opinion')) { assert.match(m.text, /\*\*주장\*\*/); assert.match(m.text, /\*\*내가 틀렸다고 볼 기준\*\*/); assert.doesNotMatch(m.text, /조사 결과|빌드 결과/); }
     assert.equal(new Set(of('opinion').map((m) => m.text)).size, 3, '역할마다 다른 의견');
     for (const m of of('review')) assert.match(m.text, /\*\*가장 약한 가정\*\*/);
+    assert.equal(new Set(of('review').map((m) => m.text)).size, 3, '검토도 역할마다 다르다');
     assert.match(of('conclude')[0].text, /^## 회의 결론/);
     assert.match(of('conclude')[0].text, /\*\*남은 이견\*\*/);
     assert.ok(mm.every((m) => !m.blocks.some((x) => x.kind === 'tool')), '회의 중에는 도구를 쓰지 않는다');

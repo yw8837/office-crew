@@ -487,3 +487,21 @@ pre.raw { background: var(--code-bg); padding: 10px 12px; border-radius: 10px; f
 .hire-check input { margin-top: 3px; }
 .hire-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 @media (max-width: 560px) { .hire-fields { grid-template-columns: 1fr; } }
+
+/* 마을 띠가 낮을 때도 그림이 띠 높이에 맞게 재어지도록(그림 자체의 최소 높이 260px가 띠보다 크면 구도가 어긋난다) */
+.office-wrap:not(.full) .office-host .office-root { min-height: 0; }
+/* 마을 띠 아래의 상태 칩: 누가 지금 무엇을 하는지 한 줄로. 사람이 봐야 하는 것(승인 대기·오류)이 맨 앞에 온다 */
+.office-chips { position: absolute; left: 6px; bottom: 4px; right: 124px; z-index: 5; display: flex; gap: 6px; padding: 4px; overflow-x: auto; scrollbar-width: none; pointer-events: none; }
+.office-chips::-webkit-scrollbar { display: none; }
+.ochip { pointer-events: auto; flex: none; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px 0 4px; border-radius: 99px; border: 1px solid var(--border-2); background: color-mix(in srgb, var(--panel) 92%, transparent); color: var(--text); font-size: 12px; cursor: pointer; white-space: nowrap; }
+.ochip:focus-visible { outline-offset: -2px; }
+.ochip b { font-weight: 700; max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+.ochip span { color: var(--muted); }
+.ochip.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.ochip.st-idle, .ochip.st-offline { opacity: .65; }
+/* 상태는 배경·테두리 색과 글자로 함께 알린다. 글자는 본문 색으로(색 글자는 대비가 모자랐다) */
+.ochip.st-waiting, .ochip.st-paused { background: var(--warn-soft); border-color: var(--warn); border-width: 2px; padding-left: 3px; }
+.ochip.st-error { background: var(--err-soft); border-color: var(--err); border-width: 2px; padding-left: 3px; }
+.ochip.st-waiting span, .ochip.st-paused span, .ochip.st-error span { color: var(--text); font-weight: 700; }
+.ochip.st-done span { color: var(--text); }
+@media (max-width: 859px) { .ochip span { display: none; } }

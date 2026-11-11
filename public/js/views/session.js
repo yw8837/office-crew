@@ -51,6 +51,12 @@ onServerEvent((type, d) => {
   if (L.length > 200) L.splice(0, L.length - 200);
 });
 
+// 상태 칩 순서: 사람이 봐야 하는 것(승인 대기·오류·멈춤) → 일하는 중 → 쉬는 중. 칩이 많아 넘쳐도 중요한 것이 먼저 보인다
+const CHIP_RANK = { waiting: 0, error: 0, paused: 1, idle: 3, offline: 3, done: 3 };
+function chipOrder(agents, live) {
+  return agents.map((a, i) => [a, live[a.id]?.state || 'idle', i]).sort((x, y) => ((CHIP_RANK[x[1]] ?? 2) - (CHIP_RANK[y[1]] ?? 2)) || (x[2] - y[2]));
+}
+
 // 지금 회의 중인 단계의 참석자(없으면 빈 목록). 마을에서 한자리에 모으는 데 쓴다
 function meetingIds(s) {
   const r = latestRun(s);
@@ -142,6 +148,9 @@ function OfficePanel({ s, full, onCollapse }) {
       </select>
       ${!full && onCollapse && html`<button class="btn sm" onClick=${onCollapse} title=${t('사무실 접기 (채팅만 보기)')} aria-label=${t('사무실 접기 (채팅만 보기)')}><${Icon} name="up" size=${14} /> ${t('접기')}</button>`}
     </div>
+    ${agents.length > 0 && html`<div class="office-chips" role="group" aria-label=${t('에이전트 상태')}>
+      ${chipOrder(agents, state.live[s.id] || {}).map(([a, st]) => { const label = STATE_LABEL[st] || st; return html`<button type="button" class=${`ochip st-${st}${state.ui.inspector === a.id ? ' on' : ''}`} aria-pressed=${state.ui.inspector === a.id ? 'true' : 'false'} aria-label=${`${a.name}, ${label}`} title=${`${a.name}${a.role ? ` · ${a.role}` : ''} · ${label}`} onClick=${() => { state.ui.inspector = a.id; changed(); }}><${Avatar} agent=${a} size=${18} /><b>${a.name}</b><span>${label}</span></button>`; })}
+    </div>`}
     ${!full && html`<div class="resizer" onPointerDown=${startDrag} onDblClick=${resetHeight} title=${t('드래그해서 높이 조절 · 두 번 누르면 기본 크기')}></div>`}
   </div>`;
 }

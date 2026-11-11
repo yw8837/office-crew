@@ -10,6 +10,8 @@ import { tr, normLang } from './i18n.js';
 const QUALITIES = ['full', 'lite', 'static'];
 
 const STATES = new Set(['idle', 'thinking', 'typing', 'tool', 'searching', 'reading', 'running', 'waiting', 'error', 'done', 'paused', 'offline']);
+// 이름표에 붙는 상태 표시: 색만으로 구분하지 않게 글자·모양을 같이 쓴다(모양은 office.css). 쉬는 중·꺼짐은 표시 없음
+const STATE_GLYPH = { thinking: '…', typing: '…', tool: '', searching: '', reading: '', running: '', waiting: '!', error: '×', done: '✓', paused: 'II' };
 const LONG_THINK_MS = 7000;   // thinking 이 이만큼 길어지면 회의실 화이트보드로
 const DONE_RELAX_MS = 2800;   // done 기지개 후 휴게실로
 const DONE_BUBBLE_MS = 3500;  // done 말풍선(✓완료)은 이만큼 뒤 숨김(태그는 유지)
@@ -161,6 +163,9 @@ export function createOffice(container, opts = {}) {
     const dots = document.createElement('span'); dots.className = 'oc-dots'; dots.innerHTML = '<i></i><i></i><i></i>';
     o.bub.append(o.bi, dots, o.bt);
     o.tag.dataset.agent = id;
+    const remeasure = () => { o.dirty = true; scheduleLayout(); };
+    o.tag.addEventListener('pointerenter', remeasure);
+    o.tag.addEventListener('pointerleave', remeasure);
     const l1 = div('oc-tag-l1');
     o.dot = document.createElement('i'); o.dot.className = 'oc-dot';
     o.name = document.createElement('b'); o.name.className = 'oc-name';
@@ -244,6 +249,7 @@ export function createOffice(container, opts = {}) {
     if (ch.flash) return ['recv', ch.flash.icon, ch.flash.text];
     if (ch.carry != null) return ['carry', '📄', head(ch.carry, 18) || T('bub.carry')];
     const s = ch.st, t = s.text;
+    if (ch.id !== selected && s.state !== 'waiting' && s.state !== 'error') return null;
     switch (s.state) {
       case 'thinking': return ['think', '', ''];
       case 'typing': return ['say', '', tail(t, 40) || '…'];
@@ -283,6 +289,7 @@ export function createOffice(container, opts = {}) {
     o.dirty = true;
     scheduleLayout();
     o.name.textContent = name;
+    o.dot.textContent = STATE_GLYPH[s.state] || '';
     o.chip.textContent = chip; o.chip.hidden = !chip;
     o.tok.textContent = tok; o.tok.hidden = !tok;
     o.badge.textContent = badge; o.badge.hidden = !badge;
@@ -418,10 +425,19 @@ export function createOffice(container, opts = {}) {
     apply(ch);
     updateZones();
   }
+  // 건물 이름표의 열쇠 → 그 건물에 해당하는 자리 이름(마을과 사무실 스킨이 이름을 다르게 쓴다)
+  const ZONE_SPOT = { library: 'shelf', tower: 'search', workshop: 'server', plaza: 'meeting', company: 'desk', dev: 'desk' };
   function updateZones() {
     const act = new Set();
-    for (const ch of chars.values()) if (!ch.walking && ch.spot && ch.at === ch.spot.name) act.add(ch.spot.name);
+    for (const ch of chars.values()) {
+      if (ch.walking || ch.gone) continue;
+      if (ch.spot && ch.at === ch.spot.name) act.add(ch.spot.name);
+      else if (ch.at === 'desk' && !quietState(ch)) act.add('desk');
+    }
     for (const z of ['search', 'meeting', 'server', 'lounge', 'shelf']) svg.classList.toggle('act-' + z, act.has(z));
+    // 이름표는 누가 그 건물에 있을 때만 또렷하게(없으면 흐리게, 띠가 작을 때는 숨긴다)
+    for (const z of zoneEls) z.el.classList.toggle('on', act.has(ZONE_SPOT[z.key] || z.key));
+    if (auto) reframe();
   }
 
   // ── 태그 충돌 회피 ──
@@ -869,6 +885,8 @@ export function createOffice(container, opts = {}) {
       applyClass(ch);
       const on = selected === x;
       ch.ov.root.classList.toggle('sel', on);
+      ch.ov.dirty = true; // 고르면 이름표에 모델·토큰이 펼쳐져 크기가 바뀐다
+      updateBubble(ch);
       ch.ov.root.style.zIndex = String(Math.round(ch.item.depth * 20) + (on ? 100000 : 0));
       scheduleLayout();
       if (ch.desk && ch.desk.group) ch.desk.group.classList.toggle('sel', on);
@@ -890,20 +908,112 @@ export function createOffice(container, opts = {}) {
     clearTimeout(wcTimer);
     wcTimer = setTimeout(() => { world.style.willChange = ''; }, 240);
   }
+  // ── 자동 구도 ──
+  // 띠가 낮아서 전체를 넣으면 캐릭터가 너무 작아질 때(CHAR_MIN 미만), 일하는 캐릭터들이 있는 곳만 확대해 보여 준다.
+  // 사용자가 직접 움직이면(휠·끌기·+/-·화살표) 꺼지고, 맞춤 버튼·두 번 누르기·0 키로 다시 켠다.
+  const CHAR_H = 76;      // 캐릭터 키 어림값(장면 단위, charScale 1 기준. 사람 그림의 머리 꼭대기는 약 87, 그림 아바타는 70)
+  const CHAR_MIN = 44;    // 이보다 작게 보이면 확대한다(화면 px)
+  const CHAR_MAX = 60;    // 확대해도 이보다 크게는 하지 않는다
+  let auto = opts.autoFrame !== false;
+  let goal = null, camRaf = 0, camT = 0;
+  const quietState = (ch) => ch.st.state === 'idle' || ch.st.state === 'offline';
+  function wholeView(vw, vh) {
+    const s = Math.min(vw / scene.width, vh / scene.height) * 0.98;
+    return { s, x: (vw - scene.width * s) / 2, y: (vh - scene.height * s) / 2 };
+  }
+  const needsEye = (ch) => ch.st.state === 'waiting' || ch.st.state === 'error';
+  // 캐릭터들을 담는 상자(장면 좌표). 걷는 중이면 지금 자리부터 남은 길 전체를 담는다(건물을 돌아가는 길이 화면 밖으로 나가지 않게)
+  function boxOf(list, ch1) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const ch of list) {
+      const w = ch.walking;
+      const h = ch1 * ch.scale;
+      for (const p of (w ? [ch.pos, ...w.path.slice(w.i)] : [ch.pos])) {
+        const [sx, sy] = scene.toScreen(p, 0);
+        x0 = Math.min(x0, sx - h * 0.4); x1 = Math.max(x1, sx + h * 0.4);
+        y0 = Math.min(y0, sy - 95 * ch.scale * (scene.charScale || 1)); y1 = Math.max(y1, sy); // 이름표는 발에서 95만큼 위에 뜬다
+      }
+    }
+    return [x0, y0, x1, y1];
+  }
+  function frameGoal() {
+    const vw = viewport.clientWidth, vh = viewport.clientHeight;
+    if (!scene || vw < 10 || vh < 10) return null;
+    const whole = wholeView(vw, vh);
+    cam.fit = whole.s;
+    const ch1 = CHAR_H * (scene.charScale || 1);
+    root.classList.toggle('oc-compact', ch1 * whole.s < CHAR_MIN);
+    if (!auto || ch1 * whole.s >= CHAR_MIN) return whole;
+    // 볼 대상: 일하는 캐릭터(없으면 전원)
+    const all = [...chars.values()].filter((ch) => !ch.gone && !ch.helper);
+    const busy = all.filter((ch) => !quietState(ch));
+    const pick = busy.length ? busy : all;
+    if (!pick.length) return whole;
+    // 이름표가 머리 위에 뜨므로 위쪽 여백을, 상태 칩 줄이 가리므로 아래쪽 여백을 둔다(화면 px)
+    const padX = 70, padTop = 40, padBottom = 44;
+    const fitOf = (b) => Math.min((vw - padX * 2) / Math.max(1, b[2] - b[0]), (vh - padTop - padBottom) / Math.max(1, b[3] - b[1]));
+    const maxS = CHAR_MAX / ch1;
+    let lo = Math.max(whole.s, CHAR_MIN / ch1);
+    let box = boxOf(pick, ch1);
+    let fitS = fitOf(box);
+    if (fitS < lo) {
+      // 다 담으려면 캐릭터가 너무 작아진다. 사람이 봐야 하는 캐릭터(승인 대기·오류)가 따로 있으면 그쪽을 담고,
+      // 없으면 캐릭터가 조금 작아지더라도 일하는 캐릭터를 다 담는다
+      const eye = pick.filter(needsEye);
+      if (eye.length && eye.length < pick.length) { box = boxOf(eye, ch1); fitS = fitOf(box); }
+      else lo = whole.s;
+    }
+    const s = clamp(fitS, lo, maxS);
+    const edge = (v, size, view) => (size * s <= view ? (view - size * s) / 2 : clamp(v, view - size * s, 0)); // 장면 밖 빈 곳을 비추지 않는다
+    return {
+      s, box,
+      x: edge(vw / 2 - ((box[0] + box[2]) / 2) * s, scene.width, vw),
+      y: edge((vh + padTop - padBottom) / 2 - ((box[1] + box[3]) / 2) * s, scene.height, vh),
+    };
+  }
+  function reframe(jump = false) {
+    const g = frameGoal();
+    if (!g) return;
+    if (jump || still() || quality === 'static' || document.hidden) {
+      cancelAnimationFrame(camRaf); camRaf = 0; goal = null;
+      cam.s = g.s; cam.x = g.x; cam.y = g.y;
+      applyCam();
+      return;
+    }
+    // 대상이 지금 화면에 다 들어와 있고 크기도 비슷하면 움직이지 않는다(상태가 바뀔 때마다 화면이 움찔하지 않게)
+    if (g.box && !goal) {
+      const vw = viewport.clientWidth, vh = viewport.clientHeight;
+      const inView = g.box[0] * cam.s + cam.x >= 24 && g.box[2] * cam.s + cam.x <= vw - 24 && g.box[1] * cam.s + cam.y >= 16 && g.box[3] * cam.s + cam.y <= vh - 36;
+      if (inView && cam.s >= g.s * 0.8 && cam.s <= g.s * 1.25) return;
+    }
+    if (Math.abs(g.s - cam.s) < 1e-4 && Math.abs(g.x - cam.x) < 0.5 && Math.abs(g.y - cam.y) < 0.5) { goal = null; cancelAnimationFrame(camRaf); camRaf = 0; return; }
+    goal = g;
+    if (!camRaf) { camT = 0; camRaf = requestAnimationFrame(camStep); }
+  }
+  function camStep(t) {
+    camRaf = 0;
+    if (destroyed || !goal) return;
+    const dt = camT ? Math.min(0.05, (t - camT) / 1000) : 1 / 60;
+    camT = t;
+    const k = 1 - Math.exp(-dt * 6); // 약 0.4초에 대부분 따라간다
+    cam.s += (goal.s - cam.s) * k; cam.x += (goal.x - cam.x) * k; cam.y += (goal.y - cam.y) * k;
+    if (Math.abs(goal.s - cam.s) < 1e-3 && Math.abs(goal.x - cam.x) < 0.6 && Math.abs(goal.y - cam.y) < 0.6) { cam.s = goal.s; cam.x = goal.x; cam.y = goal.y; goal = null; }
+    applyCam();
+    hint();
+    if (goal) camRaf = requestAnimationFrame(camStep);
+  }
+  // 사용자가 직접 화면을 움직였다: 자동 구도를 끈다
+  function manual() { auto = false; goal = null; cancelAnimationFrame(camRaf); camRaf = 0; }
   function fit() {
     if (!scene) return;
-    const vw = viewport.clientWidth, vh = viewport.clientHeight;
-    if (vw < 10 || vh < 10) return;
-    const s = Math.min(vw / scene.width, vh / scene.height) * 0.98;
-    cam.fit = s; cam.s = s;
-    cam.x = (vw - scene.width * s) / 2;
-    cam.y = (vh - scene.height * s) / 2;
-    applyCam();
+    auto = opts.autoFrame !== false;
+    reframe(true);
   }
   /** 캐릭터를 화면 가운데로(zoom = 맞춤 배율의 몇 배) */
   function focus(id, zoom = 2) {
     const ch = chars.get(String(id));
     if (!ch || !scene) return;
+    manual();
     const [sx, sy] = scene.toScreen(ch.pos, ch.lift);
     cam.s = clamp(cam.fit * zoom, cam.fit * 0.5, cam.fit * 2.5);
     cam.x = viewport.clientWidth / 2 - sx * cam.s;
@@ -912,7 +1022,8 @@ export function createOffice(container, opts = {}) {
     hint();
   }
   function zoomAt(mx, my, f) {
-    const ns = clamp(cam.s * f, cam.fit * 0.5, cam.fit * 2.5);
+    manual();
+    const ns = clamp(cam.s * f, cam.fit * 0.5, Math.max(cam.fit * 2.5, CHAR_MAX / (CHAR_H * (scene?.charScale || 1))));
     cam.x = mx - (mx - cam.x) * (ns / cam.s);
     cam.y = my - (my - cam.y) * (ns / cam.s);
     cam.s = ns;
@@ -942,7 +1053,7 @@ export function createOffice(container, opts = {}) {
       try { viewport.setPointerCapture(e.pointerId); } catch { /* 무시 */ }
       root.classList.add('oc-grabbing');
     }
-    if (drag.moved) { cam.x = drag.cx + dx; cam.y = drag.cy + dy; applyCam(); hint(); }
+    if (drag.moved) { manual(); cam.x = drag.cx + dx; cam.y = drag.cy + dy; applyCam(); hint(); }
   };
   const onUp = (e) => {
     if (!drag || e.pointerId !== drag.id) return;
@@ -971,10 +1082,10 @@ export function createOffice(container, opts = {}) {
     if (e.key === '+' || e.key === '=') zoomAt(viewport.clientWidth / 2, viewport.clientHeight / 2, 1.2);
     else if (e.key === '-') zoomAt(viewport.clientWidth / 2, viewport.clientHeight / 2, 1 / 1.2);
     else if (e.key === '0') fit();
-    else if (e.key === 'ArrowLeft') { cam.x += step; applyCam(); }
-    else if (e.key === 'ArrowRight') { cam.x -= step; applyCam(); }
-    else if (e.key === 'ArrowUp') { cam.y += step; applyCam(); }
-    else if (e.key === 'ArrowDown') { cam.y -= step; applyCam(); }
+    else if (e.key === 'ArrowLeft') { manual(); cam.x += step; applyCam(); }
+    else if (e.key === 'ArrowRight') { manual(); cam.x -= step; applyCam(); }
+    else if (e.key === 'ArrowUp') { manual(); cam.y += step; applyCam(); }
+    else if (e.key === 'ArrowDown') { manual(); cam.y -= step; applyCam(); }
     else return;
     e.preventDefault();
   };
@@ -985,7 +1096,7 @@ export function createOffice(container, opts = {}) {
   viewport.addEventListener('pointercancel', onUp);
   viewport.addEventListener('dblclick', fit);
   root.addEventListener('keydown', onKey);
-  const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { cancelAnimationFrame(roRaf); roRaf = requestAnimationFrame(fit); }) : null;
+  const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { cancelAnimationFrame(roRaf); roRaf = requestAnimationFrame(() => { if (auto) reframe(true); else frameGoal(); }); }) : null;
   if (ro) ro.observe(viewport);
   const onVis = () => {
     root.classList.toggle('oc-hidden', !!document.hidden);
@@ -1080,6 +1191,7 @@ export function createOffice(container, opts = {}) {
       gen++;
       cancelAnimationFrame(raf);
       cancelAnimationFrame(roRaf);
+      cancelAnimationFrame(camRaf);
       cancelAnimationFrame(layoutRaf);
       clearTimeout(wcTimer);
       clearTimeout(doorTimer);

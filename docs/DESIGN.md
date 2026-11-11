@@ -50,7 +50,7 @@ Team     { id, name, description, stages:[ { id, label, agentIds:[...], instruct
 Session  { id, title, teamId|null, agentId|null, cwd, createdAt, updatedAt,
            providerSessions:{ [agentId]: string }, sessionProvider:{ [agentId]: providerId },
            importedFrom?:{ source:'claude'|'codex', id, cwd, total, at }, messages:[Message], runs:[Run] }
-Message  { id, role:'user'|'agent'|'system', agentId?, runId?, stageIndex?, text,
+Message  { id, role:'user'|'agent'|'system'|'proposal'(영입 제안 카드, 결정 0006), agentId?, runId?, stageIndex?, text,
            attachments:[{id,name,mime,size,path}], blocks:[Block], status:'streaming'|'done'|'error'|'stopped',
            usage?:{input,output,cacheRead,cacheWrite,cost,durationMs}, createdAt }
 Block    { id, kind:'tool'|'thinking'|'notice', name?, input?, output?, status:'running'|'done'|'error' }

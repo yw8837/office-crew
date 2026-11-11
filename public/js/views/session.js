@@ -1,7 +1,7 @@
 // 세션 화면: 사무실(실시간) + 채팅 + 입력창 + 진행 바 + 승인/오류 카드 + 에이전트 상세
 import { Component } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { html, Icon, Avatar, ProviderChip, STATE_LABEL, EFFORT_LABEL, fmtTok, fmtCost, fmtDur, usageTotal, officeMod, agentModelText } from '../ui.js';
+import { html, Icon, Avatar, ProviderChip, STATE_LABEL, EFFORT_LABEL, fmtTok, fmtCost, fmtDur, usageTotal, officeMod, agentModelText, PERM_LABEL } from '../ui.js';
 import { state, changed, toast, agentById, teamById, latestRun, onServerEvent, loadSession, uiLang } from '../state.js';
 import { post, patch, upload, uploadUrl } from '../api.js';
 import { renderMarkdown } from '../markdown.js';
@@ -180,7 +180,7 @@ export function exportMarkdown(s) {
       const a = agentById(m.agentId);
       lines.push(`## ${a?.emoji || '🤖'} ${a?.name || m.agentId}${m.stageLabel ? ` · ${m.stageLabel}` : ''} (${m.model || ''})`, '', m.text || '', '');
       if (m.error) lines.push(`> ⚠ ${m.error}`, '');
-    } else lines.push(`*${m.text}*`, '');
+    } else if (m.text) lines.push(`*${m.text}*`, ''); // 영입 제안 카드처럼 글이 없는 것은 내보내지 않는다
   }
   const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
   const a = document.createElement('a');
@@ -190,9 +190,62 @@ export function exportMarkdown(s) {
   URL.revokeObjectURL(a.href);
 }
 
+// ── 영입 제안 카드 ──
+// "에이전트 한 명 더 영입해" 같은 말에 서버가 낸 초안. 영입을 눌러야 에이전트가 생긴다
+function HireCard({ m }) {
+  const sid = state.route.id;
+  const [name, setName] = useState(m.draft?.name || '');
+  const [role, setRole] = useState(m.draft?.role || '');
+  const [add, setAdd] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const base = agentById(m.draft?.baseId);
+  const team = m.target ? teamById(m.target.teamId) : null;
+  const stage = team?.stages.find((x) => x.id === m.target.stageId) || null;
+  const full = !!stage && stage.agentIds.length >= 8;
+  const perm = base ? (PERM_LABEL[base.permission]?.[0] || base.permission) : '';
+  const hire = () => act('accept', { name, role, addToStage: !!stage && !full && add });
+  const onEnter = (e) => { if (e.key === 'Enter' && !e.isComposing && base && name.trim()) { e.preventDefault(); hire(); } };
+  const act = async (action, body = {}) => {
+    if (busy) return;
+    setBusy(true);
+    try { await post(`/api/sessions/${sid}/proposals/${m.id}`, { action, ...body }); } catch (e) { toast(e.message, 'error'); }
+    setBusy(false);
+  };
+  if (m.status === 'accepted') {
+    const a = agentById(m.hiredAgentId);
+    return html`<div class="msg proposal"><div class="hire done" role="status">
+      <b>✓ ${t('{name} 영입 완료', { name: a?.name || m.draft?.name || '' })}</b>
+      <span class="small muted">${m.placed ? t('"{team}" 팀의 "{stage}" 단계에 넣었어. 다음 실행부터 같이 일해.', { team: m.placed.teamName, stage: m.placed.stageLabel })
+        : m.notPlaced === 'full' ? t('그 단계가 이미 꽉 차서(8명) 팀에는 넣지 못했어. 팀 배치에서 자리를 내고 넣어줘.')
+        : m.notPlaced === 'gone' ? t('그 팀이나 단계가 그사이 지워져서 팀에는 넣지 못했어.')
+        : t('팀에는 넣지 않았어. @이름으로 부르거나 팀 배치에서 넣을 수 있어.')}</span>
+      ${a && html`<button class="btn sm" onClick=${() => { state.ui.editAgent = a.id; changed(); }}><${Icon} name="gear" /> ${t('설정 열기')}</button>`}
+    </div></div>`;
+  }
+  if (m.status !== 'open') return html`<div class="msg system"><span role="status">${m.status === 'sent' ? t('영입 제안 대신 그 말을 그대로 보냈어.') : t('영입 제안을 취소했어.')}</span></div>`;
+  return html`<div class="msg proposal"><div class="hire" role="group" aria-label=${t('에이전트 영입 제안')}>
+    <div class="hire-head"><b>${t('에이전트 영입 제안')}</b><span class="small muted">${t('영입을 눌러야 만들어져. 아직 아무것도 바뀌지 않았어.')}</span></div>
+    <div class="hire-fields">
+      <label>${t('이름')}<input class="input" value=${name} maxlength="36" onInput=${(e) => setName(e.target.value)} onKeyDown=${onEnter} /></label>
+      <label>${t('역할')}<input class="input" value=${role} maxlength="30" onInput=${(e) => setRole(e.target.value)} onKeyDown=${onEnter} /></label>
+    </div>
+    <div class="small">${base ? t('"{base}"와 같은 설정으로 만들어: {model} · 권한 {perm}. 지침·스킬·커넥터도 같아.', { base: base.name, model: agentModelText(base, state.sessionData[sid]), perm }) : t('본뜰 에이전트가 지워졌어. 에이전트 화면에서 직접 만들어줘.')}</div>
+    ${stage && !full
+      ? html`<label class="hire-check"><input type="checkbox" checked=${add} onChange=${(e) => setAdd(e.target.checked)} /> <span>${t('"{team}" 팀의 "{stage}" 단계에 함께 넣기', { team: team.name, stage: stage.label })} <span class="muted">${t('(이 팀을 쓰는 다른 세션에도 적용돼)')}${stage.meeting ? ` ${t('회의 단계라 참석자가 늘면 AI를 부르는 횟수도 늘어.')}` : ''}</span></span></label>`
+      : html`<div class="small muted">${full ? t('"{stage}" 단계가 이미 꽉 차서(8명) 팀에는 넣지 않아. 영입한 뒤 팀 배치에서 자리를 내고 넣을 수 있어.', { stage: stage.label }) : t('팀에는 넣지 않아. 영입한 뒤 @이름으로 부르거나 팀 배치에서 넣을 수 있어.')}</div>`}
+    <div class="hire-acts">
+      <button class="btn primary sm" disabled=${busy || !base || !name.trim()} onClick=${hire}><${Icon} name="plus" /> ${t('영입')}</button>
+      <button class="btn sm" disabled=${busy} onClick=${() => act('dismiss')}>${t('취소')}</button>
+      <span class="grow"></span>
+      <button class="btn ghost sm" disabled=${busy} title=${t('영입해 달라는 말이 아니었으면, 이 말을 그대로 에이전트에게 보내')} onClick=${() => act('send')}>${t('영입이 아니야 — 그대로 보내기')}</button>
+    </div>
+  </div></div>`;
+}
+
 // ── 메시지 ──
 class Message extends Component {
-  shouldComponentUpdate(np) { return np.m._v !== this.v || np.m !== this.props.m || np.compact !== this.props.compact || getLang() !== this.lang; }
+  // 제안 카드는 에이전트·팀 목록도 보여 주므로 언제나 다시 그린다
+  shouldComponentUpdate(np) { return np.m.role === 'proposal' || np.m._v !== this.v || np.m !== this.props.m || np.compact !== this.props.compact || getLang() !== this.lang; }
   render({ m }) {
     this.v = m._v;
     this.lang = getLang();
@@ -210,6 +263,7 @@ class Message extends Component {
           </span></div>
       </div></div>`;
     }
+    if (m.role === 'proposal') return html`<${HireCard} m=${m} />`;
     if (m.role === 'system') return html`<div class="msg system"><span>${m.text}</span></div>`;
     const a = agentById(m.agentId) || { name: t('삭제된 에이전트'), emoji: '❔' };
     const streaming = m.status === 'streaming';

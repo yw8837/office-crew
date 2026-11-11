@@ -159,7 +159,7 @@ export class Store {
   hasSession(id) { return this.meta.has(id); }
 
   #metaOf(s) {
-    const last = s.messages[s.messages.length - 1];
+    const last = s.messages.findLast((m) => m.text); // 글이 없는 것(영입 제안 카드)은 건너뛴다
     return {
       id: s.id, title: s.title, teamId: s.teamId, agentId: s.agentId, cwd: s.cwd,
       pinned: !!s.pinned, createdAt: s.createdAt, updatedAt: s.updatedAt,

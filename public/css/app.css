@@ -475,3 +475,15 @@ pre.raw { background: var(--code-bg); padding: 10px 12px; border-radius: 10px; f
 .meet-opts label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
 .meet-opts > .small { grid-column: 1 / -1; }
 @media (max-width: 700px) { .meet-opts { grid-template-columns: 1fr; } }
+
+/* 영입 제안 카드 */
+.msg.proposal { display: flex; justify-content: center; margin: 10px 0; }
+.hire { display: flex; flex-direction: column; gap: 10px; width: min(560px, 100%); margin: 0 auto; padding: 14px 16px; border: 1px solid var(--border-2); border-radius: var(--radius); background: var(--panel); color: var(--text); text-align: left; font-size: 13.5px; }
+.hire.done { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.hire-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.hire-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.hire-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.hire-check { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; cursor: pointer; }
+.hire-check input { margin-top: 3px; }
+.hire-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+@media (max-width: 560px) { .hire-fields { grid-template-columns: 1fr; } }

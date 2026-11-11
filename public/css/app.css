@@ -463,3 +463,9 @@ pre.raw { background: var(--code-bg); padding: 10px 12px; border-radius: 10px; f
 /* 긴 대화: 앞부분은 눌러서 더 불러온다 */
 .chat-more { align-self: center; margin: 4px auto 12px; display: block; padding: 6px 14px; border: 1px solid var(--border-2); border-radius: 99px; background: var(--panel); color: var(--text); font-size: 12.5px; cursor: pointer; }
 .chat-more:hover { border-color: var(--accent); }
+
+/* 우클릭 메뉴 */
+.ctx-menu { position: fixed; z-index: 1000; min-width: 190px; max-width: 320px; padding: 5px; border: 1px solid var(--border-2); border-radius: 10px; background: var(--panel); box-shadow: 0 10px 30px rgba(0, 0, 0, .18); display: flex; flex-direction: column; }
+.ctx-menu button { all: unset; box-sizing: border-box; display: block; width: 100%; padding: 7px 10px; border-radius: 6px; font-size: 13px; color: var(--text); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctx-menu button:hover, .ctx-menu button:focus-visible { background: var(--accent-soft); outline: none; }
+.ctx-sep { height: 1px; margin: 4px 6px; background: var(--border); }

@@ -380,6 +380,8 @@ function Composer({ s, run }) {
   const active = run && ['running', 'paused', 'waiting'].includes(run.status) && !run.endedAt;
 
   useEffect(() => { if (state.ui.draft) { setText(state.ui.draft); state.ui.draft = null; setTimeout(() => ta.current?.focus(), 0); } });
+  // 우클릭 메뉴의 '지시하기': 받는 에이전트를 정하고 입력칸으로 간다
+  useEffect(() => { if (state.ui.mentionTo) { setMention(state.ui.mentionTo); state.ui.mentionTo = null; setTimeout(() => ta.current?.focus(), 0); } });
   useEffect(() => { setAtts([]); setMention(null); }, [s.id]);
   useEffect(() => {
     const el = ta.current;
@@ -573,7 +575,7 @@ export function RightPanel({ s }) {
         ${agents.map((a) => {
           const l = live[a.id];
           const au = agentUsage(s, a.id);
-          return html`<div class=${`acard${state.ui.inspector === a.id ? ' on' : ''}`} onClick=${() => { state.ui.inspector = a.id; changed(); }}>
+          return html`<div class=${`acard${state.ui.inspector === a.id ? ' on' : ''}`} data-agent=${a.id} onClick=${() => { state.ui.inspector = a.id; changed(); }}>
             <${Avatar} agent=${a} size=${38} />
             <div style="min-width:0">
               <div class="nm">${a.name}<span class=${`sbadge ${l?.state || 'idle'}`}>${STATE_LABEL[l?.state || 'idle']}</span></div>

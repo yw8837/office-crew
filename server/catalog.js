@@ -7,6 +7,7 @@ import { newId } from './store.js';
 import { runQuick } from './providers/util.js';
 import { tr } from './i18n.js';
 import { cleanAvatar, cleanSkin } from './media.js';
+import { normMeeting } from './orchestrator.js';
 
 const home = os.homedir();
 // 각 CLI 의 설정 폴더(CLAUDE_CONFIG_DIR·CODEX_HOME 을 바꿨으면 그쪽). 한도·대화 기록과 같은 곳을 본다
@@ -269,7 +270,11 @@ export class Catalog {
     for (const t of bundle.teams || []) {
       const saved = this.store.upsert('teams', {
         ...t, id: undefined, pluginId,
-        stages: (t.stages || []).map((s) => ({ ...s, id: newId('st'), agentIds: (s.agentIds || []).map((id) => idMap.get(id)).filter(Boolean) })),
+        stages: (t.stages || []).map((s) => {
+          const agentIds = [...new Set((s.agentIds || []).map((id) => idMap.get(id)).filter(Boolean))];
+          const meeting = s.meeting && typeof s.meeting === 'object' ? { ...s.meeting, chairId: idMap.get(s.meeting.chairId) } : s.meeting;
+          return { ...s, id: newId('st'), agentIds, meeting: normMeeting(meeting, agentIds) };
+        }),
       }, 'team');
       items.teams.push(saved.id);
     }

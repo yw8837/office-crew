@@ -11,7 +11,7 @@ export function normLang(lang) {
 
 const DICT = {
   ko: {
-    'zone.shelf': '자료실', 'zone.search': '정보검색실', 'zone.lounge': '휴게실', 'zone.meeting': '회의실', 'zone.server': '서버실', 'zone.dev': '개발실', 'zone.company': '회사', 'zone.library': '도서관', 'zone.workshop': '작업장', 'zone.tower': '전망탑', 'zone.plaza': '광장',
+    'zone.shelf': '자료실', 'zone.search': '정보검색실', 'zone.lounge': '휴게실', 'zone.meeting': '회의실', 'zone.server': '서버실', 'zone.dev': '개발실', 'zone.company': '회사', 'zone.library': '도서관', 'zone.workshop': '작업장', 'zone.tower': '전망탑', 'zone.plaza': '회의 광장',
     'bub.carry': '전달', 'bub.tool': '도구', 'bub.searching': '검색 중', 'bub.reading': '읽는 중', 'bub.running': '실행 중',
     'bub.waiting': '승인 필요', 'bub.error': '오류', 'bub.done': '완료', 'bub.paused': '일시정지', 'bub.received': '받음', 'bub.leave': '퇴근',
     'misc.papers': '서류', 'misc.helper': '서브에이전트', 'misc.helperChip': '서브',
@@ -33,7 +33,7 @@ const DICT = {
     'ed.missingSpots': '{list} 위치가 없어. 그 상태의 에이전트는 자기 자리에서 일해. 그래도 저장하려면 한 번 더 눌러.',
   },
   en: {
-    'zone.shelf': 'Library', 'zone.search': 'Research', 'zone.lounge': 'Lounge', 'zone.meeting': 'Meeting Room', 'zone.server': 'Server Room', 'zone.dev': 'Dev Room', 'zone.company': 'Office', 'zone.library': 'Library', 'zone.workshop': 'Workshop', 'zone.tower': 'Lookout Tower', 'zone.plaza': 'Plaza',
+    'zone.shelf': 'Library', 'zone.search': 'Research', 'zone.lounge': 'Lounge', 'zone.meeting': 'Meeting Room', 'zone.server': 'Server Room', 'zone.dev': 'Dev Room', 'zone.company': 'Office', 'zone.library': 'Library', 'zone.workshop': 'Workshop', 'zone.tower': 'Lookout Tower', 'zone.plaza': 'Meeting Plaza',
     'bub.carry': 'Handing off', 'bub.tool': 'Tool', 'bub.searching': 'Searching', 'bub.reading': 'Reading', 'bub.running': 'Running',
     'bub.waiting': 'Needs approval', 'bub.error': 'Error', 'bub.done': 'Done', 'bub.paused': 'Paused', 'bub.received': 'Received', 'bub.leave': 'Heading out',
     'misc.papers': 'Documents', 'misc.helper': 'Sub-agent', 'misc.helperChip': 'Sub',
@@ -55,7 +55,7 @@ const DICT = {
     'ed.missingSpots': 'No spot set for {list}. Agents in those states will work at their desks. Click Save again to save anyway.',
   },
   zh: {
-    'zone.shelf': '资料室', 'zone.search': '信息检索室', 'zone.lounge': '休息室', 'zone.meeting': '会议室', 'zone.server': '机房', 'zone.dev': '开发室', 'zone.company': '公司', 'zone.library': '图书馆', 'zone.workshop': '工坊', 'zone.tower': '瞭望塔', 'zone.plaza': '广场',
+    'zone.shelf': '资料室', 'zone.search': '信息检索室', 'zone.lounge': '休息室', 'zone.meeting': '会议室', 'zone.server': '机房', 'zone.dev': '开发室', 'zone.company': '公司', 'zone.library': '图书馆', 'zone.workshop': '工坊', 'zone.tower': '瞭望塔', 'zone.plaza': '会议广场',
     'bub.carry': '递交中', 'bub.tool': '工具', 'bub.searching': '搜索中', 'bub.reading': '阅读中', 'bub.running': '运行中',
     'bub.waiting': '需要批准', 'bub.error': '出错', 'bub.done': '完成', 'bub.paused': '已暂停', 'bub.received': '已收到', 'bub.leave': '下班',
     'misc.papers': '文件', 'misc.helper': '子智能体', 'misc.helperChip': '子',
@@ -77,7 +77,7 @@ const DICT = {
     'ed.missingSpots': '尚未设置{list}的位置。处于这些状态的智能体会在自己的工位工作。如仍要保存,请再点一次保存。',
   },
   ja: {
-    'zone.shelf': '資料室', 'zone.search': '情報検索室', 'zone.lounge': '休憩室', 'zone.meeting': '会議室', 'zone.server': 'サーバー室', 'zone.dev': '開発室', 'zone.company': '会社', 'zone.library': '図書館', 'zone.workshop': '工房', 'zone.tower': '展望塔', 'zone.plaza': '広場',
+    'zone.shelf': '資料室', 'zone.search': '情報検索室', 'zone.lounge': '休憩室', 'zone.meeting': '会議室', 'zone.server': 'サーバー室', 'zone.dev': '開発室', 'zone.company': '会社', 'zone.library': '図書館', 'zone.workshop': '工房', 'zone.tower': '展望塔', 'zone.plaza': '会議広場',
     'bub.carry': '受け渡し中', 'bub.tool': 'ツール', 'bub.searching': '検索中', 'bub.reading': '閲覧中', 'bub.running': '実行中',
     'bub.waiting': '承認が必要', 'bub.error': 'エラー', 'bub.done': '完了', 'bub.paused': '一時停止', 'bub.received': '受け取り', 'bub.leave': '退勤',
     'misc.papers': '書類', 'misc.helper': 'サブエージェント', 'misc.helperChip': 'サブ',

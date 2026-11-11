@@ -349,6 +349,8 @@ export function createOffice(container, opts = {}) {
   function desired(ch) {
     const s = ch.st.state, t = ch.st.tool;
     if (ch.leaving) return 'door';
+    // 회의 중인 참석자는 차례가 아니어도 모임 자리(마을은 광장, 사무실은 회의실)에 머문다
+    if (ch.st.meeting && !ch.helper && scene.spots.meeting && scene.spots.meeting.length) return 'meeting';
     // 마을: 쉬거나 퇴근(완료 후)이면 자기 집으로
     if (ch.house && (s === 'idle' || s === 'offline' || (s === 'done' && ch.relax))) return 'house';
     let spot = null;
@@ -597,10 +599,11 @@ export function createOffice(container, opts = {}) {
     const ch = chars.get(id);
     if (!ch || !patch || typeof patch !== 'object') return;
     const prev = ch.st.state, prevTool = ch.st.tool;
-    for (const k of ['state', 'text', 'tool', 'tokens', 'badge']) if (patch[k] !== undefined) ch.st[k] = patch[k];
+    const prevMeet = !!ch.st.meeting;
+    for (const k of ['state', 'text', 'tool', 'tokens', 'badge', 'meeting']) if (patch[k] !== undefined) ch.st[k] = patch[k];
     if (!STATES.has(ch.st.state)) ch.st.state = 'idle';
     if (ch.st.state !== prev) onStateChange(ch);
-    else if (ch.st.tool !== prevTool) reconcile(ch);
+    else if (ch.st.tool !== prevTool || !!ch.st.meeting !== prevMeet) reconcile(ch);
     apply(ch);
   }
 

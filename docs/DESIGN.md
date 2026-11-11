@@ -46,7 +46,7 @@ Agent    { id, name, role, emoji, provider, model, effort, systemPrompt,
            permission: 'plan'|'default'|'edit'|'auto'|'full',
            skills:[skillId], connectors:[connectorId], light:boolean,
            apiProfile?: string, avatar:{ skin, hair, hairStyle, outfit, accessory } , createdAt }
-Team     { id, name, description, stages:[ { id, label, agentIds:[...], instruction, approve:boolean } ] }
+Team     { id, name, description, stages:[ { id, label, agentIds:[...], instruction, approve:boolean, meeting:null|{ rounds, chairId, tokenCap } } ] }
 Session  { id, title, teamId|null, agentId|null, cwd, createdAt, updatedAt,
            providerSessions:{ [agentId]: string }, sessionProvider:{ [agentId]: providerId },
            importedFrom?:{ source:'claude'|'codex', id, cwd, total, at }, messages:[Message], runs:[Run] }
@@ -84,7 +84,7 @@ emit(ev):
 - 각 에이전트 프롬프트 = 역할 지시 + 팀 맥락 + (첫 단계면) 사용자 요청 / (다음 단계면) 사용자 요청 + 이전 단계 결과 + 개입 지시.
 - 에이전트마다 CLI 세션 ID를 세션에 저장 → 다음 턴은 resume으로 이어감(기억 유지).
 - `@이름` 멘션 → 그 에이전트에게만 보냄. 팀 없는 세션 → 단일 에이전트 채팅.
-- 개입: steer(지시 추가: Claude는 실행 중 stdin 주입, 나머지는 턴 종료 후 이어서 실행), pause(현재 단계 끝나면 멈춤), resume, stop(프로세스 트리 종료), skip(현재 에이전트 중단 후 다음), retry(단계 재실행), approve/reject(승인 게이트, 거절 시 피드백 붙여 재실행).
+- 개입: steer(지시 추가: Claude는 실행 중 stdin 주입, 나머지는 턴 종료 후 이어서 실행), pause(현재 단계 끝나면 멈춤), resume, stop(프로세스 트리 종료), skip(현재 에이전트 중단 후 다음), retry(단계 재실행), approve/reject(승인 게이트, 거절 시 피드백 붙여 재실행). conclude(회의 단계에서 남은 바퀴를 건너뛰고 진행자가 바로 결론).
 
 ### 이어갈 대화(resume)
 - `providerSessions[agentId]`에 CLI 대화 id, `sessionProvider[agentId]`에 그 대화를 만든 프로바이더를 같이 저장한다. 지금 실행할 프로바이더가 다르면(자동 라우팅·이어받기로 바뀜) 이어하기를 하지 않는다.

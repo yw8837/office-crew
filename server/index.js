@@ -10,7 +10,7 @@ import { Store, newId } from './store.js';
 import { Bus } from './bus.js';
 import { Usage } from './usage.js';
 import { Catalog } from './catalog.js';
-import { Orchestrator } from './orchestrator.js';
+import { Orchestrator, normMeeting } from './orchestrator.js';
 import { ProviderRegistry, PROVIDERS, syncCodexAccounts, accountProviderId, codexAccountHome } from './providers/index.js';
 import { defaultCodexHome } from './providers/codex.js';
 import { resolveRoute } from './routing.js';
@@ -166,9 +166,9 @@ function cleanAgent(a, prev = {}) {
 function cleanTeam(t) {
   if (!t.name || !String(t.name).trim()) throw new HttpError(400, tr('팀 이름이 필요해.'));
   const stages = (Array.isArray(t.stages) ? t.stages : []).map((s) => ({
-    id: s.id || newId('st'), label: String(s.label || tr('단계')).slice(0, 30), agentIds: (s.agentIds || []).map(String).slice(0, 8),
-    instruction: String(s.instruction || '').slice(0, 4000), approve: !!s.approve,
-  })).filter((s) => s.agentIds.length);
+    id: s.id || newId('st'), label: String(s.label || tr('단계')).slice(0, 30), agentIds: [...new Set((s.agentIds || []).map(String))].slice(0, 8),
+    instruction: String(s.instruction || '').slice(0, 4000), approve: !!s.approve, meeting: s.meeting,
+  })).filter((s) => s.agentIds.length).map((s) => ({ ...s, meeting: normMeeting(s.meeting, s.agentIds) }));
   if (!stages.length) throw new HttpError(400, tr('단계가 최소 1개, 단계마다 에이전트가 최소 1명 필요해.'));
   return { id: t.id, name: String(t.name).trim().slice(0, 40), description: String(t.description || '').slice(0, 300), stages };
 }

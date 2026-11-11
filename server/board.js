@@ -104,7 +104,7 @@ export class Board {
     this.store.saveSessionNow(sess);
     this.bus.emit('session', this.store.sessionMeta(sess));
     try {
-      this.orch.send(sess.id, { text: t.detail.trim() ? `${t.title}\n\n${t.detail}` : t.title });
+      this.orch.send(sess.id, { text: t.detail.trim() ? `${t.title}\n\n${t.detail}` : t.title, titled: true });
     } catch (e) {
       // 시작하지 못했으면 빈 세션을 남기지 않는다
       this.store.deleteSession(sess.id);

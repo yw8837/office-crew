@@ -16,6 +16,8 @@ const FORCE_END_MS = 5000; // 멈춘 CLI를 끄라고 한 뒤 이만큼 기다�
 const ACCOUNT_LIMITED = new Set(['claude', 'codex', 'gemini', 'hermes']); // 계정 단위 사용량 한도가 있는 CLI
 const MAX_PREV = 12000; // 이전 단계 결과 1개당 최대 글자
 const MEET_MAX = 1500; // 회의에서 다른 참석자에게 넘기는 의견 한 건의 최대 글자 수
+// 내 PC 모델하고만 나눈 말인가: 그 모델의 답, 그리고 내 PC 모델만 받은 사용자 말. 이런 말은 클라우드 AI로 넘기는 대화·기억에서 뺀다
+const localOnly = (m) => m.provider === 'local' || m.local === true;
 const MEET_CAP = 1000000; // 회의 사용량 상한 기본값(meetingSpend 기준)
 
 // 회의 단계 설정 정리: 참석자가 둘 이상일 때만 회의다. 바퀴 1~3(기본 2), 진행자는 참석자 중 한 명(기본 첫 번째),
@@ -47,6 +49,25 @@ export class Orchestrator {
 
   // 서버 재시작 시 끊긴 실행 정리
   recover() {
+    // 실행 중에 앱이 꺼진 세션: 그 실행의 사용자 말과 대기열에 있던 말이 아직 기억에 안 들어갔다.
+    // 저장된 표시는 실제로 받은 AI와 맞으니 지우지 않는다(오류로 아무도 못 받은 메시지에도 AI 이름이 남아 있어, 그걸로 지우면 샌다).
+    // 받은 기록이 모두 내 PC 모델이면 표시를 붙이기만 한다
+    for (const id of this.store.takeStale()) {
+      const s = this.store.getSession(id);
+      if (!s) continue;
+      for (const r of s.runs) {
+        if (!r.cut) continue;
+        delete r.cut;
+        const u = s.messages.find((m) => m.id === r.userMessageId && m.role === 'user');
+        if (!u) continue;
+        const got = s.messages.filter((m) => m.role === 'agent' && m.runId === r.id && m.provider);
+        if (got.length && got.every((m) => m.provider === 'local')) u.local = true;
+        this.#titleMark(s, u);
+        this.#remember(s, u);
+      }
+      for (const m of s.messages) if (m.cut) { delete m.cut; if (m.role === 'user' && !m.hire) this.#remember(s, m); }
+      this.store.saveSessionNow(s);
+    }
     for (const s of this.store.sessions.values()) {
       let dirty = false;
       for (const r of s.runs) if (ACTIVE.has(r.status)) { r.status = 'stopped'; r.endedAt = Date.now(); r.hold = null; for (const st of r.stages || []) if (st.meetingNow) st.meetingNow = null; dirty = true; }
@@ -71,7 +92,8 @@ export class Orchestrator {
 
   // ── 메시지 보내기 ──
   // detect: 영입해 달라는 말이면 제안 카드를 낸다. 사람이 채팅에서 보낸 말에만 켠다(예약 작업·칸반 카드는 언제나 그대로 실행)
-  send(sessionId, { text = '', attachments = [], mention = null, mode = 'queue', detect = false }) {
+  // titled: 세션 제목을 이 말에서 만들었다(칸반 카드). 이 말이 내 PC 모델만 받은 말이면 제목도 같이 가린다
+  send(sessionId, { text = '', attachments = [], mention = null, mode = 'queue', detect = false, titled = false }) {
     const s = this.store.getSession(sessionId);
     if (!s) throw Object.assign(new Error(tr('세션을 찾을 수 없어.')), { status: 404 });
     text = String(text);
@@ -101,8 +123,9 @@ export class Orchestrator {
       attachments: attachments.map((a) => ({ id: a.id, name: a.name, mime: a.mime, size: a.size, path: a.path })),
     };
     s.messages.push(userMsg);
-    if ((s.title === '새 세션' || s.title === tr('새 세션')) && text.trim()) s.title = text.trim().replace(/\s+/g, ' ').slice(0, 40);
-    this.#remember(s, userMsg);
+    if ((s.title === '새 세션' || s.title === tr('새 세션')) && text.trim()) { s.title = text.trim().replace(/\s+/g, ' ').slice(0, 40); s.titleFrom = userMsg.id; }
+    if (titled && !s.titleFrom) s.titleFrom = userMsg.id;
+    this.#premark(s, userMsg);
     this.store.saveSession(s, 50);
     this.bus.emit('message', { sessionId, message: userMsg });
     this.bus.emit('session', this.store.sessionMeta(s));
@@ -116,7 +139,8 @@ export class Orchestrator {
     const userMsg = { id: newId('m'), role: 'user', text, mention: null, createdAt: Date.now(), status: 'done', attachments: [], hire: true };
     const card = { id: newId('m'), role: 'proposal', kind: 'hire', status: 'open', text: '', request: text, userMessageId: userMsg.id, draft, target, createdAt: Date.now() };
     s.messages.push(userMsg, card);
-    if ((s.title === '새 세션' || s.title === tr('새 세션')) && text.trim()) s.title = text.trim().replace(/\s+/g, ' ').slice(0, 40);
+    if ((s.title === '새 세션' || s.title === tr('새 세션')) && text.trim()) { s.title = text.trim().replace(/\s+/g, ' ').slice(0, 40); s.titleFrom = userMsg.id; }
+    this.#premark(s, userMsg);
     this.store.saveSession(s, 50);
     this.bus.emit('message', { sessionId: s.id, message: userMsg });
     this.bus.emit('message', { sessionId: s.id, message: card });
@@ -133,7 +157,7 @@ export class Orchestrator {
     delete userMsg.hire;
     const ctx = this.ctx.get(sessionId);
     userMsg.status = ctx ? 'queued' : 'done';
-    this.#remember(s, userMsg);
+    this.#premark(s, userMsg);
     this.store.saveSession(s, 50);
     this.bus.emit('message', { sessionId, message: userMsg });
     if (ctx) { ctx.queue.push(userMsg); return { queued: true, messageId: userMsg.id }; }
@@ -163,6 +187,7 @@ export class Orchestrator {
     let plan;
     try { plan = this.#plan(s, userMsg.mention); } catch (e) {
       this.#systemNote(s, e.message);
+      this.#remember(s, userMsg);
       return;
     }
     if (userMsg.status === 'queued') { userMsg.status = 'done'; this.bus.emit('message', { sessionId: s.id, message: userMsg }); }
@@ -189,6 +214,9 @@ export class Orchestrator {
         this.ctx.delete(s.id);
         // 그사이 세션이 삭제됐으면 저장·알림·대기열 실행을 하지 않는다
         this.store.unpin(s.id);
+        // 사용자 말은 실행이 끝난 뒤에 기억에 넣는다. 누가 받았는지(내 PC 모델만인지) 정해진 뒤여야 표시가 맞다.
+        // 세션이 지워졌어도 넣는다(답은 이미 들어갔다. 기억은 세션을 지워도 남는다)
+        this.#remember(s, userMsg);
         if (!this.store.hasSession(s.id)) return;
         this.store.saveSession(s, 50);
         this.bus.emit('session', this.store.sessionMeta(s));
@@ -529,6 +557,7 @@ export class Orchestrator {
       this.#state(s.id, agentId, 'error', msg.error.slice(0, 80));
       return { agent, error: msg.error };
     }
+    this.#received(ctx, agent.provider);
     if (routed.note) { msg.routed = true; this.#notice(s, msg, routed.note); }
     if (budgetNote) this.#notice(s, msg, budgetNote);
     if (roleKind(agent.role) === 'review') this.#flagSameAi(ctx, stageIdx, msg, agent);
@@ -557,7 +586,7 @@ export class Orchestrator {
         const base = {
           agent: ag, cwd, settings, connectors, tmpDir: this.dirs.tmp, addDirs: [this.dirs.uploads],
           system: this.#system(ag, cwd), images: pv.caps.images ? atts.filter((a) => a.mime?.startsWith('image/')).map((a) => a.path) : [],
-          mcpConfigPath, history: ag.provider === 'openai' ? this.#history(s, msg, agentId) : [],
+          mcpConfigPath, history: ag.provider === 'openai' ? this.#history(s, msg, agentId, ag.provider) : [],
         };
         const start = (p, rid) => {
           // 불러온 Claude 세션은 처음 이어갈 때 갈래(fork)로 시작해 원래 기록을 그대로 둔다
@@ -606,6 +635,7 @@ export class Orchestrator {
         const basePrompt = this.#prompt(ctx, stageIdx, next, feedback, nextProv);
         const nextPrompt = recall.text + (nextProv.caps.resume ? this.#withHistory(basePrompt, s, msg, next.provider, recall.chars) : basePrompt);
         cur = prepare(next);
+        this.#received(ctx, next.provider);
         Object.assign(msg, { provider: next.provider, model: next.model, effort: next.effort, failover: true });
         this.bus.emit('messageMeta', { sessionId: s.id, messageId: msg.id, model: next.model, provider: next.provider, effort: next.effort });
         if (roleKind(agent.role) === 'review') this.#flagSameAi(ctx, stageIdx, msg, next);
@@ -694,11 +724,13 @@ export class Orchestrator {
     return parts.filter(Boolean).join('\n');
   }
 
-  #history(s, currentMsg, agentId) {
+  // receiver: 이 글을 받을 AI. 내 PC 모델하고만 나눈 말은 클라우드 AI로 넘기지 않는다
+  #history(s, currentMsg, agentId, receiver) {
     const n = Math.max(0, Number(this.store.settings.historyTurns) || 0) * 2;
     // 지금 작성 중인 답(이어받기 때의 앞부분)은 빼고(이어받기 지시에 따로 들어감)
     const list = s.messages.filter((m) => m !== currentMsg && m.id !== s.runs.at(-1)?.userMessageId && m.status !== 'queued' && m.status !== 'streaming'
-      && (m.role === 'user' || (m.role === 'agent' && m.agentId === agentId)) && m.text && !m.hire);
+      && (m.role === 'user' || (m.role === 'agent' && m.agentId === agentId)) && m.text && !m.hire
+      && (!localOnly(m) || receiver === 'local'));
     return list.slice(-n).map((m) => ({ role: m.role, text: m.text.slice(0, 8000) }));
   }
 
@@ -709,7 +741,7 @@ export class Orchestrator {
     const n = Math.max(0, Number(this.store.settings.historyTurns) || 0) * 2;
     const list = s.messages.filter((m) => m !== currentMsg && m.id !== s.runs.at(-1)?.userMessageId && m.status !== 'queued'
       && (m.role === 'user' || (m.role === 'agent' && (!currentMsg || m.runId !== currentMsg.runId))) && m.text && !m.hire
-      && (m.provider !== 'local' || receiver === 'local')).slice(-n);
+      && (!localOnly(m) || receiver === 'local')).slice(-n);
     let total = list.reduce((sum, m) => sum + Math.min(m.text.length, 2000), 0);
     while (reserve > 0 && list.length > 1 && total > n * 2000 - reserve) total -= Math.min(list.shift().text.length, 2000);
     if (!list.length) return prompt;
@@ -728,7 +760,7 @@ export class Orchestrator {
     if (!n || last < 0) return prompt;
     const missed = s.messages.slice(last + 1).filter((m) => m.text && m.runId !== run.id && m.id !== run.userMessageId && m.status !== 'queued'
       && (m.role === 'user' || (m.role === 'agent' && m.agentId !== agent.id)) && !m.hire
-      && (m.provider !== 'local' || agent.provider === 'local')).slice(-n);
+      && (!localOnly(m) || agent.provider === 'local')).slice(-n);
     if (!missed.length) return prompt;
     const who = (m) => (m.role === 'user' ? tr('사용자') : (this.store.get('agents', m.agentId)?.name || 'AI'));
     const mark = randomBytes(4).toString('hex');
@@ -743,13 +775,46 @@ export class Orchestrator {
     return (!gone && s.cwd) || this.store.settings.defaultCwd || '';
   }
 
-  // 끝난 메시지를 작업 폴더의 기억에 넣는다. 실패해도 실행에는 영향을 주지 않는다
+  // 이번 요청을 받은 AI를 적는다. 내 PC 모델만 받았으면 사용자 말에 표시를 남긴다(클라우드 AI가 하나라도 받으면 표시를 지운다)
+  #received(ctx, provider) {
+    if (provider === 'local') ctx.sawLocal = true; else ctx.sawCloud = true;
+    if (!ctx.userMsg) return;
+    const was = ctx.userMsg.local === true;
+    if (ctx.sawCloud) delete ctx.userMsg.local; else ctx.userMsg.local = true;
+    this.#titleMark(ctx.s, ctx.userMsg);
+    if (was !== (ctx.userMsg.local === true)) this.store.saveSession(ctx.s, 0); // 표시가 바뀌면 바로 저장한다(답이 나오기 전에 앱이 꺼져도 남게)
+  }
+
+  // 계획에 든 AI가 모두 내 PC 모델이면 보낼 때 미리 표시해 둔다(대기열에 있거나 아무도 받기 전에 끊겨도 클라우드로 새지 않게).
+  // 자동 라우팅 등으로 클라우드 AI가 실제로 받으면 #received 가 지운다
+  #premark(s, userMsg) {
+    try {
+      const ids = this.#plan(s, userMsg.mention).stages.flatMap((st) => st.agentIds);
+      if (ids.length && ids.every((id) => this.store.get('agents', id)?.provider === 'local')) userMsg.local = true; else delete userMsg.local;
+    } catch { /* 에이전트가 없으면 표시할 것도 없다 */ }
+    this.#titleMark(s, userMsg);
+  }
+
+  // 세션 제목은 첫 사용자 말에서 만든다. 그 말이 내 PC 모델만 받은 말이면 제목도 기억의 출처 줄에 싣지 않는다(titleLocal)
+  #titleMark(s, u) {
+    if (s.titleFrom !== u.id) return;
+    if (u.local) s.titleLocal = true; else delete s.titleLocal;
+  }
+
+  // 끝난 메시지를 작업 폴더의 기억에 넣는다. 실패해도 실행에는 영향을 주지 않는다.
+  // 내 PC 모델만 받은 사용자 말은 그 모델의 답과 같은 표시(provider 'local')로 넣어, 클라우드 AI에게 줄 기억에서 빠지게 한다
   #remember(s, m) {
     if (!this.memory || !this.store.settings.memory || !m?.text?.trim()) return;
-    this.memory.of(this.memoryFolder(s))
-      .then((mem) => mem.add(m.text, { sessionId: s.id, messageId: m.id, agentId: m.agentId || '', role: m.role, provider: m.provider || '', at: m.createdAt || Date.now(), title: s.title || '' }))
-      .catch(() => { /* 기억 저장 실패는 조용히 넘긴다 */ });
+    if (m.role === 'user') { if (m.remembered) return; m.remembered = true; } // 같은 말을 두 번 넣지 않는다(끊긴 실행을 다시 켠 뒤 정리할 때)
+    const job = this.memory.of(this.memoryFolder(s))
+      .then((mem) => mem.add(m.text, { sessionId: s.id, messageId: m.id, agentId: m.agentId || '', role: m.role, provider: m.provider || (m.local ? 'local' : ''), at: m.createdAt || Date.now(), title: s.titleLocal ? '' : (s.title || '') }))
+      .catch(() => { /* 기억 저장 실패는 조용히 넘긴다 */ })
+      .finally(() => this.remembering.delete(job));
+    (this.remembering ||= new Set()).add(job);
   }
+
+  // 진행 중인 기억 쓰기가 끝날 때까지 기다린다(앱을 끌 때 기억을 닫기 전에)
+  async settled() { await Promise.allSettled([...(this.remembering || [])]); }
 
   // 이번 요청과 관련된 기억 조각을 찾아 프롬프트 앞에 둘 글로 만든다. 한 실행에서 에이전트마다 한 번만.
   // 뺄 것: 이번 요청 자체, 최근 대화로 이미 넘어가는 메시지, 이어 가는 대화면 이 에이전트가 이 세션에서 한 말(CLI가 기억한다),
@@ -856,7 +921,7 @@ export class Orchestrator {
     if (st.instruction) parts.push(`${tr('[이번 단계 지시]')}\n${st.instruction}`);
     // 기억(resume) 못 하는 CLI 는 최근 대화를 넣어준다
     if (!prov.caps.resume && agent.provider !== 'openai') {
-      const hist = this.#history(s, null, agent.id).filter((m) => m.text !== userMsg.text);
+      const hist = this.#history(s, null, agent.id, agent.provider).filter((m) => m.text !== userMsg.text);
       if (hist.length) parts.push(`${tr('[이전 대화]')}\n${hist.map((m) => `${m.role === 'user' ? tr('사용자') : agent.name}: ${m.text.slice(0, 2000)}`).join('\n')}`);
     }
     parts.push(`${tr('[사용자 요청]')}\n${this.#expandSkill(userMsg.text || tr('(첨부 파일 확인)'))}`);
@@ -1095,6 +1160,9 @@ export class Orchestrator {
       ctx.stopped = true;
       for (const { handle } of ctx.handles.values()) { try { handle.stop(); } catch { /* 무시 */ } }
       if (ctx.gate) ctx.gate({ action: 'stop' });
+      // 앱을 끄는 중이면 실행이 정리되기 전에 저장소가 닫힌다. 사용자 말은 지금 기억에 넣고, 넣었다는 표시도 같이 저장되게 한다
+      this.#remember(ctx.s, ctx.userMsg);
+      this.store.saveSession(ctx.s, 0);
     }
   }
 }

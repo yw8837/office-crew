@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
+import http from 'node:http';
 import { startTestApp } from './helpers.js';
 
 let t, shop, blog;
@@ -136,6 +137,89 @@ test('기억 보기: 목록·세션별 크기·검색(원문과 출처), 폴더 
     assert.equal((await t.api('GET', `/api/memory/search?key=${encodeURIComponent(bad)}&q=x`)).status, 404, `키 ${JSON.stringify(bad)}`);
   }
   assert.equal((await t.api('GET', '/api/sessions/nope/memory')).status, 404);
+});
+
+test('내 PC 모델에게만 한 내 말도 클라우드 AI로 넘기지 않는다(기억·이전 대화 모두), 내 PC 모델에게는 준다', async () => {
+  // 가짜 내 PC 모델 서버(OpenAI 호환). 받은 요청을 적어 둔다
+  const got = [];
+  const srv = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      if (req.url.endsWith('/models')) { res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify({ data: [{ id: 'tiny' }] })); }
+      got.push(body);
+      res.setHeader('content-type', 'text/event-stream');
+      res.end(`data: ${JSON.stringify({ choices: [{ delta: { content: '내 PC 모델의 답이야.' } }] })}\n\ndata: [DONE]\n\n`);
+    });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-vault-'));
+  try {
+    t.app.store.settings.localServers = [{ name: '가짜 로컬', baseUrl: `http://127.0.0.1:${srv.address().port}/v1` }];
+    const local = await agent('로컬담당', { provider: 'local', model: 'custom0::tiny' });
+    const cloud = await agent('구름담당');
+    const SECRET = '금고 비밀번호 힌트는 은행나무 길 열일곱 번째 집 초인종 색깔이다.';
+    const chunks = async () => (await (await t.app.memory.of(vault)).search('금고 비밀번호 힌트', { budget: 8000 })).hits;
+
+    const s1 = await session(local.id, vault);
+    await say(s1.id, SECRET);
+    assert.equal(got.length, 1, '내 PC 모델이 요청을 받았다');
+    const u1 = t.app.store.getSession(s1.id).messages.find((m) => m.role === 'user');
+    assert.equal(u1.local, true, '내 PC 모델만 받은 내 말에 표시가 남는다');
+    await t.waitFor(async () => (await chunks()).some((c) => c.messageId === u1.id), 5000, '내 말이 기억에 들어감');
+    assert.equal((await chunks()).find((c) => c.messageId === u1.id).provider, 'local', '기억에도 같은 표시로 들어간다');
+
+    // 같은 폴더의 다른 세션, 클라우드 AI: 기억으로 안 넘어간다
+    const s2 = await session(cloud.id, vault);
+    await say(s2.id, '금고 비밀번호 힌트가 뭐였지?');
+    assert.ok(!lastPrompt().includes('은행나무'), '기억 조각으로 넘어가지 않는다');
+
+    // 같은 세션에서 클라우드 AI를 부를 때: 이전 대화로도 안 넘어간다
+    await say(s1.id, `@${cloud.name} 방금 얘기 이어서 정리해줘`);
+    assert.ok(!lastPrompt().includes('은행나무'), '이전 대화로 넘어가지 않는다');
+    const u2 = t.app.store.getSession(s1.id).messages.filter((m) => m.role === 'user').at(-1);
+    assert.equal(u2.local, undefined, '클라우드 AI가 받은 말에는 표시가 없다');
+
+    // 클라우드 AI가 이어 가는 대화에서 '놓친 대화'로도 안 넘어간다
+    await say(s1.id, `@${local.name} 두 번째 힌트는 살구나무 아래 화분이야`);
+    await say(s1.id, `@${cloud.name} 계속해줘`);
+    assert.ok(!lastPrompt().includes('살구나무') && !lastPrompt().includes('은행나무'), '놓친 대화로 넘어가지 않는다');
+
+    // 세션 제목(첫 말에서 만든다)이 기억의 출처 줄에 실려 넘어가지도 않는다
+    assert.equal(t.app.store.getSession(s1.id).titleLocal, true);
+    await t.waitFor(async () => (await (await t.app.memory.of(vault)).search('방금 얘기 이어서 정리', { budget: 8000 })).hits.length > 0, 5000, '클라우드 대화가 기억에 들어감');
+    const s5 = await session(cloud.id, vault);
+    await say(s5.id, '방금 얘기 이어서 정리한 거 어떻게 됐지?');
+    assert.match(lastPrompt(), /--- 기억 [0-9a-f]{8} 시작 ---/, '클라우드 대화는 기억으로 들어간다');
+    assert.ok(!lastPrompt().includes('은행나무') && !lastPrompt().includes('금고'), '출처 줄의 세션 제목으로 넘어가지 않는다');
+
+    // 칸반 카드로 만든 세션 제목(카드 제목 = 내 말 첫 줄)도 같은 기준으로 가린다
+    const card = (await t.api('POST', '/api/tasks', { title: '느티나무 금고 열쇠 위치 정리', agentId: local.id, cwd: vault })).json;
+    const kid = (await t.api('POST', `/api/tasks/${card.id}/start`, {})).json.sessionId;
+    await t.waitFor(() => t.app.store.getSession(kid)?.runs.at(-1)?.endedAt, 15000, '카드 실행 끝');
+    assert.equal(t.app.store.getSession(kid).titleLocal, true);
+    await say(kid, `@${cloud.name} 주간 회의록 양식 만들어줘`);
+    await t.waitFor(async () => (await (await t.app.memory.of(vault)).search('주간 회의록 양식', { budget: 8000 })).hits.length > 0, 5000, '카드 세션의 클라우드 대화가 기억에 들어감');
+    const s6 = await session(cloud.id, vault);
+    await say(s6.id, '주간 회의록 양식 어디까지 됐지?');
+    assert.match(lastPrompt(), /--- 기억 [0-9a-f]{8} 시작 ---/);
+    assert.ok(!lastPrompt().includes('느티나무'), '카드 세션 제목으로 넘어가지 않는다');
+
+    // 내 PC 모델에게는 준다(다른 세션의 기억으로)
+    const s3 = await session(local.id, vault);
+    await say(s3.id, '금고 비밀번호 힌트가 뭐였지?');
+    assert.ok(got.at(-1).includes('은행나무'), '내 PC 모델은 그 말을 기억으로 받는다');
+
+    // 내 PC 모델과 클라우드 AI가 같이 받은 말은 표시하지 않는다(어차피 클라우드로 간 말이다)
+    const team = (await t.api('POST', '/api/teams', { name: '섞인 팀', stages: [{ label: '하나', agentIds: [local.id] }, { label: '둘', agentIds: [cloud.id] }] })).json;
+    const s4 = (await t.api('POST', '/api/sessions', { teamId: team.id, cwd: vault })).json;
+    await say(s4.id, '섞인 팀에게 하는 말');
+    assert.equal(t.app.store.getSession(s4.id).messages.find((m) => m.role === 'user').local, undefined);
+  } finally {
+    t.app.store.settings.localServers = [];
+    await new Promise((r) => srv.close(r));
+    try { fs.rmSync(vault, { recursive: true, force: true }); } catch { /* 무시 */ }
+  }
 });
 
 test('끄면 다시 넣지 않는다(쌓인 기억은 그대로 남는다)', async () => {

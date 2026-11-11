@@ -69,6 +69,7 @@ export class Store {
       if (s?.id) this.meta.set(s.id, this.#metaOf(s));
     }
     // 재시작 직후엔 실행 중인 게 없다(기다리던 실행도 중지로 바뀌니 "기다리는 일"에서 뺀다)
+    this.stale = [...this.meta].filter(([, m]) => m.running).map(([id]) => id); // 실행 중에 꺼진 세션(오케스트레이터가 한 번 정리한다)
     for (const m of this.meta.values()) {
       m.running = false;
       if (['approve', 'decide', 'paused'].includes(m.attention?.kind)) m.attention = null;
@@ -141,10 +142,14 @@ export class Store {
 
   // 디스크에서 읽은 세션의 "실행 중" 흔적은 이전 실행이 끊긴 것이므로 정리
   #fixStale(s) {
-    for (const r of s.runs || []) if (['running', 'paused', 'waiting'].includes(r.status)) { r.status = 'stopped'; r.endedAt ||= Date.now(); r.hold = null; }
-    for (const m of s.messages || []) if (m.status === 'streaming' || m.status === 'queued') m.status = 'stopped';
+    // cut: 끊긴 실행·대기열에 있던 말이라는 표시. 오케스트레이터가 기억에 넣을 때 보고 지운다
+    for (const r of s.runs || []) if (['running', 'paused', 'waiting'].includes(r.status)) { r.status = 'stopped'; r.endedAt ||= Date.now(); r.hold = null; r.cut = true; }
+    for (const m of s.messages || []) if (m.status === 'streaming' || m.status === 'queued') { if (m.status === 'queued') m.cut = true; m.status = 'stopped'; }
     return s;
   }
+
+  // 실행 중에 꺼진 세션 id 를 한 번만 내준다
+  takeStale() { const ids = this.stale || []; this.stale = []; return ids; }
 
   #evict() {
     for (const [id] of this.sessions) {

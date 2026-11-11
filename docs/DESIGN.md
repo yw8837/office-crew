@@ -47,14 +47,14 @@ Agent    { id, name, role, emoji, provider, model, effort, systemPrompt,
            skills:[skillId], connectors:[connectorId], light:boolean,
            apiProfile?: string, avatar:{ skin, hair, hairStyle, outfit, accessory } , createdAt }
 Team     { id, name, description, stages:[ { id, label, agentIds:[...], instruction, approve:boolean, meeting:null|{ rounds, chairId, tokenCap } } ] }
-Session  { id, title, teamId|null, agentId|null, cwd, createdAt, updatedAt,
+Session  { id, title, titleFrom?(제목을 만든 사용자 말 id), titleLocal?(그 말이 내 PC 모델만 받은 말이면 true: 기억 출처 줄에 제목을 싣지 않는다), teamId|null, agentId|null, cwd, createdAt, updatedAt,
            providerSessions:{ [agentId]: string }, sessionProvider:{ [agentId]: providerId },
            importedFrom?:{ source:'claude'|'codex', id, cwd, total, at }, messages:[Message], runs:[Run] }
-Message  { id, role:'user'|'agent'|'system'|'proposal'(영입 제안 카드, 결정 0006), agentId?, runId?, stageIndex?, text,
+Message  { id, role:'user'|'agent'|'system'|'proposal'(영입 제안 카드, 결정 0006), agentId?, runId?, stageIndex?, text, local?(사용자 말: 보낼 때 계획의 AI가 모두 내 PC 모델이면 true, 클라우드 AI가 실제로 받으면 지운다. true 면 클라우드 AI로 넘기는 대화·기억에서 뺀다. 결정 0007), remembered?(사용자 말: 프로젝트 기억에 넣기 시작했음. 두 번 넣지 않는다), cut?(대기열에 있다가 앱이 꺼진 말. 다시 켤 때 기억에 넣고 지운다),
            attachments:[{id,name,mime,size,path}], blocks:[Block], status:'streaming'|'done'|'error'|'stopped',
            usage?:{input,output,cacheRead,cacheWrite,cost,durationMs}, createdAt }
 Block    { id, kind:'tool'|'thinking'|'notice', name?, input?, output?, status:'running'|'done'|'error' }
-Run      { id, teamId|null, status:'running'|'paused'|'waiting'|'done'|'error'|'stopped',
+Run      { id, cut?(실행 중에 앱이 꺼졌다는 표시. 다시 켤 때 그 사용자 말을 기억에 넣고 지운다), teamId|null, status:'running'|'paused'|'waiting'|'done'|'error'|'stopped',
            stageIndex, stages:[{ label, agentIds, status }], startedAt, endedAt }
 ```
 

@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node bin/office-crew.js",
     "serve": "node bin/office-crew.js --no-open",
-    "test": "node --test --test-concurrency=1 test/app.test.js test/regression.test.js test/routing.test.js test/markdown.test.js test/i18n.test.js test/importer.test.js test/failover.test.js test/import-app.test.js test/failover-app.test.js test/acp.test.js test/review-fixes.test.js test/attention.test.js test/review.test.js test/village.test.js test/schedule.test.js test/models-accounts.test.js test/safety-budget.test.js test/stability.test.js test/watch.test.js test/board.test.js test/phone-notify.test.js test/memory.test.js test/memory-run.test.js test/meeting.test.js test/hire.test.js",
+    "test": "node --test --test-concurrency=1 test/app.test.js test/regression.test.js test/routing.test.js test/markdown.test.js test/i18n.test.js test/importer.test.js test/failover.test.js test/import-app.test.js test/failover-app.test.js test/acp.test.js test/review-fixes.test.js test/attention.test.js test/review.test.js test/village.test.js test/schedule.test.js test/models-accounts.test.js test/safety-budget.test.js test/stability.test.js test/watch.test.js test/board.test.js test/phone-notify.test.js test/memory.test.js test/memory-run.test.js test/local-only.test.js test/meeting.test.js test/hire.test.js",
     "pack": "npm pack --pack-destination dist"
   },
   "engines": {

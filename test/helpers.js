@@ -70,7 +70,7 @@ export async function startTestApp() {
   const waitFor = async (pred, ms = 15000, label = '조건') => {
     const t0 = Date.now();
     for (;;) {
-      const v = pred();
+      const v = await pred(); // 조건이 비동기여도 그 결과를 본다(Promise 자체는 늘 참이라 기다리지 않고 지나간다)
       if (v) return v;
       if (Date.now() - t0 > ms) throw new Error(`${label} 대기 시간 초과`);
       await new Promise((r) => setTimeout(r, 25));

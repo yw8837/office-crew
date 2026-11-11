@@ -76,7 +76,7 @@ Office Crew is a local workspace for running several AI agents together. It runs
 
 - **Off by default** (Settings → Defaults). When it is on, finished conversations are kept on your PC word for word, one memory per work folder; sessions without a folder share one.
 - When a run starts, the pieces related to the request are put in front of it with their source (date, session, who said it), up to a fixed number of characters (2,000 by default) however large the memory grows. Finding them uses no AI. If nothing related is found, the agent is told so.
-- The **Memory** page lists what is stored for each folder and lets you search it. Only text that shares words with the request can be found, so a question phrased in different words can miss. A local model's replies are not handed to a cloud AI this way; what you typed in that conversation still can be.
+- The **Memory** page lists what is stored for each folder and lets you search it. Only text that shares words with the request can be found, so a question phrased in different words can miss. A conversation you had only with a local model (its replies and what you typed to it) is not handed to a cloud AI, either as memory or as earlier conversation. Messages you typed before this was added carry no such mark and still can be.
 
 ### Schedules
 

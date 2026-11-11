@@ -226,7 +226,6 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   const providers = new ProviderRegistry(store);
   const memory = new MemoryStore(path.join(dirs.home, 'memory'));
   const orch = new Orchestrator({ store, bus, usage, catalog, dirs, providers, memory });
-  orch.recover();
   const scheduler = new Scheduler({ store, orch, bus });
   const watch = new SessionWatch(bus);
   const board = new Board({ store, orch, bus, appHome: dirs.home });
@@ -463,6 +462,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     if ('teamId' in b && b.teamId && !store.get('teams', b.teamId)) throw new HttpError(400, tr('없는 팀이야.'));
     if ('agentId' in b && b.agentId && !store.get('agents', b.agentId)) throw new HttpError(400, tr('없는 에이전트야.'));
     if ('title' in b) b.title = String(b.title || '').slice(0, 120) || s.title;
+    if ('title' in b && b.title !== s.title) { delete s.titleFrom; delete s.titleLocal; } // 직접 지은 제목은 사용자 말에서 온 게 아니다
     for (const k of ['title', 'teamId', 'agentId', 'cwd', 'pinned']) if (k in b) s[k] = b[k];
     store.saveSessionNow(s);
     bus.emit('session', store.sessionMeta(s));
@@ -889,6 +889,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
         server.once('error', reject);
         server.listen(p, host, () => {
           actualPort = server.address().port;
+          orch.recover(); // 포트를 잡은 뒤에 한다: 이미 켜진 오피스 크루가 있으면 여기까지 오지 않아, 그쪽이 돌리는 세션 파일을 건드리지 않는다
           if (detect) {
             providers.refresh().then((list) => bus.emit('providers', list)).catch(() => {});
             providers.startAutoRefresh((list) => bus.emit('providers', list));
@@ -905,6 +906,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
       providers.stop();
       usage.close();
       store.close();
+      await orch.settled(); // 끄면서 넣은 사용자 말이 다 쓰인 뒤에 닫는다
       await memory.close();
       bus.close();
       await new Promise((r) => { server.close(() => r()); server.closeAllConnections?.(); });

@@ -51,6 +51,15 @@ onServerEvent((type, d) => {
   if (L.length > 200) L.splice(0, L.length - 200);
 });
 
+// 지금 회의 중인 단계의 참석자(없으면 빈 목록). 마을에서 한자리에 모으는 데 쓴다
+function meetingIds(s) {
+  const r = latestRun(s);
+  const st = r && !r.endedAt && r.stages[r.stageIndex];
+  return st && st.meetingNow ? st.agentIds : [];
+}
+// 회의 차례 이름: 의견 1/2, 검토 2/2, 결론
+const meetLabel = (m) => (m.phase === 'conclude' ? t('결론') : m.phase === 'opinion' ? t('의견 {r}/{n}', { r: m.round, n: m.rounds }) : t('검토 {r}/{n}', { r: m.round, n: m.rounds }));
+
 // ── 사무실 패널 ──
 // 사무실 기본 높이: 화면의 30%쯤, 200~300px 사이(대화가 주인공이라 절반을 넘지 않게)
 const officeDefaultH = () => Math.max(200, Math.min(300, Math.round(innerHeight * 0.3)));
@@ -63,6 +72,7 @@ function OfficePanel({ s, full, onCollapse }) {
   const mod = officeMod.m;
 
   const meta = (a) => ({ id: a.id, name: a.name, role: a.role, model: agentModelText(a, state.sessionData[s.id]), color: providerColorOf(a), avatar: a.avatar || {} });
+  const meetKey = meetingIds(s).join(',');
 
   useEffect(() => {
     if (!mod || !host.current) return undefined;
@@ -83,9 +93,9 @@ function OfficePanel({ s, full, onCollapse }) {
     for (const a of agents) {
       const l = live[a.id];
       const u = agentUsage(s, a.id);
-      o.setState(a.id, { state: l?.state || 'idle', text: l?.detail || '', tool: l?.tool || null, tokens: usageTotal(u), badge: badgeFor(a, u) });
+      o.setState(a.id, { state: l?.state || 'idle', text: l?.detail || '', tool: l?.tool || null, tokens: usageTotal(u), badge: badgeFor(a, u), meeting: meetKey.split(',').includes(a.id) });
     }
-  }, [key, s.id, mod]);
+  }, [key, s.id, mod, meetKey]);
 
   useEffect(() => { officeRef.current?.setSkin(skinValue()); }, [state.settings.skin, state.skins.length]);
   useEffect(() => { officeRef.current?.setLanguage?.(uiLang()); }, [state.settings.lang]);
@@ -101,7 +111,7 @@ function OfficePanel({ s, full, onCollapse }) {
       const a = agentById(d.agentId);
       const u = agentUsage(state.sessionData[s.id], d.agentId);
       if (a && !agents.some((x) => x.id === a.id)) o.setAgents([...agents, a].map(meta));
-      o.setState(d.agentId, { state: d.state, text: d.detail, tool: d.tool, tokens: usageTotal(u), badge: a ? badgeFor(a, u) : '' });
+      o.setState(d.agentId, { state: d.state, text: d.detail, tool: d.tool, tokens: usageTotal(u), badge: a ? badgeFor(a, u) : '', meeting: meetingIds(state.sessionData[s.id] || s).includes(d.agentId) });
       // 도우미는 Task/Agent 도구가 실행 중이거나(끝나면 state 가 thinking 으로 바뀜) 하위 도구(↳)가 도는 동안만 머문다
       const tool = d.tool || '';
       const keep = (/^(Task|Agent)$/i.test(tool) && !['thinking', 'done', 'error', 'paused', 'idle'].includes(d.state)) || tool.startsWith('↳');
@@ -212,7 +222,7 @@ class Message extends Component {
       <${Avatar} agent=${a} />
       <div style="min-width:0">
         <div class="msg-head">
-          <b>${a.name}</b>${m.stageLabel ? html`<span class="chip">${m.stageLabel}</span>` : ''}
+          <b>${a.name}</b>${m.stageLabel ? html`<span class="chip">${m.stageLabel}</span>` : ''}${m.meeting ? html`<span class=${`chip${m.meeting.phase === 'conclude' ? ' accent' : ''}`}>${meetLabel(m.meeting)}</span>` : ''}
           <${ProviderChip} id=${m.provider} />
           ${m.model && html`<span class="chip mono">${m.model}${m.effort ? ` · ${EFFORT_LABEL[m.effort] || m.effort}` : ''}</span>`}
           ${streaming && html`<span class="spin"></span>`}
@@ -315,12 +325,13 @@ function RunBar({ s, run }) {
     <div class="stages">
       ${run.stages.map((st, i) => html`${i > 0 && html`<span class="stage-arrow">→</span>`}<span class=${`stage ${st.status}`} title=${`${st.agentIds.map((id) => agentById(id)?.name).join(', ')}${st.note ? ` · ${st.note}` : ''}`}>
         ${st.status === 'running' ? html`<span class="spin" style="width:10px;height:10px"></span>` : st.status === 'done' ? '✓' : st.status === 'error' ? '⚠' : st.status === 'review' ? '✋' : st.status === 'skipped' ? '⤼' : `${i + 1}`}
-        ${st.label}${st.agentIds.length > 1 ? ` ×${st.agentIds.length}` : ''}${st.status === 'skipped' ? ` (${t('건너뜀')})` : st.note ? ` (${st.note})` : ''}
+        ${st.label}${st.agentIds.length > 1 ? ` ×${st.agentIds.length}` : ''}${st.meetingNow ? ` · ${meetLabel(st.meetingNow)}` : st.meeting ? ` · ${t('회의')}` : ''}${st.status === 'skipped' ? ` (${t('건너뜀')})` : st.note ? ` (${st.note})` : ''}
       </span>`)}
       ${!active && html`<span class=${`chip ${run.status === 'done' ? 'ok' : run.status === 'error' ? 'err' : 'warn'}`} style="margin-left:6px">${{ done: t('완료'), error: t('오류'), stopped: t('중지됨') }[run.status] || run.status}</span>`}
     </div>
     <${MemoryBadge} s=${s} />
     <span class="small muted hide-sm" title=${u.estimated ? t('작성 중인 출력은 글자 수로 추정(~)') : ''}>${t('세션 {usage}', { usage: usageText })}</span>
+    ${active && run.stages[run.stageIndex]?.meetingNow && run.stages[run.stageIndex].meetingNow.phase !== 'conclude' && html`<button class="btn sm" onClick=${() => ctl('conclude')} title=${t('지금까지 나온 의견으로 진행자가 바로 결론을 내')}>${t('회의 끝내기')}</button>`}
     ${active && html`
       ${run.status === 'paused' || run.pauseRequested
         ? html`<button class="btn sm" onClick=${() => ctl('resume')} title=${t('다시 진행')}><${Icon} name="play" /> ${t('재개')}</button>`

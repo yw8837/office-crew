@@ -169,7 +169,7 @@ export function TeamsPage() {
       ${state.teams.map((tm) => html`<div class="gcard" onClick=${() => setEdit(tm)}>
         <div class="nm">👥 ${tm.name}</div>
         <div class="desc">${tm.description}</div>
-        <div class="row wrap" style="gap:4px">${tm.stages.map((st, i) => html`${i > 0 && html`<span class="stage-arrow">→</span>`}<span class="stage">${st.label}${st.approve ? ' ✋' : ''}</span>`)}</div>
+        <div class="row wrap" style="gap:4px">${tm.stages.map((st, i) => html`${i > 0 && html`<span class="stage-arrow">→</span>`}<span class="stage">${st.label}${st.meeting ? ` · ${t('회의')}` : ''}${st.approve ? ' ✋' : ''}</span>`)}</div>
         <div class="row" style="gap:-6px">${[...new Set(tm.stages.flatMap((s) => s.agentIds))].map((id) => agentById(id)).filter(Boolean).map((a) => html`<span title=${`${a.name} · ${a.model}`}><${Avatar} agent=${a} size=${28} /></span>`)}</div>
       </div>`)}
       <div class="gcard add" onClick=${() => setEdit({ name: '', description: '', stages: [{ label: t('{n}단계', { n: 1 }), agentIds: [], instruction: '', approve: false }] })}><${Icon} name="plus" size=${22} />${t('새 팀')}</div>
@@ -229,12 +229,19 @@ function TeamEditor({ team, onClose }) {
         <div>
           <div class="grid2" style="grid-template-columns:180px 1fr">
             <div class="field" style="margin-bottom:8px"><label>${t('단계 이름')}</label><input class="input" value=${st.label} onInput=${(e) => setStage(i, 'label', e.target.value)} /></div>
-            <div class="field" style="margin-bottom:8px"><label>${t('담당 에이전트')} ${st.agentIds.length > 1 ? html`<span class="chip accent">${t('병렬 {n}명', { n: st.agentIds.length })}</span>` : ''}</label>
+            <div class="field" style="margin-bottom:8px"><label>${t('담당 에이전트')} ${st.agentIds.length > 1 ? html`<span class="chip accent">${st.meeting ? t('회의 {n}명', { n: st.agentIds.length }) : t('병렬 {n}명', { n: st.agentIds.length })}</span>` : ''}</label>
               <div class="pick">${state.agents.map((a) => html`<span class=${`chip${st.agentIds.includes(a.id) ? ' on' : ''}`} title=${`${a.role} · ${a.model} · ${EFFORT_LABEL[a.effort] || ''}`} onClick=${() => setStage(i, 'agentIds', st.agentIds.includes(a.id) ? st.agentIds.filter((x) => x !== a.id) : [...st.agentIds, a.id])}>${a.emoji} ${a.name}<span class="muted">·${({ claude: 'C', codex: 'G', gemini: 'Gm', hermes: 'H', openai: 'API', mock: t('데모') })[a.provider] || ''}</span></span>`)}</div>
             </div>
           </div>
           <div class="field" style="margin-bottom:6px"><label>${t('이 단계 지시 (선택)')}</label><input class="input" value=${st.instruction} onInput=${(e) => setStage(i, 'instruction', e.target.value)} placeholder=${t('예: 출처 링크를 꼭 붙여')} /></div>
           <div class="row"><${Toggle} checked=${st.approve} onChange=${(v) => setStage(i, 'approve', v)} /><span class="small">${t('이 단계가 끝나면 내 승인을 기다리기 (수정 요청 가능)')}</span></div>
+          ${st.agentIds.length > 1 && html`<div class="row" style="margin-top:6px"><${Toggle} checked=${!!st.meeting} onChange=${(v) => setStage(i, 'meeting', v ? { rounds: 2, chairId: st.agentIds[0], tokenCap: 300000 } : null)} /><span class="small">${t('회의로 진행하기 (각자 의견 → 서로 검토 → 진행자가 결론)')}</span></div>`}
+          ${st.agentIds.length > 1 && st.meeting && html`<div class="meet-opts">
+            <label>${t('바퀴 수')}<select class="select" value=${st.meeting.rounds || 2} onChange=${(e) => setStage(i, 'meeting', { ...st.meeting, rounds: Number(e.target.value) })}>${[1, 2, 3].map((n) => html`<option value=${n}>${t('{r}바퀴', { r: n })}</option>`)}</select></label>
+            <label>${t('진행자')}<select class="select" value=${st.agentIds.includes(st.meeting.chairId) ? st.meeting.chairId : st.agentIds[0]} onChange=${(e) => setStage(i, 'meeting', { ...st.meeting, chairId: e.target.value })}>${st.agentIds.map((id) => html`<option value=${id}>${state.agents.find((a) => a.id === id)?.name || id}</option>`)}</select></label>
+            <label>${t('사용량 상한 (토큰, 0이면 없음)')}<input class="input" type="number" min="0" step="50000" value=${st.meeting.tokenCap ?? 300000} onInput=${(e) => setStage(i, 'meeting', { ...st.meeting, tokenCap: Math.max(0, Number(e.target.value) || 0) })} /></label>
+            <div class="small muted">${t('첫 바퀴는 서로의 글을 보지 않고 각자 써. 그다음 바퀴부터 남의 의견을 보고 검토하고, 마지막에 진행자가 결론을 내. 다음 단계에는 결론만 넘어가.')}</div>
+          </div>`}
         </div>
         <div style="display:flex;flex-direction:column;gap:2px">
           <button class="icon-btn" title=${t('위로')} disabled=${i === 0} onClick=${() => move(i, -1)}>▲</button>

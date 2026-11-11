@@ -10,3 +10,4 @@ Keep a record under about 100 lines. When a decision changes, add a dated "Revis
 | [0002](0002-no-antigravity-cli.md) | Google Antigravity CLI isn't supported | Accepted |
 | [0003](0003-dual-license.md) | AGPL-3.0 or a commercial license | Accepted |
 | [0004](0004-project-memory-on-disk.md) | Project memory is verbatim text on disk with a rebuildable keyword index | Accepted |
+| [0005](0005-meeting-stage.md) | A team stage can be a meeting with fixed rounds and a chair | Accepted |

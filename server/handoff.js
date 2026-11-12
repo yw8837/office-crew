@@ -50,7 +50,7 @@ export function readImported(root, sessionId) {
   try { st = fs.statSync(file); } catch { readCache.delete(file); return null; }
   // 실행마다 다시 읽지 않게 파일이 그대로면 읽어 둔 것을 쓴다(받은 쪽이 고치지 않게 복사해서 준다)
   const hit = readCache.get(file);
-  if (hit && hit.mtime === st.mtimeMs && hit.size === st.size) return hit.list.map((m) => ({ ...m }));
+  if (hit && hit.mtime === st.mtimeMs && hit.size === st.size) return hit.list.map((m) => ({ ...m, tools: [...m.tools] }));
   let raw;
   try { raw = fs.readFileSync(file, 'utf8'); } catch { return null; }
   const out = [];
@@ -63,7 +63,7 @@ export function readImported(root, sessionId) {
   }
   if (readCache.size > 8) readCache.delete(readCache.keys().next().value); // 최근 몇 세션만 들고 있는다
   readCache.set(file, { mtime: st.mtimeMs, size: st.size, list: out });
-  return out.map((m) => ({ ...m }));
+  return out.map((m) => ({ ...m, tools: [...m.tools] }));
 }
 const readCache = new Map();
 
@@ -153,5 +153,5 @@ export function pickEarlier(pool, query, { budget = 4000, each = 1200 } = {}) {
 export function removeHandoff(root, sessionId) {
   const dir = dirOf(root, sessionId);
   // 에이전트가 읽는 중이라 못 지우는 파일이 있어도 부른 쪽(세션 삭제·대화 비우기)은 끝까지 가게 한다
-  try { if (dir) fs.rmSync(dir, { recursive: true, force: true }); } catch { /* 남은 파일은 다음에 지워진다 */ }
+  try { if (dir) fs.rmSync(dir, { recursive: true, force: true }); } catch { /* 못 지운 파일은 남는다(저장 공간 보고의 handoff 크기에 잡힌다) */ }
 }

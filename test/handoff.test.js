@@ -111,6 +111,10 @@ test('파일을 실제로 열었는지 도구 기록으로 확인해 알린다',
   await say(sid, `@${claudeB.name} READTALK 앞 대화를 읽고 정리해줘`);
   const n = notices(lastAgent(sid));
   assert.ok(n.some((x) => /대화 전체 파일을 열어 봤어/.test(x)), `열었다고 알린다: ${n}`);
+  // 읽으려다 실패한 호출은 연 것으로 치지 않는다
+  const failed = (await t.api('POST', '/api/agents', { name: '읽기실패담당', role: '검토', provider: 'claude', model: 'claude-sonnet-5-5', permission: 'plan', routing: 'manual' })).json;
+  await say(sid, `@${failed.name} READTALK READFAIL 앞 대화를 읽고 정리해줘`);
+  assert.ok(notices(lastAgent(sid)).some((x) => /대화 전체 파일은 열지 않았어/.test(x)), '실패한 읽기는 열지 않은 것');
   // 같은 내용이면 파일을 다시 쓰지 않는다(읽는 중인 파일을 건드리지 않고, 큰 세션에서 실행마다 다시 쓰지 않게)
   const file = path.join(handoffDir(sid), 'cloud', 'conversation.md');
   assert.ok(fs.existsSync(path.join(handoffDir(sid), 'cloud.stamp')), '무엇을 썼는지 폴더 밖에 적어 둔다');
@@ -271,6 +275,16 @@ test('메모 자동 작성(설정, 기본 꺼짐): 다른 AI가 처음 맡기 �
     await say(d.sessionId, `@${q3.name} 너도 봐줘`);
     assert.equal(t.app.store.getSession(d.sessionId).messages.filter((m) => m.handoffAsk).length, asks, '같은 실패를 되풀이하지 않는다');
   } finally { imp.provider = realProvider; }
+
+  // 영입 제안 카드에서 '그대로 보내기'를 눌러도 메모가 먼저 돈다
+  const e = await importX2();
+  const hire = (await t.api('POST', '/api/agents', { name: '카드뒤담당', role: '검토', provider: 'claude', model: 'claude-sonnet-5-5', permission: 'plan', routing: 'manual' })).json;
+  await t.api('PATCH', `/api/sessions/${e.sessionId}`, { teamId: null, agentId: hire.id });
+  const pr = await t.api('POST', `/api/sessions/${e.sessionId}/messages`, { text: '검토 에이전트 한 명 더 영입해' });
+  assert.equal(pr.json.proposed, true, JSON.stringify(pr.json));
+  assert.equal((await t.api('POST', `/api/sessions/${e.sessionId}/proposals/${pr.json.messageId}`, { action: 'send' })).status, 200);
+  await t.waitFor(() => { const x = t.app.store.getSession(e.sessionId); return x.runs.length === 2 && x.runs[1].endedAt && !t.app.orch.ctx.has(e.sessionId); }, 20000, '메모 → 그대로 보낸 말');
+  assert.deepEqual(t.app.store.getSession(e.sessionId).messages.filter((m) => m.role === 'agent' && !m.imported).map((m) => (m.handoff ? '메모' : m.provider)), ['메모', 'claude']);
   await t.api('PUT', '/api/settings', { autoHandoff: false });
 });
 
@@ -410,6 +424,25 @@ test('대화를 비우면 불러온 대화도 더는 건네지 않는다', async
   assert.ok(!p.includes('감나무DB') && !p.includes('살구페이'), '비운 대화는 프롬프트에 없다');
   assert.doesNotMatch(p, /\[앞선 대화 전체\]|\[앞 대화에서 고른 부분\]/);
   assert.equal(fs.existsSync(path.join(handoffDir(a.sessionId), 'import.jsonl')), false, '원래 기록에서 다시 읽어 오지도 않는다');
+});
+
+test("설정에서 '넣어 줄 최근 대화 수'를 0으로 두면 앞 대화를 건네지 않는다(최근 대화·고른 부분·파일 모두)", async () => {
+  await t.api('PUT', '/api/settings', { historyTurns: 0 });
+  try {
+    const a = await importX2();
+    const z = (await t.api('POST', '/api/agents', { name: '영담당', role: '검토', provider: 'claude', model: 'claude-sonnet-5-5', permission: 'plan', routing: 'manual' })).json;
+    await say(a.sessionId, `@${z.name} 결제 모듈 연동을 어떻게 하기로 했지?`);
+    const p = claudeTurn();
+    assert.doesNotMatch(p, /\[이전 대화\]|\[앞선 대화 전체\]|\[앞 대화에서 고른 부분\]/);
+    assert.ok(!p.includes('살구페이') && !p.includes('감나무DB') && !p.includes('답 249번'), '앞 대화가 하나도 없다');
+    assert.equal(fs.existsSync(path.join(handoffDir(a.sessionId), 'cloud')), false, '파일도 만들지 않는다');
+    assert.ok(!claudeArgs().some((x) => String(x).includes('handoff')), '폴더도 열지 않는다');
+    // 이어 가지 못하는 CLI 도 같다
+    const gz = (await t.api('POST', '/api/agents', { name: '영제미나이', role: '검토', provider: 'gemini', model: 'gemini-x', permission: 'plan', routing: 'manual' })).json;
+    await say(a.sessionId, `@${gz.name} 결제 모듈 연동을 어떻게 하기로 했지?`);
+    const gp = t.fakeLog().filter((l) => l.cli === 'gemini').at(-1);
+    assert.ok(!gp.prompt.includes('살구페이') && !gp.prompt.includes('답 249번') && !gp.args.includes('--include-directories'));
+  } finally { await t.api('PUT', '/api/settings', { historyTurns: 8 }); }
 });
 
 test('짧은 세션은 아무것도 더 건네지 않는다(넣은 최근 대화로 충분할 때)', async () => {

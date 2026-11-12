@@ -717,7 +717,7 @@ export class Orchestrator {
     if (told?.files?.length && !PROVIDERS[msg.provider]?.caps.quiet) {
       const dir = String(told.dir || '').replace(/\\/g, '/').toLowerCase();
       const opened = !!dir && msg.blocks.some((b) => b.kind === 'tool' && b.status !== 'error'
-        && JSON.stringify(b.input ?? '').replace(/\\+/g, '/').toLowerCase().includes(dir));
+        && JSON.stringify(b.input ?? '').replace(/\\+/g, '/').toLowerCase().includes(`${dir}/conversation`));
       this.#notice(s, msg, `📄 ${opened ? tr('대화 전체 파일을 열어 봤어.') : tr('대화 전체 파일은 열지 않았어. 넣어 준 최근 대화와 고른 부분만 보고 답했어.')}`, true);
     }
     finish('done');
@@ -803,6 +803,8 @@ export class Orchestrator {
   // shown: 프롬프트에 최근 대화로 이미 넣은 메시지들(그건 빼고 고른다)
   #fullTalk(ctx, agent, receiver, prov, shown) {
     const { s, run, userMsg } = ctx;
+    // 설정에서 '넣어 줄 최근 대화 수'를 0으로 뒀으면 앞 대화를 건네지 않겠다는 뜻이다: 고른 부분도 파일도 주지 않는다
+    if (!(Number(this.store.settings.historyTurns) > 0)) return '';
     const forLocal = receiver === 'local';
     const key = `${agent.id}:${forLocal ? 'local' : 'cloud'}:${prov.caps.tools ? 1 : 0}`;
     const cache = (ctx.talkText ||= new Map());
@@ -996,8 +998,9 @@ export class Orchestrator {
         for (let i = from; i < list.length; i++) {
           const m = list[i];
           await mem.add(m.text, { sessionId: s.id, messageId: `imp-${i}`, agentId: m.role === 'agent' ? agentId : '', role: m.role, provider: m.role === 'agent' ? f.source : '', at: m.createdAt || f.at || Date.now(), title });
+          // 중간에 끊겨도 넣은 데까지는 적혀 있게(200개마다, 그리고 끝에)
+          if ((i + 1) % 200 === 0 || i === list.length - 1) fs.writeFileSync(file, JSON.stringify({ ...done, [key]: i + 1 }));
         }
-        if (list.length > from) fs.writeFileSync(file, JSON.stringify({ ...done, [key]: list.length }));
         f.remembered = true;
         if (this.store.hasSession(s.id)) this.store.saveSession(s, 50);
       })

@@ -61,7 +61,7 @@ async function pump() {
   const talkFile = text.match(/^.*conversation\.md$/m)?.[0];
   if (req.includes('READTALK') && talkFile) {
     out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: `tr${turn}`, name: 'Read', input: { file_path: talkFile } }] } });
-    out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: `tr${turn}`, content: '읽었어' }] } });
+    out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: `tr${turn}`, content: req.includes('READFAIL') ? '읽지 못했어' : '읽었어', is_error: req.includes('READFAIL') }] } });
   }
   if (req.includes('SLOW')) await sleep(1500);
   if (req.includes('SESSIONLIMIT') && !text.includes('[이어받기]')) {

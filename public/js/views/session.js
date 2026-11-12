@@ -180,6 +180,12 @@ async function resend(m) {
   try { await post(`/api/sessions/${sid}/messages`, { text: m.text, attachments: (m.attachments || []).map((a) => a.id), mention: m.mention || null }); } catch (e) { toast(e.message, 'error'); }
 }
 
+// 인수인계 메모 요청: AI를 한 번 부르는 일이라 먼저 묻는다
+async function askHandoff(sid) {
+  if (!window.confirm(t('이 세션을 맡던 AI에게 인수인계 메모를 쓰게 할까? AI를 한 번 부르니까 사용량이 들어.'))) return;
+  try { await post(`/api/sessions/${sid}/handoff`, {}); } catch (e) { toast(e.message, 'error'); }
+}
+
 // 대화를 마크다운 파일로 저장
 export function exportMarkdown(s) {
   const lines = [`# ${s.title}`, '', `> ${t('오피스 크루')} · ${new Date(s.createdAt).toLocaleString(locale())}`, ''];
@@ -258,6 +264,7 @@ class Message extends Component {
   render({ m }) {
     this.v = m._v;
     this.lang = getLang();
+    if (m.role === 'user' && m.handoffAsk) return html`<div class="msg system"><span>${t('인수인계 메모를 써 달라고 했어.')}</span></div>`;
     if (m.role === 'user') {
       const ag = m.mention ? agentById(m.mention) : null;
       return html`<div class="msg user"><div>
@@ -285,7 +292,7 @@ class Message extends Component {
       <${Avatar} agent=${a} />
       <div style="min-width:0">
         <div class="msg-head">
-          <b>${a.name}</b>${m.stageLabel ? html`<span class="chip">${m.stageLabel}</span>` : ''}${m.meeting ? html`<span class=${`chip${m.meeting.phase === 'conclude' ? ' accent' : ''}`}>${meetLabel(m.meeting)}</span>` : ''}
+          <b>${a.name}</b>${m.stageLabel ? html`<span class="chip">${m.stageLabel}</span>` : ''}${m.meeting ? html`<span class=${`chip${m.meeting.phase === 'conclude' ? ' accent' : ''}`}>${meetLabel(m.meeting)}</span>` : ''}${m.handoff ? html`<span class="chip accent">${t('인수인계 메모')}</span>` : ''}
           <${ProviderChip} id=${m.provider} />
           ${m.model && html`<span class="chip mono">${m.model}${m.effort ? ` · ${EFFORT_LABEL[m.effort] || m.effort}` : ''}</span>`}
           ${streaming && html`<span class="spin"></span>`}
@@ -749,6 +756,7 @@ function TopBar({ s }) {
       <button class=${vm === 'office' ? 'on' : ''} onClick=${() => setView('office')} title=${t('사무실 크게')}><${Icon} name="building" size=${14} /></button>
     </div>
     <button class="icon-btn" title=${t('대화를 마크다운(.md)으로 내보내기')} onClick=${() => exportMarkdown(s)}><${Icon} name="download" /></button>
+    ${s.messages.some((m) => m.role === 'agent' && m.text && !m.handoff) && html`<button class="icon-btn" title=${t('인수인계 메모 만들기: 이 세션을 맡던 AI가 지금까지 한 일을 정리해. 다른 AI가 이어받을 때 그 메모를 먼저 받아.')} aria-label=${t('인수인계 메모 만들기')} onClick=${() => askHandoff(s.id)}><${Icon} name="hand" /></button>`}
     <div class="target-pick">
       <button class=${`icon-btn${folder ? ' on' : ''}`} title=${t('작업 폴더: {path}', { path: s.cwd || s.cwdResolved || '' })} onClick=${() => { setFolder(!folder); setCwd(s.cwd || ''); }}><${Icon} name="folder" /></button>
       ${folder && html`<div class="popup" style="top:calc(100% + 6px);bottom:auto;left:auto;right:0;width:420px;padding:12px">

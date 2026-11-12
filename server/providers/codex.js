@@ -134,9 +134,11 @@ export function makeCodex({ id = 'codex', name = '', home = null } = {}) {
   },
 
   run(opts, emit) {
-    const { agent, prompt, system, images = [], cwd, resumeId, connectors = [] } = opts;
+    const { agent, prompt, system, images = [], cwd, resumeId, connectors = [], extraDirs = [] } = opts;
     const args = resumeId ? ['exec', 'resume', resumeId] : ['exec'];
     args.push('--json', '--skip-git-repo-check');
+    // 건네받은 대화 전체 파일 폴더를 읽을 수 있게 연다(새 대화를 시작할 때만. 이어 가는 대화는 이미 맥락이 있다)
+    if (!resumeId) for (const d of extraDirs) args.push('--add-dir', d);
     if (agent.model) args.push('-m', agent.model);
     if (agent.effort) args.push('-c', `model_reasoning_effort=${tomlStr(agent.effort)}`);
     const sb = sandbox(agent.permission);

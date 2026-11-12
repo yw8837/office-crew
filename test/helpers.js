@@ -23,7 +23,7 @@ export async function freePort() {
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 export function installFakeClis(dir) {
-  const map = { claude: 'fake-claude.js', codex: 'fake-codex.js', 'fake-acp': 'fake-acp.js' };
+  const map = { claude: 'fake-claude.js', codex: 'fake-codex.js', gemini: 'fake-gemini.js', 'fake-acp': 'fake-acp.js' };
   for (const [name, script] of Object.entries(map)) {
     fs.copyFileSync(path.join(here, 'fake-cli', script), path.join(dir, script));
     if (process.platform === 'win32') fs.writeFileSync(path.join(dir, `${name}.cmd`), `@ECHO off\r\nnode "%~dp0\\${script}" %*\r\n`);

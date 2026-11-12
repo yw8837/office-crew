@@ -57,6 +57,12 @@ async function pump() {
   }
   // 신호어는 이번 요청 부분에서만 본다([이전 대화]에 남은 옛 신호어는 무시)
   const req = text.includes('[사용자 요청]') ? text.slice(text.lastIndexOf('[사용자 요청]')) : text;
+  // READTALK: 건네받은 대화 전체 파일을 Read 도구로 여는 흉내
+  const talkFile = text.match(/^.*conversation\.md$/m)?.[0];
+  if (req.includes('READTALK') && talkFile) {
+    out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: `tr${turn}`, name: 'Read', input: { file_path: talkFile } }] } });
+    out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: `tr${turn}`, content: req.includes('READFAIL') ? '읽지 못했어' : '읽었어', is_error: req.includes('READFAIL') }] } });
+  }
   if (req.includes('SLOW')) await sleep(1500);
   if (req.includes('SESSIONLIMIT') && !text.includes('[이어받기]')) {
     // "session" 이 들어간 한도 문구(이어하기 실패로 오판하면 안 됨)

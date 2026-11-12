@@ -77,8 +77,9 @@ function blockText(c) {
 
 // ── 대화 조립기: 사용자 글 1개 = 메시지 1개, 다음 사용자 글 전까지의 AI 글·도구 = AI 메시지 1개 ──
 class Builder {
-  constructor(max, provider) {
+  constructor(max, provider, keepOlder = false) {
     this.max = max;
+    this.older = keepOlder ? [] : null; // max 를 넘어 화면에서 빠진 메시지의 글(다른 AI에게 건넬 대화 전체용)
     this.provider = provider;
     this.list = [];
     this.total = 0;
@@ -93,7 +94,10 @@ class Builder {
   #push(m) {
     this.list.push(m);
     this.total++;
-    if (this.list.length > this.max) this.list.shift(); // 마지막 max개만 유지
+    if (this.list.length > this.max) { // 마지막 max개만 유지
+      const d = this.list.shift();
+      if (this.older && d.text) this.older.push({ role: d.role, text: d.text, createdAt: d.createdAt, tools: [...new Set(d.blocks.map((x) => x.name))].slice(0, 20) });
+    }
   }
 
   user(text, at) {
@@ -641,15 +645,16 @@ export async function listImportable({ query = '', limit = 300 } = {}) {
  * 세션 대화 전체를 스트림으로 읽어 마지막 maxMessages개 메시지를 돌려준다.
  * id 는 세션 id만 받는다(경로 아님). 목록에 있는 기록만 찾는다.
  */
-export async function readTranscript(source, id, { maxMessages = 400 } = {}) {
+// keepOlder: 화면에 안 싣는 앞부분 메시지의 글도 older 로 돌려준다(도구 기록은 빼고 글만)
+export async function readTranscript(source, id, { maxMessages = 400, keepOlder = false } = {}) {
   if (source !== 'claude' && source !== 'codex') throw fail(400, '알 수 없는 기록 종류야. (claude 또는 codex)');
   if (typeof id !== 'string' || !SAFE_ID.test(id)) throw fail(400, '세션 id 형식이 올바르지 않아.');
   const entry = (await scanAll()).find((e) => e.source === source && e.id === id);
   if (!entry) throw fail(404, '그 세션 기록을 찾을 수 없어.');
   const max = Math.max(1, Math.floor(Number(maxMessages)) || 400);
   const st = newState();
-  const b = new Builder(max, source);
-  const fb = new Builder(max, source);
+  const b = new Builder(max, source, keepOlder);
+  const fb = new Builder(max, source, keepOlder);
   const h = handlerFor(source, st, b, fb);
   try {
     await eachLine(entry.file, (buf) => {
@@ -674,7 +679,7 @@ export async function readTranscript(source, id, { maxMessages = 400 } = {}) {
   entry.displayTitle = title;
   return {
     source, id, cwd, cwdExists: !!cwd && safeIsDir(cwd), title: title || '(제목 없음)',
-    model: st.model || out.model || '', messages: out.list,
+    model: st.model || out.model || '', messages: out.list, older: out.older || [],
     truncated: out.total > out.list.length, total: out.total,
   };
 }

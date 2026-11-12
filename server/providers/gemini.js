@@ -31,11 +31,12 @@ export default {
   async models() { return MODELS.map((m) => (m.id.endsWith('-preview') ? { ...m, label: `${m.label} (${tr('미리보기')})` } : m)); },
 
   run(opts, emit) {
-    const { agent, prompt, system, cwd, settings } = opts;
+    const { agent, prompt, system, cwd, settings, extraDirs = [] } = opts;
     const full = system ? `<${tr('역할 지침')}>\n${system}\n</${tr('역할 지침')}>\n\n${prompt}` : prompt;
     const viaStdin = full.length > 20000;
     const args = ['-o', 'stream-json', '--skip-trust', '--approval-mode', approval(agent.permission)];
     if (agent.model) args.push('-m', agent.model);
+    for (const d of extraDirs) args.push('--include-directories', d); // 건네받은 대화 전체 파일 폴더
     args.push('-p', viaStdin ? tr('위 입력 내용에 답해줘.') : full);
     const key = settings?.apiKeys?.gemini || process.env.GEMINI_API_KEY || '';
 

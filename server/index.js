@@ -17,6 +17,7 @@ import { defaultCodexHome } from './providers/codex.js';
 import { resolveRoute } from './routing.js';
 import { storageReport, cleanup } from './storage.js';
 import { listImportable, readTranscript } from './importer.js';
+import { saveImported, handoffRequest, removeHandoff } from './handoff.js';
 import { ACP_PRESETS } from './providers/acp.js';
 import { resolveCommand } from './providers/util.js';
 import { initProcTracker, reapLeftovers, otherAppRunning } from './providers/procs.js';
@@ -431,21 +432,36 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   route('POST', '/api/import', async (req) => {
     const b = await readJson(req);
     let tx;
-    try { tx = await readTranscript(b.source, b.id); } catch (e) { throw new HttpError(e.status || 500, tr(e.message)); }
+    try { tx = await readTranscript(b.source, b.id, { keepOlder: true }); } catch (e) { throw new HttpError(e.status || 500, tr(e.message)); }
     const agent = importAgent(tx.source);
     const s = store.createSession({ title: tx.title, teamId: null, agentId: agent.id, cwd: tx.cwdExists ? tx.cwd : '' });
     s.messages = tx.messages.map((m) => ({ ...m, id: newId('m'), imported: true, ...(m.role === 'agent' ? { agentId: agent.id, provider: tx.source, model: m.model || tx.model || '' } : {}) }));
     const from = tx.source === 'claude' ? 'Claude Code' : 'Codex CLI';
     const notes = [tr('{from}에서 하던 대화를 불러왔어 (메시지 {n}개).', { from, n: tx.total })];
-    if (tx.truncated) notes.push(tr('화면에는 최근 {n}개만 보여. 앞부분 맥락도 이어하기로 그대로 유지돼.', { n: tx.messages.length }));
+    if (tx.truncated) notes.push(tr('화면에는 최근 {n}개만 보여.', { n: tx.messages.length }));
+    notes.push(tr('{from} 에이전트로 이어 가면 앞부분 맥락까지 그대로야. 다른 AI에게 맡기면 최근 대화와 대화 전체 파일을 건네.', { from }));
     if (!tx.cwdExists) notes.push(tr('원래 프로젝트 폴더가 없어서 새 작업 폴더에서 이어가. 이어하기가 안 되면 최근 대화를 넣어서 맥락을 잇게 해.'));
     s.messages.push({ id: newId('m'), role: 'system', text: notes.join(' '), createdAt: Date.now(), status: 'done' });
     s.providerSessions[agent.id] = tx.id;
     s.sessionProvider = { [agent.id]: tx.source };
-    s.importedFrom = { source: tx.source, id: tx.id, cwd: tx.cwd, total: tx.total, at: Date.now() };
+    s.importedFrom = { source: tx.source, id: tx.id, cwd: tx.cwd, total: tx.total, at: Date.now(), agentId: agent.id };
+    // 대화 전체(화면에 안 싣는 앞부분 포함)의 글을 따로 적어 둔다: 다른 AI에게 건넬 파일과 프로젝트 기억에 쓴다
+    try { saveImported(dirs.handoff, s.id, [...tx.older, ...tx.messages]); } catch { /* 못 적어도 불러오기는 된다(화면에 보이는 만큼만 건넨다) */ }
     store.saveSessionNow(s);
+    orch.rememberImported(s);
     bus.emit('session', store.sessionMeta(s));
     return { sessionId: s.id, agentId: agent.id, total: tx.total, shown: tx.messages.length, truncated: tx.truncated, cwdExists: tx.cwdExists };
+  });
+  // 인수인계 메모: 이 세션을 맡던 AI에게 지금까지 한 일을 정리하게 한다(AI 호출 1번). 다른 AI가 이어받을 때 그 메모를 먼저 받는다
+  route('POST', '/api/sessions/([\\w-]+)/handoff', async (req, url, [id]) => {
+    const s = store.getSession(id);
+    if (!s) throw new HttpError(404, tr('세션 없음'));
+    const b = await readJson(req);
+    if (!orch.handoffWriter(s)) throw new HttpError(400, tr('정리할 대화가 아직 없어.'));
+    const writer = orch.handoffWriter(s, b.agentId || null);
+    if (!writer) throw new HttpError(400, tr('이 세션에서 답한 적이 있는 에이전트만 메모를 쓸 수 있어.'));
+    if (orch.handoffBusy(id)) throw new HttpError(409, tr('인수인계 메모를 이미 쓰고 있어.'));
+    return { ...orch.send(id, { text: handoffRequest(), mention: writer, handoff: true }), agentId: writer };
   });
   route('GET', '/api/sessions/([\\w-]+)', async (req, url, [id]) => {
     const s = store.getSession(id);
@@ -545,6 +561,9 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     if (!s) throw new HttpError(404, tr('세션 없음'));
     if (orch.ctx.has(id)) throw new HttpError(409, tr('작업 중엔 비울 수 없어. 먼저 중지해줘.'));
     s.messages = []; s.runs = []; s.providerSessions = {};
+    // 비운 대화는 다른 AI에게 건네지도 않는다: 불러온 대화 원문과 만들어 둔 대화 파일을 지우고 표시해 둔다(이미 프로젝트 기억에 들어간 것은 기억 화면의 설명대로 남는다)
+    if (s.importedFrom) s.importedFrom.cleared = true;
+    removeHandoff(dirs.handoff, id);
     store.saveSessionNow(s);
     bus.emit('session', store.sessionMeta(s));
     return { ok: true };
@@ -627,6 +646,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     if ('defaultCwd' in b && b.defaultCwd && unsafeWorkdir(b.defaultCwd, dirs.home)) throw new HttpError(400, UNSAFE_CWD());
     if ('failoverThreshold' in b) b.failoverThreshold = Math.min(100, Math.max(50, Math.round(Number(b.failoverThreshold) || 95)));
     if ('failover' in b) b.failover = b.failover !== false;
+    if ('autoHandoff' in b) b.autoHandoff = b.autoHandoff === true;
     if ('stallMinutes' in b) b.stallMinutes = Math.min(1440, Math.max(0, Math.round(Number(b.stallMinutes) || 0)));
     if ('dailyBudget' in b) b.dailyBudget = b.dailyBudget === true;
     if ('dailyBudgetPercent' in b) b.dailyBudgetPercent = Math.min(50, Math.max(5, Math.round(Number(b.dailyBudgetPercent) || 13)));

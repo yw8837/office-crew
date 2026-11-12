@@ -22,6 +22,7 @@ export function dataDirs(home = homeDir()) {
     workspaces: path.join(home, 'workspaces'),
     skills: path.join(home, 'skills'),
     tmp: path.join(home, 'tmp'),
+    handoff: path.join(home, 'handoff'), // 다른 AI에게 건네는 대화 전체 파일(세션별 폴더)
   };
 }
 

@@ -244,6 +244,8 @@ export class Store {
     this.meta.delete(id);
     this.pinned.delete(id);
     fs.rmSync(path.join(this.dirs.sessions, `${id}.json`), { force: true });
+    // 건네려고 만든 대화 파일도 같이. 에이전트가 읽는 중이라 못 지워도 세션 삭제는 끝낸다
+    try { if (this.dirs.handoff && /^[\w-]+$/.test(String(id))) fs.rmSync(path.join(this.dirs.handoff, id), { recursive: true, force: true }); } catch { /* 남은 폴더는 다음에 지워진다 */ }
     this.#saveIndexSoon();
   }
 

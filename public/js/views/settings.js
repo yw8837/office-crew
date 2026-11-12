@@ -345,6 +345,8 @@ function Defaults() {
         <div class="field"><label>${t('멈춘 실행으로 볼 시간(분)')}</label><input class="input" type="number" min="0" max="1440" value=${s.stallMinutes ?? 30} onChange=${(e) => saveSettings({ stallMinutes: Number(e.target.value) })} /><div class="hint">${t('출력이 이만큼 없으면 CLI를 끄고 오류로 돌려. 도구가 도는 중엔 4배까지 기다려. 0이면 끄기.')}</div></div>
         <div class="field"><label>${t('보내기 키')}</label><div class="seg"><button class=${s.sendOnEnter !== false ? 'on' : ''} onClick=${() => saveSettings({ sendOnEnter: true })}>Enter</button><button class=${s.sendOnEnter === false ? 'on' : ''} onClick=${() => saveSettings({ sendOnEnter: false })}>Ctrl+Enter</button></div></div>
       </div>
+      <div class="row" style="margin-top:14px"><${Toggle} checked=${s.autoHandoff === true} onChange=${(v) => saveSettings({ autoHandoff: v })} title=${t('인수인계 메모 자동 작성')} /><b>${t('인수인계 메모 자동 작성')}</b></div>
+      <div class="hint">${t('다른 AI가 세션을 처음 이어받기 전에, 그 세션을 맡던 AI가 지금까지 한 일을 메모로 먼저 정리해. 그때마다 AI를 한 번 더 불러서 사용량이 들어. 꺼 두면 최근 대화, 앞 대화에서 고른 부분, 대화 전체 파일만 건네(AI 호출 없음).')}</div>
       <div class="row" style="margin-top:14px"><${Toggle} checked=${s.memory === true} onChange=${(v) => saveSettings({ memory: v })} title=${t('프로젝트 기억')} /><b>${t('프로젝트 기억')}</b></div>
       <div class="hint">${t('끝난 대화를 작업 폴더별로 내 PC에 원문 그대로 쌓아 두고, 실행을 시작할 때 요청과 관련된 조각만 정해진 양만큼 넣어 줘. 찾는 데 AI를 쓰지 않고, 넣은 만큼 "최근 대화"를 줄여서 전체 양을 맞춰. 켠 뒤의 대화부터 쌓여. 낱말이 겹치는 내용만 찾을 수 있어.')}</div>
       ${s.memory === true && html`<div class="field" style="max-width:260px;margin-top:8px"><label>${t('실행마다 넣는 기억의 최대 글자 수')}</label><input class="input" type="number" min="300" max="8000" step="100" value=${s.memoryBudget ?? 2000} onChange=${(e) => saveSettings({ memoryBudget: Number(e.target.value) })} /></div>`}

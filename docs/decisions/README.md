@@ -13,3 +13,4 @@ Keep a record under about 100 lines. When a decision changes, add a dated "Revis
 | [0005](0005-meeting-stage.md) | A team stage can be a meeting with fixed rounds and a chair | Accepted |
 | [0006](0006-hire-proposal-in-chat.md) | A hire request in the chat becomes a proposal the user approves | Accepted |
 | [0007](0007-local-only-user-messages.md) | What you type to a local model stays away from cloud AIs | Accepted |
+| [0008](0008-handoff-to-another-ai.md) | Another AI that takes over a session gets the earlier conversation three ways | Accepted |

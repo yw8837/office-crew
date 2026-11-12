@@ -11,6 +11,7 @@ export function defaultSettings() {
     defaultTeamId: 'team-demo',
     defaultAgentId: 'demo-researcher',
     defaultCwd: '',             // 비우면 세션마다 ~/.office-crew/workspaces/<세션id>
+    autoHandoff: false,         // 다른 AI가 처음 맡기 전에 인수인계 메모를 자동으로 쓰게 할지(AI 호출 1번이 든다)
     historyTurns: 8,            // 기억(resume) 못 하는 모델에 넣어줄 최근 대화 수
     memory: false,              // 프로젝트 기억: 끝난 대화를 작업 폴더별로 쌓고, 실행을 시작할 때 관련 조각을 넣는다
     memoryBudget: 2000,         // 실행마다 넣는 기억의 최대 글자 수

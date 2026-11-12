@@ -65,12 +65,13 @@ function oldSessions(store, days) {
 }
 
 export async function storageReport(dirs, store) {
-  const [sessions, uploads, workspaces, tmp] = await Promise.all([dirSize(dirs.sessions), dirSize(dirs.uploads), dirSize(dirs.workspaces), dirSize(dirs.tmp)]);
+  const [sessions, uploads, workspaces, tmp, handoff] = await Promise.all([dirSize(dirs.sessions), dirSize(dirs.uploads), dirSize(dirs.workspaces), dirSize(dirs.tmp), dirSize(dirs.handoff)]);
   const unused = await unusedUploads(dirs);
   const orphans = await orphanWorkspaces(dirs, store);
   return {
     home: dirs.home,
-    total: sessions.bytes + uploads.bytes + workspaces.bytes + tmp.bytes,
+    total: sessions.bytes + uploads.bytes + workspaces.bytes + tmp.bytes + handoff.bytes,
+    handoff, // 다른 AI에게 건네려고 적어 둔 대화(세션을 지우면 같이 지워진다)
     sessions: { ...sessions, count: store.listSessions().length, old90: oldSessions(store, 90).length },
     uploads: { ...uploads, count: Math.round(uploads.count / 2), unused: { count: unused.length, bytes: unused.reduce((a, x) => a + x.bytes, 0) } },
     workspaces: { ...workspaces, orphan: { count: orphans.length, bytes: orphans.reduce((a, x) => a + x.bytes, 0) } },

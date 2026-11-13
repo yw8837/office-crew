@@ -4,7 +4,7 @@
 
 # Office Crew
 
-**Turn the AI CLIs you already use into one team, and watch them work in a live isometric office.**
+**Bring a session you started in Claude Code or Codex and let another AI carry it on. Run the AI CLIs you already use as one team, and watch them work in a live isometric office.**
 
 English · [한국어](README.ko.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md)
 
@@ -20,10 +20,11 @@ English · [한국어](README.ko.md) · [简体中文](README.zh-CN.md) · [日�
   <img src="docs/screens/demo.gif" alt="Office Crew demo: in Crew Village the AI team leaves their houses, works at the office, waits for approval and goes home when done" width="900">
 </p>
 
-Office Crew is a local workspace for running several AI agents together. It runs the **official CLIs you have installed and signed in to** (Claude Code, OpenAI Codex CLI, Gemini CLI, Nous Hermes Agent) and any ACP-compatible agent, plus OpenAI-compatible APIs and local models. You arrange the agents into a pipeline, and while they work you can watch each one move around an office and step in at any point.
+Office Crew is a local workspace for running several AI agents together. It runs the **official CLIs you have installed and signed in to** (Claude Code, OpenAI Codex CLI, Gemini CLI, Nous Hermes Agent) and any ACP-compatible agent, plus OpenAI-compatible APIs and local models. You can import a conversation from Claude Code or Codex and hand it to a different AI, arrange the agents into a pipeline, and while they work watch each one move around an office and step in at any point.
 
 ## 💡 Why Office Crew
 
+- **Carry a session over to another AI.** Import a conversation you had in Claude Code or Codex and let a different AI continue it. Without any AI call, the new AI gets the recent conversation and parts of the earlier conversation picked for your request (the very beginning and the messages that share words with it); an AI that can read files also gets a file with the whole conversation. A button (after one confirmation, because it is an AI call) has the AI that knows the session best write a handoff note for whoever takes over. The details and limits are under Features below.
 - **Use the subscriptions you already have.** Office Crew launches the official CLIs on your machine with their existing sign-in. It never asks for or stores your passwords.
 - **A team instead of a single chat box.** Each agent has its own model, effort level, permissions, skills and MCP connectors. Stages run in order, agents inside a stage run in parallel, and with auto-routing, reviews are cross-checked by a different AI than the one that did the build whenever possible.
 - **See and steer every step.** The agents live in Crew Village: they stay home while idle, commute to the office when work starts, and walk to the library, the lookout tower, the workshop or the plaza depending on the tool they're using. They raise a hand when they need approval and sweat when something fails. You can redirect or skip any agent mid-run, pause the run before its next stage, or stop it.

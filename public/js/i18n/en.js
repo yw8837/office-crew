@@ -1299,4 +1299,5 @@ export default {
   "닫기": "Close",
   "내가 보낸 말로 가기": "Go to my message",
   "내 요청": "My request",
+  "조사 역할이라 조사 스킬 {n}개를 기본으로 켰어. 이 스킬은 명령을 실행해야 동작해서, 권한이 \"읽기 전용\"이나 \"기본\"이면 쓰지 못해.": "This is a research role, so {n} research skills were turned on by default. They need to run commands, so they do not work with the \"Read-only\" or \"Default\" permission.",
 };

@@ -161,7 +161,7 @@ a { color: var(--link); }
 /* 메시지 */
 .msg { margin: 16px 0; }
 .msg.user { display: flex; justify-content: flex-end; }
-.msg.user .bubble { background: var(--panel-3); padding: 10px 15px; border-radius: 16px 16px 4px 16px; max-width: 78%; white-space: pre-wrap; word-break: break-word; }
+.msg.user .bubble { background: color-mix(in srgb, var(--accent) 13%, var(--panel)); border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent); padding: 10px 15px; border-radius: 16px 16px 4px 16px; max-width: 78%; white-space: pre-wrap; word-break: break-word; }
 .msg.user .bubble .att { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
 .msg.user .meta { text-align: right; }
 .msg .mention { color: var(--accent-2); font-weight: 700; }
@@ -402,6 +402,7 @@ pre.raw { background: var(--code-bg); padding: 10px 12px; border-radius: 10px; f
   .grid2, .grid3 { grid-template-columns: 1fr; }
   .top { padding: 8px 10px; gap: 6px; }
   .chat-inner { padding: 14px 14px 24px; }
+  .chat-top { padding: 6px 14px; }
   .composer-wrap { padding: 6px 10px 10px; }
   .hide-sm { display: none !important; }
 }
@@ -505,3 +506,19 @@ pre.raw { background: var(--code-bg); padding: 10px 12px; border-radius: 10px; f
 .ochip.st-waiting span, .ochip.st-paused span, .ochip.st-error span { color: var(--text); font-weight: 700; }
 .ochip.st-done span { color: var(--text); }
 @media (max-width: 859px) { .ochip span { display: none; } }
+
+/* 채팅 맨 위에 붙는 띠: 내 요청(답이 길어져도 내가 뭘 시켰는지 보이게)과 대화에서 찾기 */
+.chat-top { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--border); padding: 6px 22px; display: flex; flex-direction: column; gap: 6px; }
+.chat-top > * { max-width: 816px; width: 100%; margin: 0 auto; }
+.my-ask { display: flex; align-items: baseline; gap: 8px; text-align: left; padding: 6px 10px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent); background: color-mix(in srgb, var(--accent) 13%, var(--panel)); color: var(--text); cursor: pointer; font-size: 13px; }
+.my-ask:hover { border-color: var(--accent); }
+.my-ask b { flex: none; color: var(--text); font-size: 12px; font-weight: 800; }
+.my-ask .txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.my-ask .when { flex: none; font-size: 11.5px; color: var(--text-2); }
+.chat-find { display: flex; align-items: center; gap: 6px; }
+.chat-find .input { flex: 1; min-width: 0; height: 30px; padding: 4px 10px; font-size: 13px; }
+.chat-find .count { flex: none; font-size: 12px; min-width: 44px; text-align: right; }
+.msg.flash, .msg.flash .bubble { animation: msg-flash 1.6s ease-out; }
+@keyframes msg-flash { 0%, 40% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 55%, transparent); border-radius: 12px; } 100% { box-shadow: 0 0 0 3px transparent; border-radius: 12px; } }
+@media (prefers-reduced-motion: reduce) { .msg.flash, .msg.flash .bubble { animation: none !important; } .msg.flash { outline: none; border-radius: 12px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 55%, transparent); } }
+@media (max-width: 860px) { .chat-top { padding: 6px 14px; } }

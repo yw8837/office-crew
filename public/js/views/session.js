@@ -1,12 +1,13 @@
 // 세션 화면: 사무실(실시간) + 채팅 + 입력창 + 진행 바 + 승인/오류 카드 + 에이전트 상세
 import { Component } from 'preact';
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { html, Icon, Avatar, ProviderChip, STATE_LABEL, EFFORT_LABEL, fmtTok, fmtCost, fmtDur, usageTotal, officeMod, agentModelText, PERM_LABEL } from '../ui.js';
 import { state, changed, toast, agentById, teamById, latestRun, onServerEvent, loadSession, uiLang } from '../state.js';
 import { post, patch, upload, uploadUrl } from '../api.js';
 import { renderMarkdown } from '../markdown.js';
 import { t, getLang, locale, tmap } from '../i18n/index.js';
 import { MemoryBadge } from './memory.js';
+import { continueList, findInMessages } from '../chat-tools.js';
 
 export const sessionAgents = (s) => {
   if (!s) return [];
@@ -338,6 +339,7 @@ function AttThumb({ a, onRemove, uploading }) {
 }
 
 const CHAT_WINDOW = 40; // 한 번에 그리는 메시지 수
+
 function Chat({ s, run }) {
   const ref = useRef(null);
   const stick = useRef(true);
@@ -348,17 +350,86 @@ function Chat({ s, run }) {
   const hidden = Math.max(0, s.messages.length - shown);
   const visible = hidden ? s.messages.slice(hidden) : s.messages;
   const showMore = () => { grow.current = ref.current?.scrollHeight || 0; stick.current = false; setShown((n) => n + CHAT_WINDOW); };
+  const jump = useRef(null); // 가려고 하는 메시지 id(그려진 뒤에 그 자리로 간다)
+  const [find, setFind] = useState(null); // null: 닫힘, { q, at }: 열림
+  const hits = useMemo(() => (find ? findInMessages(s.messages, find.q) : []), [find?.q, s.messages.length, last?.text?.length]);
+  // 메시지로 가기: 아직 안 그린 앞 메시지면 거기까지 그린 뒤에 간다. 맨 아래 따라가기는 멈춘다
+  const goTo = (id) => {
+    const i = s.messages.findIndex((m) => m.id === id);
+    if (i < 0) return;
+    stick.current = false;
+    jump.current = id;
+    if (i < hidden) setShown(s.messages.length - i + 2); else force((n) => n + 1); // 이미 그려져 있으면 다시 그리기만 해서 아래 effect 가 그 자리로 가게 한다
+  };
+  const [, force] = useState(0);
   useEffect(() => {
     const el = ref.current;
+    if (el && jump.current) {
+      const node = el.querySelector(`[data-mid="${jump.current}"]`);
+      jump.current = null; // 못 찾았어도 푼다(안 풀면 아래의 맨 아래 따라가기가 영영 안 돈다)
+      if (node) {
+        const bar = el.querySelector('.chat-top')?.offsetHeight || 0;
+        el.scrollTop += node.getBoundingClientRect().top - el.getBoundingClientRect().top - bar - 8;
+        const target = node.firstElementChild;
+        if (target) { target.classList.add('flash'); setTimeout(() => target.classList.remove('flash'), 1600); }
+        return;
+      }
+    }
     if (el && grow.current) { el.scrollTop += el.scrollHeight - grow.current; grow.current = 0; }
     else if (el && stick.current) el.scrollTop = el.scrollHeight;
   });
-  useEffect(() => { setShown(CHAT_WINDOW); stick.current = true; const el = ref.current; if (el) el.scrollTop = el.scrollHeight; }, [s.id]);
+  useEffect(() => { setShown(CHAT_WINDOW); setFind(null); jump.current = null; stick.current = true; const el = ref.current; if (el) el.scrollTop = el.scrollHeight; }, [s.id]);
+  // Ctrl+F: 브라우저 찾기 대신 대화에서 찾기를 연다(브라우저 찾기는 화면에 그린 40개만 본다)
+  useEffect(() => {
+    const k = (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || !(e.key?.toLowerCase() === 'f' || e.code === 'KeyF')) return;
+      if (document.querySelector('.backdrop')) return; // 다른 창이 떠 있으면 그 뒤에서 열지 않는다
+      if (document.activeElement?.closest?.('.chat-find')) return; // 이미 찾기 칸이면 한 번 더 누를 때 브라우저 찾기로 넘긴다
+      e.preventDefault();
+      setFind((f) => f || { q: '', at: -1 });
+      ref.current?.querySelector('.chat-find input')?.focus(); // 이미 열려 있으면 바로
+    };
+    addEventListener('keydown', k);
+    return () => removeEventListener('keydown', k);
+  }, []);
+  // 찾기 칸이 그려지는 즉시 포커스를 준다(그 전에 친 글자가 입력칸으로 새지 않게)
+  const findOpen = !!find;
+  useLayoutEffect(() => { if (findOpen) ref.current?.querySelector('.chat-find input')?.focus(); }, [findOpen]); // 그린 직후 바로(화면이 가려져 있어도 늦지 않게)
   const onScroll = (e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; };
+  // 내 요청 띠: 가장 최근에 보낸 내 말(답이 길어지면 금방 위로 밀려 안 보이니 대화 위에 붙여 둔다)
+  const mine = s.messages.findLast((m) => m.role === 'user' && m.text && !m.handoffAsk && !m.hire);
+  const after = mine ? s.messages.length - 1 - s.messages.indexOf(mine) : 0;
+  const step = (d) => {
+    if (!hits.length) return;
+    const from = find.at < 0 ? (d < 0 ? 0 : -1) : find.at; // 아직 안 갔으면 '다음'은 첫째, '이전'은 마지막
+    const at = ((from + d) % hits.length + hits.length) % hits.length;
+    setFind({ ...find, at });
+    goTo(hits[at]);
+  };
+  const closeFind = () => { setFind(null); setTimeout(() => document.querySelector('.composer textarea, textarea[rows="1"]')?.focus(), 0); };
+  const onFindKey = (e) => {
+    if (e.isComposing) return; // 한글을 치다 Enter 로 글자를 확정하는 중
+    if (e.key === 'Enter') { e.preventDefault(); step(e.shiftKey ? -1 : 1); }
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeFind(); }
+  };
   return html`<div class="chat" ref=${ref} onScroll=${onScroll}>
+    ${(find || (mine && after > 0)) && html`<div class="chat-top">
+      ${find && html`<div class="chat-find" role="search">
+        <${Icon} name="search" size=${14} />
+        <input class="input" placeholder=${t('대화에서 찾을 말')} aria-label=${t('대화에서 찾기')} value=${find.q}
+          onInput=${(e) => setFind({ q: e.target.value, at: -1 })} onKeyDown=${onFindKey} />
+        <span class="muted count" aria-live="polite">${find.q.trim() ? (hits.length ? t('{n}/{total}', { n: Math.max(0, find.at + 1), total: hits.length }) : t('없음')) : ''}</span>
+        <button class="icon-btn" title=${t('이전 (Shift+Enter)')} aria-label=${t('이전')} disabled=${!hits.length} onClick=${() => step(-1)}><${Icon} name="up" size=${14} /></button>
+        <button class="icon-btn" title=${t('다음 (Enter)')} aria-label=${t('다음')} disabled=${!hits.length} onClick=${() => step(1)}><${Icon} name="down" size=${14} /></button>
+        <button class="icon-btn" title=${t('닫기 (Esc)')} aria-label=${t('닫기')} onClick=${closeFind}><${Icon} name="x" size=${14} /></button>
+      </div>`}
+      ${mine && after > 0 && html`<button class="my-ask" title=${t('내가 보낸 말로 가기')} onClick=${() => goTo(mine.id)}>
+        <b>${t('내 요청')}</b><span class="txt">${mine.text.replace(/\s+/g, ' ').slice(0, 300)}</span><span class="muted when">${new Date(mine.createdAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })}</span>
+      </button>`}
+    </div>`}
     <div class="chat-inner">
       ${hidden > 0 && html`<button class="chat-more" onClick=${showMore}>${t('이전 대화 {n}개 더 보기', { n: Math.min(hidden, CHAT_WINDOW) })} <span class="muted">${t('(남은 {n}개)', { n: hidden })}</span></button>`}
-      ${s.messages.length === 0 ? html`<${Welcome} s=${s} />` : visible.map((m) => html`<${Message} key=${m.id} m=${m} />`)}
+      ${s.messages.length === 0 ? html`<${Welcome} s=${s} />` : visible.map((m) => html`<div class="msg-wrap" key=${m.id} data-mid=${m.id}><${Message} m=${m} /></div>`)}
       ${/* 승인·오류 카드는 결과 바로 아래(채팅 흐름 안)에 둬서 결과를 가리지 않게 */ ''}
       <${Gate} s=${s} run=${run} inline=${true} />
       ${last && html`<div style="height:4px"></div>`}
@@ -537,7 +608,25 @@ function Composer({ s, run }) {
       if (e.key === 'Escape') { setPop(null); return; }
     }
     const sendKey = state.settings.sendOnEnter !== false ? (e.key === 'Enter' && !e.shiftKey && !e.isComposing) : (e.key === 'Enter' && (e.ctrlKey || e.metaKey));
-    if (sendKey) { e.preventDefault(); submit(); }
+    if (sendKey) { e.preventDefault(); submit(); return; }
+    // 줄바꿈(보내기가 아닌 Enter): 번호·글머리 목록을 쓰던 중이면 다음 번호를 이어 준다
+    if (e.key === 'Enter' && !e.isComposing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const el = e.target;
+      const next = continueList(el.value, el.selectionStart, el.selectionEnd);
+      if (next) {
+        e.preventDefault();
+        // 브라우저의 입력 명령으로 넣는다(값을 통째로 바꾸면 Ctrl+Z 기록이 끊긴다). 안 되면 값을 바꾸는 방식으로
+        let done = false;
+        try {
+          if (next.remove) { el.setSelectionRange(next.remove[0], next.remove[1]); done = document.execCommand('delete'); }
+          else done = document.execCommand('insertText', false, next.insert);
+        } catch { done = false; }
+        if (!done || el.value !== next.text) {
+          setText(next.text);
+          requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = next.caret; });
+        }
+      }
+    }
   };
 
   const onPaste = (e) => {

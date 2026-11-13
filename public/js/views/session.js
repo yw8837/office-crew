@@ -261,8 +261,8 @@ function HireCard({ m }) {
 // ── 메시지 ──
 class Message extends Component {
   // 제안 카드는 에이전트·팀 목록도 보여 주므로 언제나 다시 그린다
-  shouldComponentUpdate(np) { return np.m.role === 'proposal' || np.m._v !== this.v || np.m !== this.props.m || np.compact !== this.props.compact || getLang() !== this.lang; }
-  render({ m }) {
+  shouldComponentUpdate(np, ns) { return np.m.role === 'proposal' || np.m._v !== this.v || np.m !== this.props.m || np.compact !== this.props.compact || np.fold !== this.props.fold || ns.open !== this.state.open || getLang() !== this.lang; }
+  render({ m, fold }, { open }) {
     this.v = m._v;
     this.lang = getLang();
     if (m.role === 'user' && m.handoffAsk) return html`<div class="msg system"><span>${t('인수인계 메모를 써 달라고 했어.')}</span></div>`;
@@ -289,6 +289,16 @@ class Message extends Component {
     const notices = m.blocks.filter((b) => b.kind === 'notice' && !b.quiet);
     const quiet = m.blocks.filter((b) => b.kind === 'notice' && b.quiet);
     const u = m.usage || {};
+    // 긴 답은 접어 둔다(앞부분만 보이고 '전체 보기'로 편다). 쓰는 중인 답과, 펼쳐 두기로 한 답(가장 최근 실행의 마지막 결과)은 펼친다
+    this.seen ||= streaming; // 쓰는 걸 지켜본 답은 끝나도 접지 않는다(읽던 답이 갑자기 줄지 않게)
+    const long = !streaming && (m.text || '').length > FOLD_CHARS;
+    const folded = long && !(open ?? (!fold || this.seen));
+    // 펼치고 접을 때: 대화가 맨 아래로 끌려가지 않게 알리고, 접은 뒤에는 버튼이 화면 밖으로 밀리지 않게 한다
+    const toggle = (e) => {
+      const btn = e.currentTarget;
+      this.props.onToggle?.();
+      this.setState({ open: folded }, () => { if (!folded) btn.scrollIntoView?.({ block: 'nearest' }); });
+    };
     return html`<div class=${`msg agent${streaming ? ' streaming' : ''}`} data-agent=${m.agentId}>
       <${Avatar} agent=${a} />
       <div style="min-width:0">
@@ -304,7 +314,8 @@ class Message extends Component {
             : tools.map((b) => html`<${ToolBlock} b=${b} />`)}
         </div>` : ''}
         ${notices.map((b) => html`<div class="notice">${b.text}</div>`)}
-        <div class="msg-body md" dangerouslySetInnerHTML=${{ __html: m.text ? renderMarkdown(m.text) : (streaming ? `<p class="muted">${t('작업 중…')}</p>` : '') }}></div>
+        <div class=${`msg-body md${folded ? ' folded' : ''}`} id=${`body-${m.id}`} onFocusCapture=${folded ? () => { this.props.onToggle?.(); this.setState({ open: true }); } : undefined} dangerouslySetInnerHTML=${{ __html: m.text ? renderMarkdown(m.text) : (streaming ? `<p class="muted">${t('작업 중…')}</p>` : '') }}></div>
+        ${long && html`<button class="fold-btn" aria-expanded=${!folded} aria-controls=${`body-${m.id}`} onClick=${toggle}>${folded ? t('전체 보기 ({n}자)', { n: m.text.length.toLocaleString(locale()) }) : t('접기')}</button>`}
         ${m.error && html`<div class="msg-err">⚠ ${m.error}</div>`}
         <div class="msg-foot">
           ${m.status === 'stopped' && html`<span class="chip warn">${t('중지됨')}</span>`}
@@ -338,6 +349,7 @@ function AttThumb({ a, onRemove, uploading }) {
   </div>`;
 }
 
+const FOLD_CHARS = 2400; // 이보다 긴 답은 접을 수 있다
 const CHAT_WINDOW = 40; // 한 번에 그리는 메시지 수
 
 function Chat({ s, run }) {
@@ -371,6 +383,7 @@ function Chat({ s, run }) {
         const bar = el.querySelector('.chat-top')?.offsetHeight || 0;
         el.scrollTop += node.getBoundingClientRect().top - el.getBoundingClientRect().top - bar - 8;
         const target = node.firstElementChild;
+        if (node.querySelector('.msg-body.folded')) node.querySelector('.fold-btn')?.click(); // 접힌 답이면 펼쳐서 찾은 글이 보이게
         if (target) { target.classList.add('flash'); setTimeout(() => target.classList.remove('flash'), 1600); }
         return;
       }
@@ -396,6 +409,12 @@ function Chat({ s, run }) {
   const findOpen = !!find;
   useLayoutEffect(() => { if (findOpen) ref.current?.querySelector('.chat-find input')?.focus(); }, [findOpen]); // 그린 직후 바로(화면이 가려져 있어도 늦지 않게)
   const onScroll = (e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; };
+  // 펼쳐 둘 답: 가장 최근 실행의 마지막 단계 결과와 회의 결론, 그리고 대화의 맨 마지막 답. 나머지 긴 답은 접는다
+  const lastRun = s.runs[s.runs.length - 1];
+  const lastAgent = s.messages.findLast((m) => m.role === 'agent');
+  const keepOpen = (m) => m === lastAgent || !!m.error
+    || (lastRun && m.runId === lastRun.id && (m.meeting ? m.meeting.phase === 'conclude' : m.stageIndex === lastRun.stages.length - 1));
+  const unstick = () => { stick.current = false; };
   // 내 요청 띠: 가장 최근에 보낸 내 말(답이 길어지면 금방 위로 밀려 안 보이니 대화 위에 붙여 둔다)
   const mine = s.messages.findLast((m) => m.role === 'user' && m.text && !m.handoffAsk && !m.hire);
   const after = mine ? s.messages.length - 1 - s.messages.indexOf(mine) : 0;
@@ -429,7 +448,7 @@ function Chat({ s, run }) {
     </div>`}
     <div class="chat-inner">
       ${hidden > 0 && html`<button class="chat-more" onClick=${showMore}>${t('이전 대화 {n}개 더 보기', { n: Math.min(hidden, CHAT_WINDOW) })} <span class="muted">${t('(남은 {n}개)', { n: hidden })}</span></button>`}
-      ${s.messages.length === 0 ? html`<${Welcome} s=${s} />` : visible.map((m) => html`<div class="msg-wrap" key=${m.id} data-mid=${m.id}><${Message} m=${m} /></div>`)}
+      ${s.messages.length === 0 ? html`<${Welcome} s=${s} />` : visible.map((m) => html`<div class="msg-wrap" key=${m.id} data-mid=${m.id}><${Message} m=${m} fold=${m.role === 'agent' && !keepOpen(m)} onToggle=${unstick} /></div>`)}
       ${/* 승인·오류 카드는 결과 바로 아래(채팅 흐름 안)에 둬서 결과를 가리지 않게 */ ''}
       <${Gate} s=${s} run=${run} inline=${true} />
       ${last && html`<div style="height:4px"></div>`}

@@ -1299,4 +1299,5 @@ export default {
   "닫기": "Close",
   "내가 보낸 말로 가기": "Go to my message",
   "내 요청": "My request",
+  "전체 보기 ({n}자)": "Show all ({n} characters)",
 };

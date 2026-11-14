@@ -57,6 +57,23 @@ export function AgentEditor({ agent, onClose }) {
   const setAv = (k, v) => setA((x) => ({ ...x, avatar: { ...x.avatar, [k]: v } }));
   const setMany = (patch) => setA((x) => ({ ...x, ...patch }));
 
+  // 새 에이전트: 역할이 조사면 조사 스킬을 기본으로 켠다. 사용자가 스킬을 직접 고른 뒤에는 건드리지 않는다
+  const [auto, setAuto] = useState([]); // 기본으로 켜 준 스킬 id
+  const [touched, setTouched] = useState(false);
+  useEffect(() => {
+    if (!isNew || touched) return undefined;
+    let live = true;
+    const timer = setTimeout(() => {
+      get(`/api/skill-defaults?role=${encodeURIComponent(a.role || '')}&provider=${encodeURIComponent(a.provider || '')}`).then((d) => {
+        if (!live) return;
+        const want = d.skills || [];
+        setA((x) => ({ ...x, skills: [...x.skills.filter((id) => !auto.includes(id)), ...want.filter((id) => !x.skills.includes(id) || auto.includes(id))] }));
+        setAuto(want);
+      }).catch(() => {});
+    }, 350); // 역할을 치는 동안 매 글자마다 묻지 않게
+    return () => { live = false; clearTimeout(timer); };
+  }, [a.role, a.provider, touched]);
+
   const save = async () => {
     try {
       if (isNew) await post('/api/agents', a); else await put(`/api/agents/${a.id}`, a);
@@ -120,7 +137,8 @@ export function AgentEditor({ agent, onClose }) {
         <div class="field"><label>${t('역할 지침 (시스템 프롬프트)')}</label>
           <textarea class="textarea" style="min-height:110px" value=${a.systemPrompt} onInput=${(e) => set('systemPrompt', e.target.value)} placeholder=${t('이 에이전트가 늘 지킬 규칙·말투·산출물 형식')}></textarea></div>
         <div class="field"><label>${t('스킬 (항상 적용)')} ${a.skills.length > 0 && html`<span class="chip accent">${t('{n}개 선택', { n: a.skills.length })}</span>`}</label>
-          <${SkillPicker} agent=${a} onChange=${(ids) => set('skills', ids)} />
+          <${SkillPicker} agent=${a} onChange=${(ids) => { setTouched(true); set('skills', ids); }} />
+          ${isNew && !touched && auto.length > 0 && html`<div class="hint">${t('조사 역할이라 조사 스킬 {n}개를 기본으로 켰어. 이 스킬은 명령을 실행해야 동작해서, 권한이 "읽기 전용"이나 "기본"이면 쓰지 못해.', { n: auto.length })}</div>`}
         </div>
         ${prov?.caps?.connectors && html`<div class="field"><label>${t('커넥터 (MCP 서버)')}</label>
           <div class="pick">${state.connectors.map((c) => html`<span class=${`chip${a.connectors.includes(c.id) ? ' on' : ''}`} onClick=${() => set('connectors', a.connectors.includes(c.id) ? a.connectors.filter((x) => x !== c.id) : [...a.connectors, c.id])}>🔌 ${c.name}</span>`)}</div>

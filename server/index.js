@@ -14,7 +14,7 @@ import { Orchestrator, normMeeting } from './orchestrator.js';
 import { uniqueName, STAGE_MAX } from './hire.js';
 import { ProviderRegistry, PROVIDERS, syncCodexAccounts, accountProviderId, codexAccountHome } from './providers/index.js';
 import { defaultCodexHome } from './providers/codex.js';
-import { resolveRoute } from './routing.js';
+import { resolveRoute, roleKind } from './routing.js';
 import { storageReport, cleanup } from './storage.js';
 import { listImportable, readTranscript } from './importer.js';
 import { saveImported, handoffRequest, removeHandoff } from './handoff.js';
@@ -334,7 +334,10 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
 
   // 에이전트
   route('POST', '/api/agents', async (req) => {
-    const a = store.upsert('agents', cleanAgent(await readJson(req)), 'agent');
+    const b = await readJson(req);
+    // 스킬을 아예 안 보냈으면(화면 밖에서 만들 때) 조사 역할에는 조사 스킬을 기본으로 켠다. 빈 목록을 보냈으면 그대로 둔다
+    if (b.skills === undefined && roleKind(b.role) === 'research') b.skills = catalog.researchSkills(b.provider);
+    const a = store.upsert('agents', cleanAgent(b), 'agent');
     bus.emit('agents', store.all('agents'));
     return a;
   });
@@ -700,6 +703,11 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   });
 
   // 스킬
+  // 역할에 맞춰 기본으로 켤 스킬(지금은 조사 역할만). 새 에이전트를 만드는 화면이 쓴다
+  route('GET', '/api/skill-defaults', async (req, url) => {
+    const research = roleKind(url.searchParams.get('role') || '') === 'research';
+    return { kind: research ? 'research' : '', skills: research ? catalog.researchSkills(url.searchParams.get('provider') || '') : [] };
+  });
   route('GET', '/api/skills', async (req, url) => { if (url.searchParams.get('rescan')) catalog.scanExternalSkills(); return catalog.skills(); });
   route('GET', '/api/skills/(.+)', async (req, url, [id]) => { const s = catalog.skillContent(decodeURIComponent(id)); if (!s) throw new HttpError(404, tr('스킬 없음')); return s; });
   route('POST', '/api/skills', async (req) => { const s = catalog.saveSkill({ ...(await readJson(req)), id: undefined }); bus.emit('skills', catalog.skills()); return s; });

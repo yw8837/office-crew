@@ -57,6 +57,9 @@ export const descKey = (d) => crypto.createHash('sha1').update(String(d || '').t
 
 export const safeKey = (s) => String(s || 'mcp').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'mcp';
 
+// 조사 역할 에이전트에 기본으로 켜는 스킬 이름(이 PC에 설치돼 있을 때만 적용)
+const RESEARCH_SKILLS = ['agent-reach', 'insane-search'];
+
 export class Catalog {
   constructor(store, dirs) {
     this.store = store;
@@ -132,6 +135,20 @@ export class Catalog {
     fs.writeFileSync(this.#koFile(), JSON.stringify(ko, null, 1));
     this.koCache = ko;
     return n;
+  }
+
+  // 조사 역할 에이전트에 기본으로 켤 스킬: 이 PC의 스킬 폴더에 그 이름의 스킬이 있을 때만(없으면 빈 목록).
+  // 같은 이름이 여러 곳에 있으면 그 에이전트의 CLI 쪽 것을 먼저, 다음은 공용(~/.agents), 그다음 아무거나
+  researchSkills(provider) {
+    const all = this.scanExternalSkills(); // 서버를 켠 뒤에 설치하거나 지운 스킬도 맞게 보려고 매번 다시 훑는다
+    const order = [/^codex(-[a-z0-9]+)?$/.test(String(provider || '')) ? 'codex' : 'claude', 'agents', 'claude', 'codex'];
+    const out = [];
+    for (const name of RESEARCH_SKILLS) {
+      const same = all.filter((s) => s.id === `ext:${s.source}:${name}`);
+      const pick = order.map((src) => same.find((s) => s.source === src)).find(Boolean) || same[0];
+      if (pick) out.push(pick.id);
+    }
+    return out;
   }
 
   skillContent(id) {

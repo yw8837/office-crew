@@ -313,7 +313,7 @@ class Message extends Component {
           ${tools.length > 6 ? html`<details class="tools-group"><summary>${t('도구 {n}개 사용 (펼치기)', { n: tools.length })}</summary><div class="blocks">${tools.map((b) => html`<${ToolBlock} b=${b} />`)}</div></details>`
             : tools.map((b) => html`<${ToolBlock} b=${b} />`)}
         </div>` : ''}
-        ${notices.map((b) => html`<div class="notice">${b.text}</div>`)}
+        ${notices.map((b) => html`<div class="notice">${b.text}${b.count > 1 ? html` <span class="chip">×${b.count}</span>` : ''}</div>`)}
         <div class=${`msg-body md${folded ? ' folded' : ''}`} id=${`body-${m.id}`} onFocusCapture=${folded ? () => { this.props.onToggle?.(); this.setState({ open: true }); } : undefined} dangerouslySetInnerHTML=${{ __html: m.text ? renderMarkdown(m.text) : (streaming ? `<p class="muted">${t('작업 중…')}</p>` : '') }}></div>
         ${long && html`<button class="fold-btn" aria-expanded=${!folded} aria-controls=${`body-${m.id}`} onClick=${toggle}>${folded ? t('전체 보기 ({n}자)', { n: m.text.length.toLocaleString(locale()) }) : t('접기')}</button>`}
         ${m.error && html`<div class="msg-err">⚠ ${m.error}</div>`}

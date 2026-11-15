@@ -1301,4 +1301,6 @@ export default {
   "내 요청": "My request",
   "전체 보기 ({n}자)": "Show all ({n} characters)",
   "조사 역할이라 조사 스킬 {n}개를 기본으로 켰어. 이 스킬은 명령을 실행해야 동작해서, 권한이 \"읽기 전용\"이나 \"기본\"이면 쓰지 못해.": "This is a research role, so {n} research skills were turned on by default. They need to run commands, so they do not work with the \"Read-only\" or \"Default\" permission.",
+  "같은 알림이나 같은 작업을 {n}번 되풀이해서 헛도는 걸로 보고 껐어. 다시 시도하면 새 대화로 시작해. 건너뛰어도 돼.": "It repeated the same notice or the same action {n} times, so it looked stuck in a loop and was stopped. A retry starts a new conversation. You can also skip it.",
+  "예약 실행이 같은 일만 되풀이해서 끝냈어. 다음 회차는 정상으로 돌아.": "The scheduled run kept repeating the same thing, so it was ended. The next run goes as usual.",
 };

@@ -16,6 +16,8 @@ import { readTranscript } from './importer.js';
 const ACTIVE = new Set(['running', 'paused', 'waiting']);
 const FORCE_END_MS = 5000; // 멈춘 CLI를 끄라고 한 뒤 이만큼 기다려도 안 끝나면 강제로 끝낸다
 const ACCOUNT_LIMITED = new Set(['claude', 'codex', 'gemini', 'hermes']); // 계정 단위 사용량 한도가 있는 CLI
+const LOOP_NOTICES = 10; // 한 번 실행에서 CLI가 같은 알림을 이만큼 되풀이하면 헛도는 걸로 본다
+const LOOP_TOOLS = 20; // 같은 도구를 같은 입력으로 연달아 이만큼 부르면 헛도는 걸로 본다
 const MAX_PREV = 12000; // 이전 단계 결과 1개당 최대 글자
 const MEET_MAX = 1500; // 회의에서 다른 참석자에게 넘기는 의견 한 건의 최대 글자 수
 // 내 PC 모델하고만 나눈 말인가: 그 모델의 답, 그리고 내 PC 모델만 받은 사용자 말. 이런 말은 클라우드 AI로 넘기는 대화·기억에서 뺀다
@@ -260,7 +262,7 @@ export class Orchestrator {
           st.status = 'error';
           // 사람이 안 보는 예약 실행이 멈췄으면 결정을 기다리지 않고 끝낸다(기다리는 동안 뒤 회차가 전부 막히지 않게)
           if (ctx.stalled && ctx.s.scheduleId) {
-            this.#systemNote(ctx.s, tr('예약 실행이 멈춰서 끝냈어. 다음 회차는 정상으로 돌아.'));
+            this.#systemNote(ctx.s, ctx.looped ? tr('예약 실행이 같은 일만 되풀이해서 끝냈어. 다음 회차는 정상으로 돌아.') : tr('예약 실행이 멈춰서 끝냈어. 다음 회차는 정상으로 돌아.'));
             ctx.stopped = true;
             break;
           }
@@ -583,7 +585,9 @@ export class Orchestrator {
     let cur = { agent, prov }; // 지금 일하는 AI(한도로 이어받으면 바뀜)
     const cfgFiles = [];
     // 이어갈 대화 id 는 그 대화를 만든 AI 와 짝으로 기억한다(다른 AI 에 엉뚱한 id 를 넘기지 않게)
+    let fresh = false; // 헛돌아서 끈 대화는 이어 가지 않는다(다시 시도하면 새 대화로)
     const remember = (id) => {
+      if (fresh) { delete s.providerSessions[agentId]; return; }
       if (!id || !cur.prov.caps.resume) return;
       s.providerSessions[agentId] = id;
       (s.sessionProvider ||= {})[agentId] = cur.agent.provider;
@@ -611,8 +615,8 @@ export class Orchestrator {
         const start = (p, rid) => {
           // 불러온 Claude 세션은 처음 이어갈 때 갈래(fork)로 시작해 원래 기록을 그대로 둔다
           const forkSession = !!rid && ag.provider === 'claude' && s.importedFrom?.source === 'claude' && rid === s.importedFrom.id;
-          const watch = this.#watchStall(ctx, pv.caps.quiet);
-          const emit = (ev) => { watch.saw(ev); this.#onEvent(ctx, msg, ag, ev); };
+          const watch = this.#watchStall(ctx, pv.caps.quiet, () => { fresh = true; });
+          const emit = (ev) => { if (watch.saw(ev) === false) return; this.#onEvent(ctx, msg, ag, ev); }; // 헛돌아서 끈 뒤에 밀려 나오는 출력은 버린다
           const h = watch.attach(pv.run({ ...base, prompt: p, resumeId: rid, forkSession }, emit));
           ctx.handles.set(agentId, { handle: h, msg, agent: ag, prov: pv });
           return h;
@@ -634,7 +638,7 @@ export class Orchestrator {
       const firstPrompt = recall.text + (resumeId ? this.#withMissed(prompt, ctx, agent) : prov.caps.resume ? this.#withHistory(prompt, s, msg, undefined, recall.chars, { ctx, agent, prov }) : prompt);
       res = await cur.start(firstPrompt, resumeId).done;
       // (한도 오류는 이어하기 실패가 아니다: "session limit" 같은 문구에 걸려 원래 대화를 잃지 않게)
-      if (res.error && resumeId && !res.stopped && !isQuotaError(res.error) && /conversation|session|not found|no such|resume/i.test(res.error)) {
+      if (res.error && resumeId && !res.stopped && !res.looped && !isQuotaError(res.error) && /conversation|session|not found|no such|resume/i.test(res.error)) {
         this.#notice(s, msg, tr('이전 대화를 이어갈 수 없어서 새 대화로 다시 시작해.'));
         delete s.providerSessions[agentId];
         res = await cur.start(recall.text + this.#withHistory(full, s, msg, undefined, recall.chars, { ctx, agent, prov }), null).done;
@@ -1054,25 +1058,59 @@ export class Orchestrator {
   // 멈춘 실행 감시: 출력이 한동안 없으면 CLI를 끄고 오류로 돌린다.
   // 도구가 돌고 있으면 빌드·테스트처럼 조용히 오래 걸릴 수 있어 4배까지 기다린다. 0이면 끈다.
   // 끝날 때 결과를 한 번에 주는 CLI(Hermes)는 출력이 없는 게 정상이라 감시하지 않는다
-  #watchStall(ctx, quiet) {
+  #watchStall(ctx, quiet, onLoop = null) {
     let last = Date.now();
     const running = new Set();
+    // 되풀이 감지: 출력은 계속 나오는데 같은 알림이나 같은 도구 호출만 반복하는 경우(멈춤 감지로는 못 잡는다)
+    const repeats = new Map();
+    const counted = new Set();
+    let trip = null;
+    let dead = false;
+    let lastTool = '';
+    const bump = (key, max) => { const n = (repeats.get(key) || 0) + 1; repeats.set(key, n); if (n >= max) trip?.(n); };
     return {
       saw: (ev) => {
+        if (dead) return ev.type === 'usage' || ev.type === 'limits' ? undefined : false; // 사용량·한도 기록은 끈 뒤에도 받는다
         last = Date.now();
+        if (ev.type === 'notice' && ev.text && !ev.quiet) bump(`n:${ev.text}`, LOOP_NOTICES); // 조용한 알림(훅 경고 등)은 정상 실행에서도 여러 번 나온다
+        if (ev.type === 'tool' && ev.id && !counted.has(ev.id) && ev.name && ev.input !== undefined) {
+          let sig = '';
+          try { sig = JSON.stringify(ev.input); } catch { /* 셀 수 없는 입력은 건너뛴다 */ }
+          if (sig && sig.length > 2) {
+            counted.add(ev.id); // 같은 호출의 진행 알림은 한 번만 센다(입력이 나중에 오는 CLI는 입력이 온 때 센다)
+            // 연달아 같은 호출만 센다: 사이에 다른 호출이 끼면 처음부터(오래 도는 실행이 같은 명령을 가끔 다시 돌리는 건 정상이다)
+            const key = `t:${ev.name}:${sig.slice(0, 2000)}`;
+            if (key !== lastTool) { repeats.delete(lastTool); lastTool = key; }
+            bump(key, LOOP_TOOLS);
+          }
+        }
         if (ev.type !== 'tool' || !ev.id) return;
         if (ev.status === 'running') running.add(ev.id);
         else if (ev.status) running.delete(ev.id); // 상태 없는 진행 알림은 아직 도는 중이다
       },
       attach: (h) => {
         const minutes = Number(this.store.settings.stallMinutes ?? 30);
-        if (quiet || !(minutes > 0)) return h;
+        const timed = !quiet && minutes > 0; // 멈춤 감지를 끈 경우에도 되풀이 감지는 한다
         const limit = () => minutes * 60000 * (running.size ? 4 : 1);
         let stalled = false;
+        let looped = 0;
         let idle = 1;
         let force;
         const forced = new Promise((r) => { force = r; });
-        const timer = setInterval(() => {
+        let timer = null;
+        trip = (n) => {
+          if (stalled || looped) return;
+          looped = n;
+          dead = true;
+          ctx.stalled = true;
+          ctx.looped = true;
+          onLoop?.();
+          clearInterval(timer);
+          h.stop();
+          setTimeout(() => force({ text: '' }), FORCE_END_MS).unref?.();
+        };
+        if (timed) timer = setInterval(() => {
+          if (looped) return;
           if (Date.now() - last <= limit()) return;
           stalled = true;
           ctx.stalled = true;
@@ -1082,8 +1120,9 @@ export class Orchestrator {
           // 손자 프로세스가 출력을 잡고 있거나 종료 신호를 무시하면 끝나지 않으니 잠시 뒤 강제로 끝낸다
           setTimeout(() => force({ text: '' }), FORCE_END_MS).unref?.();
         }, Math.min(30000, Math.max(20, minutes * 15000)));
-        timer.unref?.();
-        const done = Promise.race([h.done, forced]).then((r) => (stalled ? { ...r, stopped: false, error: tr('{n}분 동안 아무 출력이 없어서 멈춘 걸로 보고 껐어. 다시 시도하거나 건너뛰어줘.', { n: idle }) } : r)).finally(() => clearInterval(timer));
+        timer?.unref?.();
+        const done = Promise.race([h.done, forced]).then((r) => (stalled ? { ...r, stopped: false, error: tr('{n}분 동안 아무 출력이 없어서 멈춘 걸로 보고 껐어. 다시 시도하거나 건너뛰어줘.', { n: idle }) }
+          : looped ? { ...r, stopped: false, looped: true, error: tr('같은 알림이나 같은 작업을 {n}번 되풀이해서 헛도는 걸로 보고 껐어. 다시 시도하면 새 대화로 시작해. 건너뛰어도 돼.', { n: looped }) } : r)).finally(() => { clearInterval(timer); trip = null; });
         // 추가 지시를 보내면 다시 일하기 시작하니 시계를 돌려놓는다
         const steer = h.steer && ((t) => { last = Date.now(); return h.steer(t); });
         return { ...h, done, ...(steer ? { steer } : {}) };
@@ -1246,7 +1285,15 @@ export class Orchestrator {
   }
 
   #notice(s, msg, text, quiet = false) {
-    const b = { id: newId('n'), kind: 'notice', text: String(text || '').slice(0, 1000), quiet: !!quiet, status: 'done' };
+    const t = String(text || '').slice(0, 1000);
+    // 같은 알림이 또 오면 줄을 늘리지 않고 횟수만 올린다(같은 경고 수백 줄이 답을 덮지 않게)
+    const same = msg.blocks.find((x) => x.kind === 'notice' && x.text === t && x.quiet === !!quiet);
+    if (same) {
+      same.count = (same.count || 1) + 1;
+      this.bus.emit('block', { sessionId: s.id, messageId: msg.id, block: same });
+      return;
+    }
+    const b = { id: newId('n'), kind: 'notice', text: t, quiet: !!quiet, status: 'done' };
     msg.blocks.push(b);
     this.bus.emit('block', { sessionId: s.id, messageId: msg.id, block: b });
   }

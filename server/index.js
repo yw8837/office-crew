@@ -650,6 +650,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     if ('failoverThreshold' in b) b.failoverThreshold = Math.min(100, Math.max(50, Math.round(Number(b.failoverThreshold) || 95)));
     if ('failover' in b) b.failover = b.failover !== false;
     if ('autoHandoff' in b) b.autoHandoff = b.autoHandoff === true;
+    if ('agentAsks' in b) b.agentAsks = b.agentAsks !== false;
     if ('stallMinutes' in b) b.stallMinutes = Math.min(1440, Math.max(0, Math.round(Number(b.stallMinutes) || 0)));
     if ('dailyBudget' in b) b.dailyBudget = b.dailyBudget === true;
     if ('dailyBudgetPercent' in b) b.dailyBudgetPercent = Math.min(50, Math.max(5, Math.round(Number(b.dailyBudgetPercent) || 13)));

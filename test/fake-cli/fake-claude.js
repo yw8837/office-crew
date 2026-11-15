@@ -50,6 +50,10 @@ async function pump() {
   const koReq = text.match(/\[\{"i":0,"d":[\s\S]*\}\]/);
   const koItems = koReq ? (() => { try { return JSON.parse(koReq[0]); } catch { return null; } })() : null;
   const chunks = koItems ? ['```json\n', JSON.stringify(Object.fromEntries(koItems.map((x) => [String(x.i), `가짜 한글 설명 ${x.i}`]))), '\n```']
+    // ASKME: 사용자에게 선택지를 묻고 멈춘다. 답을 받으면 이어서 쓴다. ASKMORE 는 답을 받아도 계속 묻고, ASKBAD 는 형식을 틀린다
+    : text.includes('[사용자 답변]') && !text.includes('ASKMORE') ? ['답 받았어. ', '이어서 진행했어']
+    : /ASKME|ASKMORE/.test(text) ? ['먼저 확인할게.\n\n', '```oc-ask\n{"questions":[{"header":"범위","question":"' + (text.includes('ASKMORE') ? 'ASKMORE ' : '') + '어디까지 할까?","options":[{"label":"전부 (추천)","description":"처음부터 끝까지"},{"label":"일부만","description":"앞부분만"}],"multi":false},{"question":"무엇을 넣을까?","options":["표","그림","요약"],"multi":true}]}\n```']
+    : text.includes('ASKBAD') ? ['```oc-ask\n{"questions":[{"question":"보기가 하나뿐","options":["하나"]}]}\n```']
     : text.includes('도구를 더 쓰지 말고') ? ['조사 결과 ', '정리했어'] : text.includes('EMPTYANSWER') ? [] : ['안녕', '하세요 ', `turn${turn}`];
   for (const ch of chunks) {
     out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: ch } } });

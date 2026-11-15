@@ -347,6 +347,8 @@ function Defaults() {
       </div>
       <div class="row" style="margin-top:14px"><${Toggle} checked=${s.autoHandoff === true} onChange=${(v) => saveSettings({ autoHandoff: v })} title=${t('인수인계 메모 자동 작성')} /><b>${t('인수인계 메모 자동 작성')}</b></div>
       <div class="hint">${t('다른 AI가 세션을 처음 이어받기 전에, 그 세션을 맡던 AI가 지금까지 한 일을 메모로 먼저 정리해. 그때마다 AI를 한 번 더 불러서 사용량이 들어. 꺼 두면 최근 대화, 앞 대화에서 고른 부분, 대화 전체 파일만 건네(AI 호출 없음).')}</div>
+      <div class="row" style="margin-top:14px"><${Toggle} checked=${s.agentAsks !== false} onChange=${(v) => saveSettings({ agentAsks: v })} title=${t('에이전트가 묻기')} /><b>${t('에이전트가 묻기')}</b></div>
+      <div class="hint">${t('에이전트가 혼자 정할 수 없는 것을 선택지로 물어. 답하면 그 에이전트가 이어서 일해. 질문 하나마다 AI를 한 번 더 불러서 사용량이 들어. 예약 실행, 회의, 인수인계 메모에서는 묻지 않아. 꺼 두면 묻지 않고 가정을 정해서 진행해.')}</div>
       <div class="row" style="margin-top:14px"><${Toggle} checked=${s.memory === true} onChange=${(v) => saveSettings({ memory: v })} title=${t('프로젝트 기억')} /><b>${t('프로젝트 기억')}</b></div>
       <div class="hint">${t('끝난 대화를 작업 폴더별로 내 PC에 원문 그대로 쌓아 두고, 실행을 시작할 때 요청과 관련된 조각만 정해진 양만큼 넣어 줘. 찾는 데 AI를 쓰지 않고, 넣은 만큼 "최근 대화"를 줄여서 전체 양을 맞춰. 켠 뒤의 대화부터 쌓여. 낱말이 겹치는 내용만 찾을 수 있어.')}</div>
       ${s.memory === true && html`<div class="field" style="max-width:260px;margin-top:8px"><label>${t('실행마다 넣는 기억의 최대 글자 수')}</label><input class="input" type="number" min="300" max="8000" step="100" value=${s.memoryBudget ?? 2000} onChange=${(e) => saveSettings({ memoryBudget: Number(e.target.value) })} /></div>`}

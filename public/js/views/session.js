@@ -7,7 +7,7 @@ import { post, patch, upload, uploadUrl } from '../api.js';
 import { renderMarkdown } from '../markdown.js';
 import { t, getLang, locale, tmap } from '../i18n/index.js';
 import { MemoryBadge } from './memory.js';
-import { continueList, findInMessages } from '../chat-tools.js';
+import { continueList, findInMessages, hideAsks } from '../chat-tools.js';
 
 export const sessionAgents = (s) => {
   if (!s) return [];
@@ -259,6 +259,39 @@ function HireCard({ m }) {
 }
 
 // ── 메시지 ──
+// 에이전트의 질문: 보기를 고르거나 직접 써서 답한다. 답하면 그 에이전트가 같은 답 안에서 이어 쓴다
+function AskCard({ sid, ask }) {
+  const [ans, setAns] = useState(() => ask.questions.map(() => ({ picked: [], other: '' })));
+  const [busy, setBusy] = useState(false);
+  const set = (i, p) => setAns((a) => a.map((x, k) => (k === i ? { ...x, ...p } : x)));
+  const pick = (i, n, multi) => set(i, { picked: multi ? (ans[i].picked.includes(n) ? ans[i].picked.filter((x) => x !== n) : [...ans[i].picked, n]) : [n] });
+  const ready = ans.every((a) => a.picked.length || a.other.trim());
+  const send = (body) => {
+    setBusy(true);
+    post(`/api/sessions/${sid}/control`, { action: 'answer', askId: ask.id, ...body })
+      .then((r) => { if (r?.ok === false) toast(r.reason || t('이미 답했거나 끝난 질문이야.'), 'warn'); })
+      .catch((e) => toast(e.message, 'error'))
+      .finally(() => setBusy(false));
+  };
+  return html`<div class="ask" role="group" aria-label=${t('에이전트의 질문')}>
+    <div class="ask-title">🙋 ${t('답이 필요해')}</div>
+    ${ask.questions.map((q, i) => html`<fieldset class="ask-q" key=${i}>
+      <legend>${q.header && html`<span class="chip accent">${q.header}</span>`}<span>${q.question}</span>${q.multi && html`<span class="muted small">${t('여러 개 고를 수 있어')}</span>`}</legend>
+      <div class="ask-opts" role=${q.multi ? 'group' : 'radiogroup'} aria-label=${q.question}>
+        ${q.options.map((o, n) => html`<button type="button" key=${n} class=${`ask-opt${ans[i].picked.includes(n) ? ' on' : ''}`} role=${q.multi ? 'checkbox' : 'radio'} aria-checked=${ans[i].picked.includes(n) ? 'true' : 'false'} disabled=${busy} onClick=${() => pick(i, n, q.multi)}>
+          <b>${o.label}</b>${o.description && html`<span>${o.description}</span>`}
+        </button>`)}
+      </div>
+      <input class="input" placeholder=${t('보기에 없으면 직접 써')} aria-label=${t('직접 쓰는 답')} maxlength="1000" value=${ans[i].other} disabled=${busy}
+        onInput=${(e) => set(i, { other: e.target.value })} onKeyDown=${(e) => { if (e.key === 'Enter' && !e.isComposing && ready && !busy) { e.preventDefault(); send({ answers: ans }); } }} />
+    </fieldset>`)}
+    <div class="row">
+      <button class="btn primary sm" disabled=${!ready || busy} onClick=${() => send({ answers: ans })}>${t('답 보내기')}</button>
+      <button class="btn sm" disabled=${busy} title=${t('답하지 않고 넘겨. 에이전트가 가정을 정해서 진행해.')} onClick=${() => send({ skip: true })}>${t('넘기기')}</button>
+    </div>
+  </div>`;
+}
+
 class Message extends Component {
   // 제안 카드는 에이전트·팀 목록도 보여 주므로 언제나 다시 그린다
   shouldComponentUpdate(np, ns) { return np.m.role === 'proposal' || np.m._v !== this.v || np.m !== this.props.m || np.compact !== this.props.compact || np.fold !== this.props.fold || ns.open !== this.state.open || getLang() !== this.lang; }
@@ -291,7 +324,9 @@ class Message extends Component {
     const u = m.usage || {};
     // 긴 답은 접어 둔다(앞부분만 보이고 '전체 보기'로 편다). 쓰는 중인 답과, 펼쳐 두기로 한 답(가장 최근 실행의 마지막 결과)은 펼친다
     this.seen ||= streaming; // 쓰는 걸 지켜본 답은 끝나도 접지 않는다(읽던 답이 갑자기 줄지 않게)
-    const long = !streaming && (m.text || '').length > FOLD_CHARS;
+    const asks = this.props.panel ? [] : (m.asks || []).filter((x) => x.status === 'open'); // 오른쪽 패널에는 카드를 또 띄우지 않는다
+    const body = hideAsks(m.text, m.asks, streaming); // 질문 블록은 아래 선택 카드로 보여 준다
+    const long = !streaming && body.length > FOLD_CHARS;
     const folded = long && !(open ?? (!fold || this.seen));
     // 펼치고 접을 때: 대화가 맨 아래로 끌려가지 않게 알리고, 접은 뒤에는 버튼이 화면 밖으로 밀리지 않게 한다
     const toggle = (e) => {
@@ -314,8 +349,9 @@ class Message extends Component {
             : tools.map((b) => html`<${ToolBlock} b=${b} />`)}
         </div>` : ''}
         ${notices.map((b) => html`<div class="notice">${b.text}</div>`)}
-        <div class=${`msg-body md${folded ? ' folded' : ''}`} id=${`body-${m.id}`} onFocusCapture=${folded ? () => { this.props.onToggle?.(); this.setState({ open: true }); } : undefined} dangerouslySetInnerHTML=${{ __html: m.text ? renderMarkdown(m.text) : (streaming ? `<p class="muted">${t('작업 중…')}</p>` : '') }}></div>
-        ${long && html`<button class="fold-btn" aria-expanded=${!folded} aria-controls=${`body-${m.id}`} onClick=${toggle}>${folded ? t('전체 보기 ({n}자)', { n: m.text.length.toLocaleString(locale()) }) : t('접기')}</button>`}
+        <div class=${`msg-body md${folded ? ' folded' : ''}`} id=${`body-${m.id}`} onFocusCapture=${folded ? () => { this.props.onToggle?.(); this.setState({ open: true }); } : undefined} dangerouslySetInnerHTML=${{ __html: body.trim() ? renderMarkdown(body) : (streaming && !asks.length ? `<p class="muted">${t('작업 중…')}</p>` : '') }}></div>
+        ${asks.map((x) => html`<${AskCard} key=${x.id} sid=${state.route.id} ask=${x} />`)}
+        ${long && html`<button class="fold-btn" aria-expanded=${!folded} aria-controls=${`body-${m.id}`} onClick=${toggle}>${folded ? t('전체 보기 ({n}자)', { n: body.length.toLocaleString(locale()) }) : t('접기')}</button>`}
         ${m.error && html`<div class="msg-err">⚠ ${m.error}</div>`}
         <div class="msg-foot">
           ${m.status === 'stopped' && html`<span class="chip warn">${t('중지됨')}</span>`}
@@ -730,7 +766,7 @@ function Inspector({ s, agentId }) {
     <div class="drawer-body">
       <div class="row" style="margin-bottom:10px"><span class=${`sbadge ${live?.state || 'idle'}`}>${STATE_LABEL[live?.state || 'idle']}</span><span class="small muted ellipsis">${live?.detail || ''}</span></div>
       <div class="small muted" style="margin-bottom:10px">${t('이 세션 사용량: {tok} 토큰 {cost} · 메시지 {n}개', { tok: fmtTok(usageTotal(u)), cost: fmtCost(u.cost), n: msgs.length })}</div>
-      ${lastMsg ? html`<${Message} m=${lastMsg} />` : html`<div class="muted">${t('아직 이 에이전트의 출력이 없어.')}</div>`}
+      ${lastMsg ? html`<${Message} m=${lastMsg} panel=${true} />` : html`<div class="muted">${t('아직 이 에이전트의 출력이 없어.')}</div>`}
     </div>
     <div class="drawer-foot">
       <textarea class="textarea" style="min-height:56px" placeholder=${running ? t('{name}에게 지금 바로 지시 (작업 중 끼어들기)', { name: a.name }) : t('{name}에게만 질문·요청 보내기', { name: a.name })} value=${note} onInput=${(e) => setT(e.target.value)} onKeyDown=${(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); ask(); } }}></textarea>

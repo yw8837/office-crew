@@ -25,3 +25,21 @@ export function findInMessages(messages, q) {
   if (!k) return [];
   return messages.filter((m) => (m.role === 'user' || m.role === 'agent') && !m.handoffAsk && (m.text || '').toLowerCase().includes(k)).map((m) => m.id);
 }
+
+// 에이전트가 사용자에게 묻는 블록(oc-ask)은 선택 카드로 보여 주니 본문에서는 뺀다.
+// asks: 서버가 질문으로 받은 블록들({ from, to } = 글에서의 자리). 그 자리만 뺀다.
+// 쓰는 중이면 마지막으로 받은 블록 뒤에 나오는 블록(아직 서버가 읽기 전이거나 쓰다 만 것)도 감춘다.
+// 다 쓴 뒤에 서버가 받지 않은 블록(형식이 틀렸거나, 횟수를 넘었거나, 예로 든 것)은 그대로 보여서 사용자가 글로 읽을 수 있다
+export function hideAsks(text, asks = [], streaming = false) {
+  const src = String(text || '');
+  const spans = (asks || []).filter((a) => Number.isInteger(a.from) && Number.isInteger(a.to) && a.from >= 0 && a.to > a.from && a.to <= src.length).sort((a, b) => a.from - b.from);
+  let out = '';
+  let at = 0;
+  for (const a of spans) {
+    if (a.from < at) continue;
+    out += src.slice(at, a.from);
+    at = a.to;
+  }
+  const tail = src.slice(at);
+  return out + (streaming ? tail.replace(/```oc-ask[\s\S]*$/, '') : tail);
+}

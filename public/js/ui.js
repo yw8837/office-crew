@@ -132,7 +132,7 @@ export function ProviderChip({ id }) {
 
 export const STATE_LABEL = tmap(() => ({
   idle: t('대기'), thinking: t('생각 중'), typing: t('작성 중'), tool: t('도구 사용'), searching: t('검색 중'), reading: t('자료 읽는 중'),
-  running: t('실행 중'), waiting: t('승인 대기'), error: t('오류'), done: t('완료'), paused: t('멈춤'), offline: t('자리 비움'),
+  running: t('실행 중'), waiting: t('응답 대기'), error: t('오류'), done: t('완료'), paused: t('멈춤'), offline: t('자리 비움'),
 }));
 export const PERM_LABEL = tmap(() => ({
   plan: [t('읽기 전용'), t('계획·분석만, 파일 수정·명령 실행 안 함')],

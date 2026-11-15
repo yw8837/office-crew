@@ -34,6 +34,7 @@ export function attentionOf(run) {
   if (!run) return null;
   const at = (t) => ({ runId: run.id, since: t || run.startedAt });
   if (run.status === 'waiting') return { kind: run.hold?.reason === 'approve' ? 'approve' : 'decide', ...at(run.hold?.at) };
+  if (run.status === 'running' && run.asks?.length) return { kind: 'ask', ...at(run.asks[0].at) };
   if (run.status === 'paused') return { kind: 'paused', ...at(run.hold?.at) };
   if (run.status === 'error' && run.endedAt) return { kind: 'failed', ...at(run.endedAt) };
   if (run.status === 'done' && run.endedAt) return { kind: 'done', ...at(run.endedAt) };
@@ -72,7 +73,7 @@ export class Store {
     this.stale = [...this.meta].filter(([, m]) => m.running).map(([id]) => id); // 실행 중에 꺼진 세션(오케스트레이터가 한 번 정리한다)
     for (const m of this.meta.values()) {
       m.running = false;
-      if (['approve', 'decide', 'paused'].includes(m.attention?.kind)) m.attention = null;
+      if (['approve', 'decide', 'paused', 'ask'].includes(m.attention?.kind)) m.attention = null;
     }
     this.#saveIndexSoon();
     if (first) {

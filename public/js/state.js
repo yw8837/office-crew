@@ -190,6 +190,7 @@ function handle(type, d) {
       else state.active.delete(d.sessionId);
       if (d.run.status === 'waiting' && d.sessionId !== state.route.id) toast(d.run.hold?.reason === 'approve' ? t('다른 세션에서 승인이 필요해') : t('다른 세션에서 결정이 필요해'), 'warn');
       notifyRun(d.sessionId, d.run);
+      notifyAsk(d.sessionId, d.run);
       break;
     }
     case 'usage': state.usage = d; break;
@@ -219,6 +220,17 @@ export async function askNotifyPermission() {
 }
 
 const notified = new Set();
+// 에이전트가 질문했을 때: 질문마다 한 번만 알린다(실행 상태는 자주 다시 오니까)
+function notifyAsk(sessionId, run) {
+  const a = run.asks?.[0];
+  if (!a || notified.has(a.id)) return;
+  notified.add(a.id);
+  if (sessionId !== state.route.id) toast(t('다른 세션에서 에이전트가 질문했어'), 'warn');
+  if (!state.settings.desktopNotify || document.hasFocus()) return;
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  const n = new Notification(t('에이전트가 질문했어'), { body: state.sessions.find((s) => s.id === sessionId)?.title || t('오피스 크루'), tag: `crew-${sessionId}` });
+  n.onclick = () => { window.focus(); go('session', sessionId); n.close(); };
+}
 function notifyRun(sessionId, run) {
   const title = {
     waiting: run.hold?.reason === 'approve' ? t('승인이 필요해') : t('결정이 필요해'),

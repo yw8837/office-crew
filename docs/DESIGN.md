@@ -23,6 +23,7 @@ server/index.js             HTTP 라우팅, 정적 파일, 보안
 server/store.js             JSON 저장소(원자적 쓰기, 디바운스)
 server/bus.js               SSE 이벤트 허브
 server/orchestrator.js      실행(run) 엔진: 단계 진행, 병렬, 승인 게이트, 개입
+server/ask.js               에이전트가 사용자에게 묻기: 답 끝의 oc-ask 블록 읽기, 답을 돌려주는 글(결정 0009)
 server/usage.js             토큰·비용 집계, 계정 한도
 server/catalog.js           스킬·커넥터·플러그인 목록
 server/routing.js           자동 라우팅(역할×프로필 → 프로바이더·모델·노력)

@@ -10,6 +10,7 @@ import { resolveRoute, roleKind, aiKey, baseProvider } from './routing.js';
 import { Cooldown, isQuotaError, nearLimit, avoidUntil, resetTime, resetFromText, availableCatalog, pickFallback, continuationPrompt, handoffFacts } from './failover.js';
 import { nextMidnight, lowerEffort } from './budget.js';
 import { tr } from './i18n.js';
+import { ASK_MAX, parseAsk, cleanAnswers, answered, answerPrompt, answerRecord, askNote, stripAsks } from './ask.js';
 import { writeConversation, readImported, saveImported, pickEarlier, toolNames, handoffRequest, NOTE_MAX } from './handoff.js';
 import { readTranscript } from './importer.js';
 
@@ -73,6 +74,8 @@ export class Orchestrator {
     for (const s of this.store.sessions.values()) {
       let dirty = false;
       for (const r of s.runs) if (ACTIVE.has(r.status)) { r.status = 'stopped'; r.endedAt = Date.now(); r.hold = null; for (const st of r.stages || []) if (st.meetingNow) st.meetingNow = null; dirty = true; }
+      for (const r of s.runs) if (r.asks?.length) { r.asks = []; dirty = true; }
+      for (const m of s.messages) for (const a of m.asks || []) if (a.status === 'open') { a.status = 'cancelled'; dirty = true; }
       for (const m of s.messages) if (m.status === 'streaming' || m.status === 'queued') { m.status = 'stopped'; dirty = true; }
       if (dirty) this.store.saveSessionNow(s);
     }
@@ -206,7 +209,7 @@ export class Orchestrator {
     if (s.runs.length > 30) s.runs.splice(0, s.runs.length - 30);
     const ctx = {
       s, run, userMsg, handles: new Map(), outputs: [], gate: null, stopped: false, pauseRequested: false,
-      skipped: new Set(), pendingSteer: new Map(), nextNotes: [], queue: [],
+      skipped: new Set(), pendingSteer: new Map(), nextNotes: [], queue: [], asks: new Map(),
     };
     this.ctx.set(s.id, ctx);
     this.store.pin(s.id); // 실행 중엔 메모리에서 내리지 않는다
@@ -217,6 +220,7 @@ export class Orchestrator {
       .finally(() => {
         run.endedAt = Date.now();
         run.hold = null;
+        run.asks = [];
         this.#emitRun(ctx);
         this.ctx.delete(s.id);
         // 그사이 세션이 삭제됐으면 저장·알림·대기열 실행을 하지 않는다
@@ -429,6 +433,34 @@ export class Orchestrator {
     });
   }
 
+  // 에이전트의 질문을 띄우고 답(또는 넘기기·중지)을 기다린다. 같은 단계의 다른 에이전트는 그대로 일한다
+  #ask(ctx, agentId, msg, ask) {
+    const { s, run } = ctx;
+    const entry = { id: newId('ask'), questions: ask.questions, from: ask.from, to: ask.to, status: 'open', at: Date.now() };
+    (msg.asks ||= []).push(entry);
+    (run.asks ||= []).push({ id: entry.id, agentId, messageId: msg.id, at: entry.at });
+    const publish = () => {
+      this.bus.emit('message', { sessionId: s.id, message: msg });
+      this.#emitRun(ctx);
+      this.bus.emit('session', this.store.sessionMeta(s));
+      this.store.saveSession(s, 100);
+    };
+    this.#state(s.id, agentId, 'waiting', tr('답을 기다리는 중'));
+    publish();
+    return new Promise((resolve) => {
+      ctx.asks.set(entry.id, {
+        agentId, ask,
+        done: (d) => {
+          ctx.asks.delete(entry.id);
+          run.asks = (run.asks || []).filter((a) => a.id !== entry.id);
+          entry.status = d.stop ? 'cancelled' : d.answers ? 'answered' : 'skipped';
+          publish();
+          resolve(d);
+        },
+      });
+    });
+  }
+
   // ── 에이전트 1명 실행 ──
   // 자동 라우팅: 실행 직전에 지금 쓸 수 있는 AI 기준으로 모델·노력을 고른다
   // 자동 이어받기 설정: 쉬는 중·한도 임박 판단에 쓰는 값
@@ -593,6 +625,8 @@ export class Orchestrator {
       const cwd = this.cwdOf(s);
       const settings = this.store.settings;
       const atts = ctx.userMsg.attachments || [];
+      // 사용자에게 물어도 되는 실행인지: 사람이 안 보는 예약 실행, 회의, 인수인계 메모 쓰기에서는 묻지 않는다
+      const askOk = settings.agentAsks !== false && !s.scheduleId && !ctx.userMsg?.handoffAsk && !meet && !s.agentOverride;
       // 에이전트가 읽을 수 있게 여는 폴더. 대화 전체 파일을 건네면 그 폴더가 여기에 더해진다
       const addDirs = [this.dirs.uploads];
       const extraDirs = []; // 대화 전체 파일 폴더만(Codex·Gemini 처럼 올린 파일 폴더를 따로 열지 않는 CLI 용)
@@ -605,7 +639,7 @@ export class Orchestrator {
         if (mcpConfigPath) cfgFiles.push(mcpConfigPath);
         const base = {
           agent: ag, cwd, settings, connectors, tmpDir: this.dirs.tmp, addDirs, extraDirs,
-          system: this.#system(ag, cwd), images: pv.caps.images ? atts.filter((a) => a.mime?.startsWith('image/')).map((a) => a.path) : [],
+          system: this.#system(ag, cwd, askOk), images: pv.caps.images ? atts.filter((a) => a.mime?.startsWith('image/')).map((a) => a.path) : [],
           mcpConfigPath, history: ag.provider === 'openai' ? this.#history(s, msg, agentId, ag.provider) : [],
         };
         const start = (p, rid) => {
@@ -667,6 +701,7 @@ export class Orchestrator {
         res = await cur.start(continuationPrompt(nextPrompt, partial, from, tr, facts), null).done;
       }
       // 실행 중 주입 못 한 추가 지시는 이어서 처리
+      const drainSteer = async () => {
       while (!ctx.stopped && !res.stopped && !res.error && (ctx.pendingSteer.get(agentId) || []).length) {
         const t = ctx.pendingSteer.get(agentId).shift();
         this.#notice(s, msg, `📝 ${tr('추가 지시로 이어서 진행: {text}', { text: t })}`);
@@ -678,6 +713,11 @@ export class Orchestrator {
         remember(res.providerSessionId);
         res = await cur.start(follow, rid).done;
       }
+      };
+      // 답이 질문으로 끝났으면 질문부터 받는다(추가 지시를 먼저 처리하면 이미 지나간 질문이 카드로 뜬다). 밀린 추가 지시는 답을 받은 뒤에 처리한다
+      let askFrom = 0;
+      const asking = () => (askOk ? parseAsk(msg.text.slice(askFrom)) : null);
+      if (!asking()) await drainSteer();
       // 오류 없이 빈 답으로 끝나면(도구 거부 뒤 그냥 멈춤 등) 한 번만 최종 답변을 다시 요청한다
       if (!ctx.stopped && !res.stopped && !res.error && !msg.text.trim()) {
         this.#notice(s, msg, tr('응답이 비어 있어서(도구 거부 등) 최종 답변을 한 번 더 요청했어.'));
@@ -686,6 +726,37 @@ export class Orchestrator {
         const nudge = tr('도구를 더 쓰지 말고, 지금까지 알아낸 것과 네 지식으로 요청에 대한 최종 답변을 바로 글로 써줘.');
         res = await cur.start(rid ? nudge : `${full}\n\n${tr('[중요]')} ${nudge}`, rid).done;
       }
+      // 에이전트가 사용자에게 물으면(답 끝의 oc-ask 블록) 선택 카드를 띄우고, 답을 받아 같은 답 안에서 이어 간다
+      for (let n = 0; askOk && !ctx.stopped && !res.stopped && !res.error; n++) {
+        const found = asking();
+        if (!found) break;
+        if (found.error) { this.#notice(s, msg, tr('에이전트가 질문을 보냈는데 형식이 맞지 않아서 선택창을 띄우지 못했어. 아래 글을 보고 직접 답해 줘.')); break; }
+        if (n >= ASK_MAX) { this.#notice(s, msg, tr('한 번에 물을 수 있는 횟수({n}번)를 넘어서 선택창을 띄우지 않았어. 아래 글을 보고 직접 답해 줘.', { n: ASK_MAX })); break; }
+        // 기다리는 동안에는 끝난 프로세스의 핸들을 빈 것으로 바꿔 둔다(몇 시간 뒤 중지를 눌러도 이미 끝난 프로세스 번호를 끄려 하지 않게).
+        // 그사이 온 추가 지시는 전달되지 않으니 밀려 있다가 답을 받은 뒤 처리된다
+        ctx.handles.set(agentId, { handle: { stop() {}, steer: () => false }, msg, agent: cur.agent, prov: cur.prov });
+        const got = await this.#ask(ctx, agentId, msg, { ...found.ask, from: askFrom + found.from, to: askFrom + found.to });
+        if (got.stop || ctx.stopped) { res = { ...res, stopped: true }; break; }
+        const record = `\n\n${answerRecord(found.ask, got.answers)}\n\n`;
+        msg.text += record;
+        this.bus.emit('delta', { sessionId: s.id, messageId: msg.id, text: record });
+        askFrom = msg.text.length;
+        const reply = answerPrompt(found.ask, got.answers);
+        // 이어 갈 CLI 대화가 없으면(이어하기를 못 하는 AI) 요청과 지금까지 쓴 답을 다시 준다. 질문 블록은 빼고 준다(그대로 베껴 또 묻지 않게)
+        const fresh = () => `${recall.text}${full}\n\n${tr('[네 이전 답변]')}\n${stripAsks(msg.text).slice(-MAX_PREV)}\n\n${reply}`;
+        const rid = cur.prov.caps.resume ? res.providerSessionId : null;
+        remember(res.providerSessionId);
+        this.#state(s.id, agentId, 'thinking', tr('답을 받아 이어서 진행 중…'));
+        res = await cur.start(rid ? reply : fresh(), rid).done;
+        // 오래 기다린 사이 CLI 대화가 없어졌으면 새 대화로 한 번 다시 한다
+        if (res.error && rid && !res.stopped && !isQuotaError(res.error) && /conversation|session|not found|no such|resume/i.test(res.error)) {
+          this.#notice(s, msg, tr('이전 대화를 이어갈 수 없어서 새 대화로 다시 시작해.'));
+          delete s.providerSessions[agentId];
+          res = await cur.start(fresh(), null).done;
+        }
+        if (!asking()) await drainSteer();
+      }
+      await drainSteer(); // 질문을 더 받지 않고 끝난 경우에 밀린 추가 지시
     } catch (e) {
       res = { error: e.code === 'ENOENT' ? e.message : tr('실행 실패: {msg}', { msg: e.message }) };
     } finally {
@@ -727,7 +798,7 @@ export class Orchestrator {
     return { agent: worker, text: msg.text };
   }
 
-  #system(agent, cwd) {
+  #system(agent, cwd, canAsk = false) {
     // 비대화형 실행에선 권한 요청이 자동 거부되므로, 할 수 있는 일을 미리 알려 헛시도·빈 답을 막는다(실측)
     const PERM_NOTE = {
       plan: tr('권한: 읽기 전용이야. 명령 실행·파일 수정은 거부되니 시도하지 말고, 받은 자료와 네 지식으로 답해.'),
@@ -744,6 +815,7 @@ export class Orchestrator {
       roleKind(agent.role) === 'review' ? tr('검수 규칙: 남이 쓴 "다 했다·통과했다" 같은 결론(앞 단계 결과·문서·커밋 메시지 포함)은 믿지 말고, 네가 직접 확인한 증거(파일 내용, 명령·테스트 실행 결과)로만 판정해. 판정마다 근거(파일:줄이나 실행 출력)를 붙이고, 확인 못 한 항목은 "확인 못 함"으로 따로 적어.') : '',
       tr('도구가 실패하거나 거부돼도 마지막엔 반드시 최종 답변을 글로 남겨.'),
       tr('사용자가 쓴 언어로 답하고, 결과는 읽기 쉬운 마크다운으로 써.'),
+      canAsk ? askNote() : '',
     ];
     for (const sid of agent.skills || []) {
       const sk = this.catalog.skillContent(sid);
@@ -1275,7 +1347,7 @@ export class Orchestrator {
   }
 
   // ── 개입 ──
-  control(sessionId, { action, agentId = null, text = '' }) {
+  control(sessionId, { action, agentId = null, text = '', askId = null, answers = null, skip = false }) {
     const ctx = this.ctx.get(sessionId);
     if (!ctx) throw Object.assign(new Error(tr('진행 중인 작업이 없어.')), { status: 409 });
     const { s } = ctx;
@@ -1322,12 +1394,26 @@ export class Orchestrator {
         if (ctx.run.status === 'paused') gate({ action: 'resume' });
         this.#emitRun(ctx);
         return { ok: true };
+      case 'answer': {
+        const w = ctx.asks.get(askId);
+        if (!w) return { ok: false, reason: tr('이미 답했거나 끝난 질문이야.') };
+        if (skip === true) { w.done({ answers: null }); return { ok: true }; }
+        const a = cleanAnswers(w.ask, answers);
+        if (!answered(a)) throw Object.assign(new Error(tr('질문마다 보기를 고르거나 직접 써 줘.')), { status: 400 });
+        w.done({ answers: a });
+        return { ok: true };
+      }
       case 'stop':
         ctx.stopped = true;
+        for (const w of [...ctx.asks.values()]) w.done({ stop: true });
         for (const { handle } of ctx.handles.values()) handle.stop();
         gate({ action: 'stop' });
         return { ok: true };
       case 'skip': {
+        // 답을 기다리는 에이전트를 건너뛰면 질문을 닫고 그 에이전트를 끝낸다
+        const asking = [...ctx.asks.values()].filter((w) => !agentId || w.agentId === agentId);
+        for (const w of asking) { ctx.skipped.add(w.agentId); w.done({ stop: true }); }
+        if (asking.length && agentId) return { ok: true };
         // 특정 에이전트 건너뛰기: 실행 중일 때만. 이미 끝났으면 아무것도 안 함(단계 게이트를 건드리지 않음)
         if (agentId) {
           const h = ctx.handles.get(agentId);
@@ -1364,6 +1450,7 @@ export class Orchestrator {
     for (const ctx of this.ctx.values()) {
       ctx.stopped = true;
       for (const { handle } of ctx.handles.values()) { try { handle.stop(); } catch { /* 무시 */ } }
+      for (const w of [...ctx.asks.values()]) w.done({ stop: true });
       if (ctx.gate) ctx.gate({ action: 'stop' });
       // 앱을 끄는 중이면 실행이 정리되기 전에 저장소가 닫힌다. 사용자 말은 지금 기억에 넣고, 넣었다는 표시도 같이 저장되게 한다
       this.#remember(ctx.s, ctx.userMsg);

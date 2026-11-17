@@ -375,6 +375,7 @@ export function buildVillageScene(skin, nAgents, opts = {}) {
   return {
     mode: 'vector', kind: 'village', width, height, P, defs, stat, labels, zones, neon: null, items, desks, houses, door: null,
     spots: SPOTS, doorPos: homeDoor, charScale: 1, speed: 3.6, stride: 0.34,
+    board: P(2.75, 12.25, 0), // 회의 결론 게시판(아래 가운데 기준): 광장 왼쪽 벤치 옆, 전망탑과 모임 자리 이름표를 피한 곳
     toScreen: (p, lift = 0) => P(p[0], p[1], lift),
     depth: (p) => p[0] + p[1],
     path: (a, b) => nav.path(a, b),

@@ -25,3 +25,54 @@ export function isTalking(view, id, participant) {
 export function researcherOf(now) {
   return now && now.phase === 'research' && now.speakerId ? String(now.speakerId) : null;
 }
+
+// 결론의 "결정" 줄: "- 결정: …", "- **결정**: …", "**Decision:** …", "1. 决定：…" (결론 프롬프트와 데모 결론이 네 언어로 쓰는 머리말)
+const DECISION = /^\s*(?:[-*+•]\s+|\d+[.)]\s+)?(?:\*\*|__)?\s*(?:결정|Decision|决定|決定)\s*(?:\*\*|__)?\s*[:：]\s*(?:\*\*|__)?\s*(.*)$/i;
+// 마크다운 표시를 뺀 한 줄 글
+const plain = (s) => String(s)
+  .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+  .replace(/\*\*|__|~~|`/g, '')
+  .replace(/^\s*#{1,6}\s+/, '')
+  .replace(/^\s*(?:[-*+•]\s+|\d+[.)]\s+|>\s*)/, '')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+/**
+ * 결론 메시지 글 → 게시판 카드 글. "결정" 줄의 글, 없으면 첫 글줄(제목 줄은 다른 글이 없을 때만).
+ * max 글자(그림 글자도 한 글자)를 넘으면 잘라서 "…"를 붙인다. 쓸 글이 없으면 ''
+ */
+export function cardText(text, max = 30) {
+  const lines = String(text || '').split(/\r?\n/);
+  let pick = '';
+  for (const line of lines) {
+    const m = line.match(DECISION);
+    if (m && plain(m[1])) { pick = plain(m[1]); break; }
+  }
+  if (!pick) {
+    let heading = '';
+    for (const line of lines) {
+      if (!line.trim() || /^\s*(```|~~~)/.test(line) || /^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) continue;
+      const t = plain(line);
+      if (!t) continue;
+      if (/^\s*#{1,6}\s/.test(line)) { heading ||= t; continue; }
+      pick = t;
+      break;
+    }
+    pick ||= heading;
+  }
+  const chars = [...pick];
+  return chars.length > max ? `${chars.slice(0, max).join('').trimEnd()}…` : pick;
+}
+
+/** 게시판 카드: 메시지 목록에서 회의 결론(다 쓴 것) 최근 n개를 새것부터 [{ id, text }] */
+export function boardCards(messages, n = 3) {
+  const out = [];
+  const list = Array.isArray(messages) ? messages : [];
+  for (let i = list.length - 1; i >= 0 && out.length < n; i--) {
+    const m = list[i];
+    if (!m || m.role !== 'agent' || m.status !== 'done' || !m.meeting || m.meeting.phase !== 'conclude') continue;
+    const text = cardText(m.text);
+    if (text) out.push({ id: m.id, text });
+  }
+  return out;
+}

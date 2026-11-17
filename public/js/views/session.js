@@ -8,7 +8,7 @@ import { renderMarkdown } from '../markdown.js';
 import { t, getLang, locale, tmap } from '../i18n/index.js';
 import { MemoryBadge } from './memory.js';
 import { continueList, findInMessages, hideAsks, hideCheck } from '../chat-tools.js';
-import { researcherOf, meetingView } from '../office/meeting.js';
+import { researcherOf, meetingView, boardCards } from '../office/meeting.js';
 
 export const sessionAgents = (s) => {
   if (!s) return [];
@@ -79,9 +79,12 @@ const checkChip = (status) => ({ asked: [t('조사 중'), ''], answered: [t('조
 // ── 사무실 패널 ──
 // 사무실 기본 높이: 화면의 30%쯤, 200~300px 사이(대화가 주인공이라 절반을 넘지 않게)
 const officeDefaultH = () => Math.max(200, Math.min(300, Math.round(innerHeight * 0.3)));
-function OfficePanel({ s, full, onCollapse }) {
+function OfficePanel({ s, full, onCollapse, onJump }) {
   const host = useRef(null);
   const officeRef = useRef(null);
+  const jumpRef = useRef(null); // 게시판 카드를 눌렀을 때 채팅에서 그 메시지로(그림은 한 번만 만들어서 최신 함수를 여기로 넘긴다)
+  jumpRef.current = onJump;
+  const boardSid = useRef(null); // 게시판을 마지막으로 채운 세션(세션이 바뀌면 "새 카드" 표시 없이 채운다)
   const [height, setHeight] = useState(() => Number(localStorage.getItem('ui.officeH')) || officeDefaultH());
   const agents = sessionAgents(s);
   const key = agents.map((a) => `${a.id}:${a.name}:${a.model}:${avatarKey(a.avatar)}`).join('|');
@@ -101,8 +104,10 @@ function OfficePanel({ s, full, onCollapse }) {
     const office = mod.createOffice(host.current, {
       skin: skinValue(), reducedMotion: !!state.settings.reducedMotion, lang: uiLang(), quality: state.settings.officeQuality || 'full',
       onSelect: (id) => { state.ui.inspector = id; changed(); },
+      onCard: (id) => jumpRef.current?.(id),
     });
     officeRef.current = office;
+    boardSid.current = null;
     host.current.__office = office; // 점검·테스트용(getSnapshot)
     return () => { office.destroy(); officeRef.current = null; };
   }, [mod]);
@@ -119,6 +124,15 @@ function OfficePanel({ s, full, onCollapse }) {
     }
   }, [key, s.id, mod, meetKey, errandId]);
   useEffect(() => { officeRef.current?.setMeeting?.(meetView); }, [meetViewKey, mod]);
+  // 회의 결론 게시판: 이 세션의 최근 결론 3개(새것부터)
+  const cards = boardCards(s.messages);
+  const cardsKey = JSON.stringify(cards);
+  useEffect(() => {
+    const o = officeRef.current;
+    if (!o?.setBoard) return;
+    o.setBoard(cards, { quiet: boardSid.current !== s.id });
+    boardSid.current = s.id;
+  }, [cardsKey, s.id, mod]);
 
   useEffect(() => { officeRef.current?.setSkin(skinValue()); }, [state.settings.skin, state.skins.length]);
   useEffect(() => { officeRef.current?.setLanguage?.(uiLang()); }, [state.settings.lang]);
@@ -513,6 +527,8 @@ function Chat({ s, run }) {
     else if (el && stick.current) el.scrollTop = el.scrollHeight;
   });
   useEffect(() => { setShown(CHAT_WINDOW); setFind(null); jump.current = null; stick.current = true; const el = ref.current; if (el) el.scrollTop = el.scrollHeight; }, [s.id]);
+  // 사무실 게시판의 결론 카드를 누르면 그 메시지로 간다(위의 세션 바뀜 처리 뒤에 둬야 갓 그린 채팅에서도 가려던 곳이 지워지지 않는다)
+  useEffect(() => { const id = state.ui.jumpTo; if (!id) return; state.ui.jumpTo = null; goTo(id); });
   // Ctrl+F: 브라우저 찾기 대신 대화에서 찾기를 연다(브라우저 찾기는 화면에 그린 40개만 본다)
   useEffect(() => {
     const k = (e) => {
@@ -1008,9 +1024,11 @@ export function SessionView({ s }) {
   const run = latestRun(s);
   const vm = state.settings.viewMode || 'split';
   const setView = (v) => { state.settings.viewMode = v; changed(); import('../api.js').then(({ put }) => put('/api/settings', { viewMode: v })).catch(() => {}); };
+  // 게시판의 결론 카드: 채팅에서 그 메시지로. "사무실 크게"(채팅 없음)면 사무실+채팅으로 바꿔서 간다
+  const jumpTo = (id) => { state.ui.jumpTo = id; if ((state.settings.viewMode || 'split') === 'office') setView('split'); else changed(); };
   return html`<div class="session">
     <${TopBar} s=${s} />
-    ${vm !== 'chat' && html`<${OfficePanel} s=${s} full=${vm === 'office'} onCollapse=${() => setView('chat')} />`}
+    ${vm !== 'chat' && html`<${OfficePanel} s=${s} full=${vm === 'office'} onCollapse=${() => setView('chat')} onJump=${jumpTo} />`}
     ${vm === 'chat' && html`<button class="office-reopen" onClick=${() => setView('split')}><${Icon} name="down" size=${14} /> ${t('사무실 펼치기')}</button>`}
     ${vm !== 'office' && html`<${Chat} s=${s} run=${run} />`}
     ${vm === 'office' && html`<${Gate} s=${s} run=${run} />`}

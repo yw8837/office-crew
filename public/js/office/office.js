@@ -71,6 +71,8 @@ function buildImageScene(skin, n) {
   return {
     mode: 'image', width: W, height: H, defs: el('defs'), stat, labels: el('g'), items: [], desks, door: null,
     spots: { search: mk('search', 'front'), shelf: mk('shelf', 'front'), server: mk('server', 'back'), meeting: mk('meeting', 'back'), lounge: mk('lounge', 'front') },
+    // 회의 결론 게시판: 회의실 자리를 찍었으면 그 오른쪽에(그림 밖으로 나가지 않게), 안 찍었으면 없음
+    board: sp.meeting && sp.meeting.x != null ? [clamp(+sp.meeting.x + 170 * cs, 100 * cs, W - 100 * cs), +sp.meeting.y] : null,
     doorPos: door, charScale: cs, speed: 120 * cs, stride: 13 * cs,
     toScreen: (p, lift = 0) => [p[0], p[1] - lift * cs],
     depth: (p) => p[1] / 10,
@@ -89,6 +91,7 @@ function buildImageScene(skin, n) {
 export function createOffice(container, opts = {}) {
   if (!container) throw new Error('createOffice: container 가 필요해');
   const onSelect = typeof opts.onSelect === 'function' ? opts.onSelect : null;
+  const onCard = typeof opts.onCard === 'function' ? opts.onCard : null; // 게시판의 결론 카드를 눌렀을 때(메시지 id)
   const mq = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
   let reducedOpt = opts.reducedMotion;
   let reduced = !!(reducedOpt ?? (mq && mq.matches));
@@ -134,6 +137,7 @@ export function createOffice(container, opts = {}) {
   let raf = 0, lastT = 0, gen = 0, helperSeq = 0, destroyed = false, doorTimer = 0;
   const spotOcc = new Map();
   let meet = null, meetSig = 'null'; // 지금 회의(setMeeting): { phase, round, rounds, speakerId, opposerId } | null
+  let board = [], boardSig = '[]', boardEl = null, boardTitle = null, boardList = null, boardTimer = 0; // 회의 결론 게시판(setBoard)
   const talking = (ch) => isTalking(meet, ch.id, !!ch.st.meeting && !ch.helper);
 
   // ── 깊이 정렬 ──
@@ -886,6 +890,22 @@ export function createOffice(container, opts = {}) {
       n.textContent = scene.neon.text;
       ovl.append(n);
     }
+    // 회의 결론 게시판(모임 자리 옆). 씬에 자리가 없으면(회의실 자리를 안 찍은 커스텀 그림) 만들지 않는다
+    boardEl = null;
+    if (scene.board) {
+      boardEl = div('oc-mboard');
+      boardEl.setAttribute('role', 'group');
+      const inner = div('oc-mboard-in');
+      boardTitle = div('oc-mboard-t');
+      boardTitle.setAttribute('aria-hidden', 'true'); // 묶음 이름(aria-label)과 같은 글
+      boardList = div('oc-mboard-cards');
+      inner.append(boardTitle, boardList);
+      boardEl.append(inner);
+      boardEl.style.transform = `translate(${scene.board[0].toFixed(1)}px,${scene.board[1].toFixed(1)}px)`;
+      boardEl.addEventListener('dblclick', (e) => e.stopPropagation()); // 카드를 두 번 눌러도 화면 맞춤이 되지 않게
+      ovl.append(boardEl);
+    }
+    drawBoard(null);
     list.forEach((a, i) => {
       const ch = chars.get(a.id);
       ch.desk = scene.desks[i] || null;
@@ -971,6 +991,41 @@ export function createOffice(container, opts = {}) {
   function updateMeetLabel() {
     const txt = meet ? T('meet.progress', { r: meet.round, n: meet.rounds, phase: T('meet.phase.' + meet.phase) }) : '';
     for (const z of zoneEls) if (z.sub) { z.sub.textContent = txt; z.sub.hidden = !txt; }
+  }
+  /**
+   * 회의 결론 게시판: [{ id, text }](왼쪽부터, 최대 3장). 앞의 목록에 없던 카드는 한 번 눈에 띄게 붙는다.
+   * o.quiet 이면 새 카드 표시 없이(세션을 바꾸거나 처음 채울 때). 카드를 누르면 opts.onCard(id)
+   */
+  function setBoard(cards, o = {}) {
+    const next = (Array.isArray(cards) ? cards : []).filter((c) => c && c.id != null && c.text).slice(0, 3).map((c) => ({ id: String(c.id), text: String(c.text) }));
+    const sig = JSON.stringify(next);
+    if (sig === boardSig) return;
+    const prev = new Set(board.map((c) => c.id));
+    boardSig = sig;
+    board = next;
+    drawBoard(o && o.quiet ? null : new Set(next.filter((c) => !prev.has(c.id)).map((c) => c.id)));
+  }
+  function drawBoard(fresh) {
+    clearTimeout(boardTimer);
+    if (!boardEl) return;
+    boardEl.hidden = !board.length;
+    boardEl.setAttribute('aria-label', T('board.title'));
+    boardTitle.textContent = T('board.title');
+    boardList.replaceChildren(...board.map((c) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = fresh && fresh.has(c.id) ? 'oc-card new' : 'oc-card';
+      b.title = c.text;
+      b.setAttribute('aria-label', T('board.open', { text: c.text }));
+      const t = document.createElement('span');
+      t.className = 'oc-card-t';
+      t.textContent = c.text;
+      b.append(t);
+      b.addEventListener('click', (e) => { e.stopPropagation(); if (onCard) onCard(c.id); });
+      return b;
+    }));
+    // 새 카드 표시(테두리)는 잠깐만
+    if (fresh && fresh.size) boardTimer = setTimeout(() => { for (const b of boardList.children) b.classList.remove('new'); }, 4000);
   }
   function select(id) {
     const prev = selected;
@@ -1238,6 +1293,7 @@ export function createOffice(container, opts = {}) {
       if (ch.holdEl) ch.holdEl.firstChild.textContent = T('meet.away');
     }
     updateMeetLabel();
+    drawBoard(null);
     scheduleLayout();
   }
   /** 품질: full(기본) | lite(장식 반복 애니메이션 끔·장식 요소 축소, 걷기 유지) | static(애니메이션 0, 순간이동, 렌더 루프 없음) */
@@ -1257,6 +1313,7 @@ export function createOffice(container, opts = {}) {
     setAgents,
     setState,
     setMeeting,
+    setBoard,
     handoff,
     setSkin,
     select,
@@ -1294,6 +1351,7 @@ export function createOffice(container, opts = {}) {
       cancelAnimationFrame(layoutRaf);
       clearTimeout(wcTimer);
       clearTimeout(doorTimer);
+      clearTimeout(boardTimer);
       for (const ch of chars.values()) { stopWalk(ch, false); clearTimers(ch); clearTimeout(ch.flashTimer); }
       chars.clear();
       if (ro) ro.disconnect();

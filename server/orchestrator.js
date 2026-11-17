@@ -26,13 +26,16 @@ const localOnly = (m) => m.provider === 'local' || m.local === true;
 const MEET_CAP = 1000000; // 회의 사용량 상한 기본값(meetingSpend 기준)
 
 // 회의 단계 설정 정리: 참석자가 둘 이상일 때만 회의다. 바퀴 1~3(기본 2), 진행자는 참석자 중 한 명(기본 첫 번째),
-// 사용량 상한은 토큰(기본 1,000,000, 0 = 없음). 값이 없거나 숫자가 아니면 기본값을 쓴다
+// 사용량 상한은 토큰(기본 1,000,000, 0 = 없음). 값이 없거나 숫자가 아니면 기본값을 쓴다.
+// 반대편은 진행자가 아닌 참석자 한 명. 아니면 null(실행 때 자동으로 고른다)
 export function normMeeting(meeting, agentIds) {
   const ids = [...new Set((agentIds || []).map(String))];
   if (!meeting || ids.length < 2) return null;
   const m = typeof meeting === 'object' ? meeting : {};
   const num = (v, d, lo, hi) => { const n = v === null || v === undefined || v === '' ? NaN : Math.round(Number(v)); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
-  return { rounds: num(m.rounds, 2, 1, 3), chairId: ids.includes(String(m.chairId)) ? String(m.chairId) : ids[0], tokenCap: num(m.tokenCap, MEET_CAP, 0, 20000000) };
+  const chairId = ids.includes(String(m.chairId)) ? String(m.chairId) : ids[0];
+  const opposeId = ids.includes(String(m.opposeId)) && String(m.opposeId) !== chairId ? String(m.opposeId) : null;
+  return { rounds: num(m.rounds, 2, 1, 3), chairId, tokenCap: num(m.tokenCap, MEET_CAP, 0, 20000000), opposeId };
 }
 
 // 회의 사용량 세기: 새로 읽은 글(입력 + 캐시에 새로 쓴 것)과 쓴 글(출력)은 그대로, 캐시에서 다시 읽은 글은 10분의 1로 센다.

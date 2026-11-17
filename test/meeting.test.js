@@ -23,14 +23,18 @@ test('팀 저장: 회의는 둘 이상일 때만, 바퀴는 1~3, 진행자는 �
   const a = await agent('가람'), b = await agent('나래');
   const tm = await team('저장 확인', [
     { label: '혼자', agentIds: [a.id], meeting: { rounds: 2 } },
-    { label: '둘', agentIds: [a.id, b.id], meeting: { rounds: 9, chairId: 'nobody', tokenCap: -5 } },
+    { label: '둘', agentIds: [a.id, b.id], meeting: { rounds: 9, chairId: 'nobody', tokenCap: -5, opposeId: 'nobody' } },
     { label: '기본값', agentIds: [a.id, b.id], meeting: true },
     { label: '보통', agentIds: [a.id, b.id] },
+    { label: '진행자가 반대편', agentIds: [a.id, b.id], meeting: { chairId: b.id, opposeId: b.id } },
+    { label: '반대편 지정', agentIds: [a.id, b.id], meeting: { chairId: a.id, opposeId: b.id } },
   ]);
   assert.equal(tm.stages[0].meeting, null, '한 명이면 회의가 아니다');
-  assert.deepEqual(tm.stages[1].meeting, { rounds: 3, chairId: a.id, tokenCap: 0 });
-  assert.deepEqual(tm.stages[2].meeting, { rounds: 2, chairId: a.id, tokenCap: 1000000 });
+  assert.deepEqual(tm.stages[1].meeting, { rounds: 3, chairId: a.id, tokenCap: 0, opposeId: null }, '참석자가 아닌 반대편은 비운다');
+  assert.deepEqual(tm.stages[2].meeting, { rounds: 2, chairId: a.id, tokenCap: 1000000, opposeId: null }, '설정이 없던 회의는 반대편 자동');
   assert.equal(tm.stages[3].meeting, null);
+  assert.equal(tm.stages[4].meeting.opposeId, null, '진행자는 반대편이 못 된다');
+  assert.equal(tm.stages[5].meeting.opposeId, b.id, '참석자인 반대편은 그대로');
 });
 
 test('회의 2바퀴: 의견 3 → 검토 3 → 결론 1, 서로의 글은 2바퀴부터 보이고 다음 단계에는 결론만 넘어간다', async () => {
@@ -142,8 +146,12 @@ test('중지: 회의 중에 멈추면 결론을 쓰지 않고 끝난다', async 
 // ── 코드 검토에서 나온 경우들 ──
 
 test('설정 정리: 값이 없으면 기본값, 같은 사람 둘은 회의가 아니다(저장·플러그인·실행이 같은 규칙)', () => {
-  assert.deepEqual(normMeeting({ rounds: null, tokenCap: '' }, ['a', 'b']), { rounds: 2, chairId: 'a', tokenCap: 1000000 });
-  assert.deepEqual(normMeeting({ rounds: 2.6, tokenCap: 0, chairId: 'b' }, ['a', 'b']), { rounds: 3, chairId: 'b', tokenCap: 0 });
+  assert.deepEqual(normMeeting({ rounds: null, tokenCap: '' }, ['a', 'b']), { rounds: 2, chairId: 'a', tokenCap: 1000000, opposeId: null });
+  assert.deepEqual(normMeeting({ rounds: 2.6, tokenCap: 0, chairId: 'b' }, ['a', 'b']), { rounds: 3, chairId: 'b', tokenCap: 0, opposeId: null });
+  assert.equal(normMeeting({ chairId: 'b', opposeId: 'a' }, ['a', 'b']).opposeId, 'a');
+  assert.equal(normMeeting({ chairId: 'b', opposeId: 'b' }, ['a', 'b']).opposeId, null, '진행자는 반대편이 못 된다');
+  assert.equal(normMeeting({ opposeId: 'zzz' }, ['a', 'b']).opposeId, null, '참석자가 아니면 비운다');
+  assert.equal(normMeeting(true, ['a', 'b']).opposeId, null, '설정이 없던 옛 팀');
   assert.equal(normMeeting({ rounds: 2 }, ['a', 'a']), null);
   assert.equal(normMeeting(null, ['a', 'b']), null);
 });

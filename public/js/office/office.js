@@ -264,7 +264,8 @@ export function createOffice(container, opts = {}) {
     if (ch.id !== selected && !talk && s.state !== 'waiting' && s.state !== 'error') return null;
     switch (s.state) {
       case 'thinking': return ['think', '', ''];
-      case 'typing': return ['say', '', sayText(t, 40) || '…'];
+      // 고르지 않았는데 회의 차례라서 뜬 말풍선은 짧게(옆 사람 이름표를 가리지 않게)
+      case 'typing': return ['say', '', sayText(t, ch.id === selected ? 40 : 22) || '…'];
       case 'tool': return ['tool', toolIcon(s.tool), head(s.tool || T('bub.tool'), 18)];
       case 'searching': return ['tool', '🔎', tail(t, 22) || T('bub.searching')];
       case 'reading': return ['tool', '📖', tail(t, 22) || T('bub.reading')];

@@ -1,4 +1,5 @@
-// 회의 단계: 각자 의견(서로 못 봄) → 서로 검토 → 진행자 결론. 바퀴·사용량 상한, 회의 끝내기, 다음 단계에는 결론만(가짜 CLI, 실제 AI 사용량 0)
+// 회의 단계: 각자 의견(서로 못 봄) → 한 명씩 차례 발언(반대편은 맨 뒤) → 바퀴마다 진행자 판정 → 진행자 결론.
+// 바퀴·사용량 상한, 회의 끝내기, 다음 단계에는 결론만(가짜 CLI, 실제 AI 사용량 0)
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { startTestApp } from './helpers.js';
@@ -10,6 +11,8 @@ before(async () => { t = await startTestApp(); });
 after(async () => { try { await t.close(); } catch { /* 윈도우 파일 잠금 무시 */ } });
 
 const agent = async (name, role = '조사') => (await t.api('POST', '/api/agents', { name, role, provider: 'codex', model: 'gpt-6.1-sol', permission: 'plan', routing: 'manual' })).json;
+// 가짜 claude 는 판정 차례에 판정 블록을 낸다(AGREEFAST → 합의, BADVERDICT → 틀린 형식, 그 밖 → 계속)
+const cagent = async (name, role = '분석') => (await t.api('POST', '/api/agents', { name, role, provider: 'claude', model: 'sonnet', permission: 'plan', routing: 'manual' })).json;
 const team = async (name, stages) => (await t.api('POST', '/api/teams', { name, stages })).json;
 const session = async (teamId) => (await t.api('POST', '/api/sessions', { teamId })).json;
 const runs = (sid) => t.app.store.getSession(sid).runs;
@@ -37,7 +40,7 @@ test('팀 저장: 회의는 둘 이상일 때만, 바퀴는 1~3, 진행자는 �
   assert.equal(tm.stages[5].meeting.opposeId, b.id, '참석자인 반대편은 그대로');
 });
 
-test('회의 2바퀴: 의견 3 → 검토 3 → 결론 1, 서로의 글은 2바퀴부터 보이고 다음 단계에는 결론만 넘어간다', async () => {
+test('회의 2바퀴: 의견 3 → 차례 2 → 결론 1, 차례 발언은 앞사람 말을 보고 다음 단계에는 결론만 넘어간다', async () => {
   const a = await agent('하늘'), b = await agent('바다'), c = await agent('구름'), d = await agent('마루', '정리');
   const tm = await team('회의 팀', [
     { label: '방향 회의', agentIds: [a.id, b.id, c.id], meeting: { rounds: 2, chairId: b.id } },
@@ -52,8 +55,12 @@ test('회의 2바퀴: 의견 3 → 검토 3 → 결론 1, 서로의 글은 2바�
   assert.equal(run.stages[0].meetingNow, null, '끝나면 진행 표시를 지운다');
 
   const mm = meetMsgs(s.id);
-  assert.deepEqual(mm.map((m) => `${m.meeting.phase}${m.meeting.round || ''}`).sort(), ['conclude', 'opinion1', 'opinion1', 'opinion1', 'review2', 'review2', 'review2']);
-  assert.equal(mm.filter((m) => m.meeting.phase === 'conclude')[0].agentId, b.id, '결론은 진행자가 쓴다');
+  assert.deepEqual(mm.map((m) => m.meeting.phase), ['opinion', 'opinion', 'opinion', 'turn', 'turn', 'conclude'], '2바퀴가 마지막이라 판정은 없다');
+  const turns = mm.filter((m) => m.meeting.phase === 'turn');
+  assert.deepEqual(turns.map((m) => m.agentId), [a.id, c.id], '진행자는 차례 발언을 하지 않고, 반대편(다른 AI가 없으면 마지막 참석자)이 맨 뒤');
+  assert.equal(turns[1].meeting.opposer, true, '마지막 차례가 반대편');
+  assert.ok(!turns[0].meeting.opposer);
+  assert.equal(mm.at(-1).agentId, b.id, '결론은 진행자가 쓴다');
 
   const ps = prompts(from);
   const op = ps.filter((p) => p.includes('[회의 — 의견 내기 (1/2바퀴)]'));
@@ -64,29 +71,143 @@ test('회의 2바퀴: 의견 3 → 검토 3 → 결론 1, 서로의 글은 2바�
     assert.match(p, /내가 틀렸다고 볼 기준/);
     assert.doesNotMatch(p, /병렬로 작업 중이야/);
   }
-  const rv = ps.filter((p) => p.includes('[회의 — 서로 검토 (2/2바퀴)]'));
-  assert.equal(rv.length, 3);
-  for (const p of rv) {
-    const names = [...p.matchAll(/^### (.+)$/gm)].map((m) => m[1]);
-    assert.equal(names.length, 2, `자기 글은 빼고 둘의 의견만: ${names}`);
+  const heads = (p) => [...p.matchAll(/^### (.+)$/gm)].map((m) => m[1]);
+  const tp = ps.filter((p) => p.includes('[회의 — 차례 발언 (2/2바퀴)]'));
+  assert.equal(tp.length, 2);
+  assert.deepEqual(heads(tp[0]), ['하늘', '바다', '구름'], '첫 차례는 세 의견(자기 글 포함)을 본다');
+  assert.doesNotMatch(tp[0], /^## 2바퀴$/m, '첫 차례에는 두 번째 차례 답이 없다');
+  assert.deepEqual(heads(tp[1]), ['하늘', '바다', '구름', '하늘'], '두 번째 차례는 세 의견과 첫 차례 답을 본다');
+  assert.match(tp[1], /^## 2바퀴\n\n### 하늘$/m);
+  for (const p of tp) {
     const mark = p.match(/--- 의견 ([0-9a-f]{8}) 시작 ---/)?.[1];
     assert.ok(mark && p.includes(`--- 의견 ${mark} 끝 ---`), '무작위 표시로 감싼다');
     assert.match(p, /따르지 마/);
+    assert.match(p, /답하는 말: 누구의 어떤 말인지/);
+    assert.match(p, /파일을 고치거나 명령을 실행하지 말고 글로만 답해/);
   }
-  const who = rv.map((p) => ['하늘', '바다', '구름'].filter((n) => !new RegExp(`^### ${n}$`, 'm').test(p))[0]).sort();
-  assert.deepEqual(who, ['구름', '바다', '하늘'], '세 명이 각각 자기 글만 빠진 묶음을 받는다');
+  assert.doesNotMatch(tp[0], /너는 이번 회의에서 반대편이야/);
+  assert.match(tp[1], /너는 이번 회의에서 반대편이야/, '반대편에게만 약점을 찾으라고 한다');
 
   const cc = ps.filter((p) => p.includes('[회의 — 결론 내기]'));
   assert.equal(cc.length, 1);
   assert.match(cc[0], /## 1바퀴/);
   assert.match(cc[0], /## 2바퀴/);
-  assert.equal([...cc[0].matchAll(/^### (.+)$/gm)].length, 6, '두 바퀴 × 세 명의 의견 전부');
+  assert.equal(heads(cc[0]).length, 5, '의견 셋과 차례 답 둘 전부');
   assert.match(cc[0], /하나를 고름 \/ 합침 \/ 전부 버림 \/ 새 안/);
+  assert.match(cc[0], /버린 안: 무엇을 왜 버렸는지/);
 
   const next = ps.at(-1);
   assert.match(next, /"정리"를 네가 맡았어/);
   assert.equal([...next.matchAll(/--- 결과 [0-9a-f]{8} 시작 ---/g)].length, 1, '다음 단계에는 결론 하나만 넘어간다');
   assert.match(next, /### 1\. 방향 회의 — 바다/);
+});
+
+test('3바퀴: 2바퀴 뒤 진행자가 판정하고, 합의면 3바퀴를 건너뛴다', async () => {
+  const a = await agent('여울'), b = await agent('시내'), ch = await cagent('호수');
+  const tm = await team('판정 회의', [{ label: '회의', agentIds: [a.id, b.id, ch.id], meeting: { rounds: 3, chairId: ch.id } }]);
+  const s = await session(tm.id);
+  const from = t.fakeLog().length;
+  await say(s.id, 'AGREEFAST 방향을 정하자');
+  assert.equal(runs(s.id).at(-1).status, 'done');
+  const mm = meetMsgs(s.id);
+  assert.deepEqual(mm.map((m) => m.meeting.phase), ['opinion', 'opinion', 'opinion', 'turn', 'turn', 'judge', 'conclude']);
+  const j = mm.find((m) => m.meeting.phase === 'judge');
+  assert.equal(j.agentId, ch.id, '판정은 진행자가 한다');
+  assert.equal(j.meeting.round, 2);
+  assert.deepEqual(j.verdict, { verdict: 'agree', reason: '가짜 판정' });
+  assert.doesNotMatch(j.text, /oc-verdict/, '읽은 판정 블록은 글에서 지운다');
+  assert.match(j.text, /판정할게/);
+  const jp = t.fakeLog().slice(from).filter((l) => l.cli === 'claude' && l.text?.includes('[회의 — 판정 (2/3바퀴)]'));
+  assert.equal(jp.length, 1);
+  assert.match(jp[0].text, /반대편을 뺀 참석자들의 "입장"이 같은 안을 가리키면 합의야/);
+  assert.match(jp[0].text, /```oc-verdict\n/);
+  assert.match(jp[0].text, /--- 의견 [0-9a-f]{8} 시작 ---/, '판정에 들어가는 글도 표시로 감싼다');
+});
+
+test('판정이 계속이면 다음 바퀴를 돈다. 판정 형식이 틀리면 계속으로 보고 알린다', async () => {
+  const a = await agent('들녘'), b = await agent('언덕'), ch = await cagent('고개');
+  const tm = await team('계속 회의', [{ label: '회의', agentIds: [a.id, b.id, ch.id], meeting: { rounds: 3, chairId: ch.id } }]);
+  const shape = ['opinion', 'opinion', 'opinion', 'turn', 'turn', 'judge', 'turn', 'turn', 'conclude'];
+  let s = await session(tm.id);
+  await say(s.id, '계속 의논하자');
+  let mm = meetMsgs(s.id);
+  assert.deepEqual(mm.map((m) => m.meeting.phase), shape);
+  assert.deepEqual(mm.filter((m) => m.meeting.phase === 'turn').map((m) => m.meeting.round), [2, 2, 3, 3]);
+  let j = mm.find((m) => m.meeting.phase === 'judge');
+  assert.equal(j.verdict?.verdict, 'continue');
+  assert.doesNotMatch(j.text, /oc-verdict/);
+  assert.equal(runs(s.id).at(-1).status, 'done');
+
+  s = await session(tm.id);
+  await say(s.id, 'BADVERDICT 계속 의논하자');
+  mm = meetMsgs(s.id);
+  assert.deepEqual(mm.map((m) => m.meeting.phase), shape, '형식이 틀린 판정은 계속으로 본다');
+  j = mm.find((m) => m.meeting.phase === 'judge');
+  assert.equal(j.verdict, undefined);
+  assert.ok(j.blocks.some((x) => x.kind === 'notice' && x.text === '판정 형식이 맞지 않아서 "계속"으로 봤어.'), '알림을 붙인다');
+  assert.match(j.text, /```oc-verdict/, '못 읽은 블록은 글로 남긴다');
+});
+
+test('참석자가 둘이면 진행자가 아닌 한 명이 반대편으로 차례 발언을 한다', async () => {
+  const a = await agent('솔'), b = await agent('잣');
+  const tm = await team('둘 회의', [{ label: '회의', agentIds: [a.id, b.id], meeting: { rounds: 2 } }]);
+  const s = await session(tm.id);
+  await say(s.id, '둘이서 정하자');
+  const mm = meetMsgs(s.id);
+  assert.deepEqual(mm.map((m) => m.meeting.phase), ['opinion', 'opinion', 'turn', 'conclude']);
+  const turn = mm.find((m) => m.meeting.phase === 'turn');
+  assert.equal(turn.agentId, b.id, '진행자(기본 첫 참석자)가 아닌 한 명');
+  assert.equal(turn.meeting.opposer, true);
+
+  // 3바퀴: 한 명의 독백 뒤에도 판정이 돌고, 블록 없는 판정은 알림 없이 계속으로 본다
+  const tm3 = await team('둘 회의 3바퀴', [{ label: '회의', agentIds: [a.id, b.id], meeting: { rounds: 3 } }]);
+  const s3 = await session(tm3.id);
+  await say(s3.id, '둘이서 더 정하자');
+  const m3 = meetMsgs(s3.id);
+  assert.deepEqual(m3.map((m) => m.meeting.phase), ['opinion', 'opinion', 'turn', 'judge', 'turn', 'conclude']);
+  const j = m3.find((m) => m.meeting.phase === 'judge');
+  assert.equal(j.agentId, a.id);
+  assert.equal(j.verdict, undefined);
+  assert.ok(!j.blocks.some((x) => x.kind === 'notice' && /판정 형식/.test(x.text)), '블록이 없을 때는 알리지 않는다');
+  assert.equal(runs(s3.id).at(-1).status, 'done');
+});
+
+test('차례 중 오류·건너뛰기: 그 사람 차례만 빠지고 다음 사람이 말한다. 아무도 못 말한 바퀴는 판정 없이 결론으로 간다', async () => {
+  const ch = await agent('들보'), ok = await agent('기둥'), bad = await cagent('서까래'), bad2 = await cagent('추녀');
+  // 반대편을 정해 둬서 차례가 서까래(실패) → 기둥 순서가 되게 한다
+  const tm = await team('실패 섞인 회의', [{ label: '회의', agentIds: [ch.id, bad.id, ok.id], meeting: { rounds: 2, chairId: ch.id, opposeId: ok.id } }]);
+  let s = await session(tm.id);
+  await say(s.id, 'FAILME 정하자');
+  let mm = meetMsgs(s.id);
+  assert.deepEqual(mm.map((m) => m.meeting.phase), ['opinion', 'opinion', 'opinion', 'turn', 'turn', 'conclude']);
+  assert.deepEqual(mm.filter((m) => m.meeting.phase === 'turn').map((m) => [m.agentId, m.status]), [[bad.id, 'error'], [ok.id, 'done']]);
+  assert.ok(t.app.store.getSession(s.id).messages.some((m) => m.role === 'system' && m.text.includes('회의 2바퀴에서 서까래의 답을 받지 못했어')));
+  assert.equal(runs(s.id).at(-1).status, 'done');
+
+  // 차례 발언자가 모두 실패한 바퀴: 판정 없이 결론(3바퀴여도 다음 바퀴를 돌지 않는다)
+  const all = await team('모두 실패하는 차례', [{ label: '회의', agentIds: [ch.id, bad.id, bad2.id], meeting: { rounds: 3, chairId: ch.id } }]);
+  s = await session(all.id);
+  await say(s.id, 'FAILME 정하자');
+  mm = meetMsgs(s.id);
+  assert.deepEqual(mm.map((m) => m.meeting.phase), ['opinion', 'opinion', 'opinion', 'turn', 'turn', 'conclude']);
+  assert.equal(mm.at(-1).status, 'done');
+  assert.equal(runs(s.id).at(-1).status, 'done');
+
+  // 건너뛰기: 첫 차례를 건너뛰면 다음 사람이 이어 말하고, 건너뛴 차례의 글은 다음 사람에게 가지 않는다
+  const a = await agent('처마'), b = await agent('마당'), c = await agent('대문');
+  const three = await team('건너뛸 회의', [{ label: '회의', agentIds: [a.id, b.id, c.id], meeting: { rounds: 2, chairId: a.id } }]);
+  s = await session(three.id);
+  const from = t.fakeLog().length;
+  await start(s.id, 'SLOW 하나씩 정하자');
+  await t.waitFor(() => runs(s.id).at(-1).stages[0].meetingNow?.speakerId === b.id, 15000, '첫 차례 시작');
+  await t.waitFor(async () => (await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'skip', agentId: b.id })).json?.ok, 15000, '첫 차례 건너뛰기');
+  await ended(s.id);
+  mm = meetMsgs(s.id);
+  assert.deepEqual(mm.map((m) => m.meeting.phase), ['opinion', 'opinion', 'opinion', 'turn', 'turn', 'conclude']);
+  assert.deepEqual(mm.filter((m) => m.meeting.phase === 'turn').map((m) => [m.agentId, m.status]), [[b.id, 'stopped'], [c.id, 'done']]);
+  const second = prompts(from).filter((p) => p.includes('[회의 — 차례 발언 (2/2바퀴)]')).at(-1);
+  assert.doesNotMatch(second, /^## 2바퀴$/m, '건너뛴 차례의 글은 넘기지 않는다');
+  assert.equal(runs(s.id).at(-1).status, 'done');
 });
 
 test('사용량 상한: 닿으면 남은 바퀴를 건너뛰고 결론으로 간다', async () => {
@@ -117,8 +238,8 @@ test('회의 끝내기: 쓰던 의견을 멈추고 그때까지 나온 것으로
   assert.ok(!mm.some((m) => m.meeting.round === 3), '3바퀴는 돌지 않는다');
   assert.equal(mm.filter((m) => m.meeting.phase === 'opinion').length, 2);
   const cut = mm.filter((m) => m.meeting.round === 2);
-  assert.equal(cut.length, 2);
-  assert.ok(cut.every((m) => m.status === 'stopped'), '쓰던 2바퀴 의견은 실제로 멈춘다');
+  assert.deepEqual(cut.map((m) => m.meeting.phase), ['turn'], '둘이면 2바퀴 차례 발언은 한 명');
+  assert.ok(cut.every((m) => m.status === 'stopped'), '쓰던 차례 발언은 실제로 멈춘다');
 
   // 회의가 아닌 실행에서는 거절한다
   const solo = await team('혼자 팀', [{ label: '일', agentIds: [a.id] }]);
@@ -166,7 +287,9 @@ test('앞 단계 결과: 자기 대화를 이어 가는 AI는 2바퀴부터 다�
   await say(s.id, '조사한 걸로 방향을 정하자');
   let ps = prompts(from);
   assert.ok(ps.filter((p) => p.includes('의견 내기 (1/2바퀴)')).every(hasPrev), '1바퀴에는 앞 단계 결과가 들어간다');
-  assert.ok(ps.filter((p) => p.includes('서로 검토 (2/2바퀴)')).every((p) => !hasPrev(p)), '이어 가는 대화에는 다시 넣지 않는다');
+  const turnPs = ps.filter((p) => p.includes('차례 발언 (2/2바퀴)'));
+  assert.equal(turnPs.length, 1);
+  assert.ok(turnPs.every((p) => !hasPrev(p)), '이어 가는 대화에는 다시 넣지 않는다');
   assert.ok(!hasPrev(ps.find((p) => p.includes('[회의 — 결론 내기]'))));
 
   const caps = PROVIDERS.codex.caps;
@@ -176,8 +299,8 @@ test('앞 단계 결과: 자기 대화를 이어 가는 AI는 2바퀴부터 다�
     from = t.fakeLog().length;
     await say(s.id, '기억 못 하는 AI로 다시 정하자');
     ps = prompts(from);
-    const later = ps.filter((p) => p.includes('서로 검토 (2/2바퀴)') || p.includes('[회의 — 결론 내기]'));
-    assert.equal(later.length, 3);
+    const later = ps.filter((p) => p.includes('차례 발언 (2/2바퀴)') || p.includes('[회의 — 결론 내기]'));
+    assert.equal(later.length, 2);
     assert.ok(later.every(hasPrev), '기억 못 하는 AI에게는 2바퀴와 결론에도 앞 단계 결과를 다시 준다');
   } finally { PROVIDERS.codex.caps = caps; }
 });
@@ -209,22 +332,22 @@ test('수정 요청으로 회의를 다시 돌 때: 상한은 이번 시도에�
   assert.ok(one > u.input + u.output, '캐시로 다시 읽은 양도 일부 센다');
   assert.ok(one > 0, '가짜 CLI가 사용량을 알려 준다');
 
-  // 상한 = 3건: 1바퀴(2건) 뒤에는 통과, 2바퀴(4건) 뒤에는 닿아서 3바퀴를 건너뛴다 → 의견 2 + 검토 2 + 결론 1
+  // 상한 = 3건: 1바퀴(2건) 뒤에는 통과해 차례 발언 1건, 그 뒤(3건)에는 닿아서 판정과 3바퀴를 건너뛴다 → 의견 2 + 차례 1 + 결론 1
   const tm = await team('다시 도는 회의', [{ label: '회의', agentIds: [a.id, b.id], approve: true, meeting: { rounds: 3, tokenCap: one * 3 } }]);
   const s = await session(tm.id);
   await say(s.id, '방향을 정하자');
   const shape = () => meetMsgs(s.id).map((m) => `${m.meeting.phase}${m.meeting.round || ''}`);
-  const first = ['opinion1', 'opinion1', 'review2', 'review2', 'conclude'];
+  const first = ['opinion1', 'opinion1', 'turn2', 'conclude'];
   assert.deepEqual(shape(), first);
   assert.equal(runs(s.id).at(-1).hold?.reason, 'approve');
 
   const from = t.fakeLog().length;
   await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'reject', text: '결론에 비용 비교표를 넣어' });
-  await t.waitFor(() => meetMsgs(s.id).length >= 10 && runs(s.id).at(-1).hold?.reason === 'approve', 30000, '두 번째 시도 끝');
+  await t.waitFor(() => meetMsgs(s.id).length >= 8 && runs(s.id).at(-1).hold?.reason === 'approve', 30000, '두 번째 시도 끝');
   assert.deepEqual(shape(), [...first, ...first], '두 번째 시도도 첫 시도와 같은 만큼 돈다(앞 시도에서 쓴 양을 세지 않는다)');
   const ps = prompts(from);
-  assert.equal(ps.length, 5);
-  assert.ok(ps.every((p) => p.includes('결론에 비용 비교표를 넣어')), '의견·검토·결론 차례 모두에 수정 요청이 들어간다');
+  assert.equal(ps.length, 4);
+  assert.ok(ps.every((p) => p.includes('결론에 비용 비교표를 넣어')), '의견·차례·결론 모두에 수정 요청이 들어간다');
   await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'approve' });
   await ended(s.id);
 });
@@ -248,19 +371,31 @@ test('데모(가짜 AI) 팀으로 회의하면 차례에 맞는 짧은 답이 �
     const s = await session(tm.id);
     await say(s.id, '새 기능 이름을 정하자');
     const mm = meetMsgs(s.id);
-    assert.equal(mm.length, 7);
+    assert.deepEqual(mm.map((m) => m.meeting.phase), ['opinion', 'opinion', 'opinion', 'turn', 'turn', 'conclude']);
     const of = (phase) => mm.filter((m) => m.meeting.phase === phase);
     for (const m of of('opinion')) { assert.match(m.text, /\*\*주장\*\*/); assert.match(m.text, /\*\*내가 틀렸다고 볼 기준\*\*/); assert.doesNotMatch(m.text, /조사 결과|빌드 결과/); }
     assert.equal(new Set(of('opinion').map((m) => m.text)).size, 3, '역할마다 다른 의견');
-    for (const m of of('review')) assert.match(m.text, /\*\*가장 약한 가정\*\*/);
-    assert.equal(new Set(of('review').map((m) => m.text)).size, 3, '검토도 역할마다 다르다');
+    for (const m of of('turn')) { assert.match(m.text, /\*\*답하는 말\*\*/); assert.match(m.text, /\*\*입장\*\*/); }
+    assert.equal(new Set(of('turn').map((m) => m.text)).size, 2, '차례 발언도 역할마다 다르다');
     assert.match(of('conclude')[0].text, /^## 회의 결론/);
     assert.match(of('conclude')[0].text, /\*\*남은 이견\*\*/);
+    assert.match(of('conclude')[0].text, /\*\*버린 안\*\*/);
     assert.ok(mm.every((m) => !m.blocks.some((x) => x.kind === 'tool')), '회의 중에는 도구를 쓰지 않는다');
     // 회의가 아닌 단계는 예전처럼 도구를 쓰고 역할에 맞는 글을 낸다
     const after = t.app.store.getSession(s.id).messages.filter((m) => m.runId === runs(s.id).at(-1).id && !m.meeting && m.role === 'agent');
     assert.equal(after.length, 1);
     assert.match(after[0].text, /빌드 결과/);
     assert.ok(after[0].blocks.some((x) => x.kind === 'tool'));
+
+    // 3바퀴: 데모 진행자는 2바퀴 뒤 판정에서 바로 합의한다
+    const tm3 = await team('데모 판정 팀', [{ label: '회의', agentIds: [a.id, b.id, c.id], meeting: { rounds: 3, chairId: b.id } }]);
+    const s3 = await session(tm3.id);
+    await say(s3.id, '새 기능 이름을 정하자');
+    const m3 = meetMsgs(s3.id);
+    assert.deepEqual(m3.map((m) => m.meeting.phase), ['opinion', 'opinion', 'opinion', 'turn', 'turn', 'judge', 'conclude']);
+    const j = m3.find((m) => m.meeting.phase === 'judge');
+    assert.equal(j.verdict?.verdict, 'agree');
+    assert.doesNotMatch(j.text, /oc-verdict/);
+    assert.ok(j.text.trim(), '판정 이유 한 문장은 남는다');
   } finally { t.app.store.settings.mockSpeed = speed; }
 });

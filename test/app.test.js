@@ -215,6 +215,15 @@ test('스킬·커넥터·플러그인 내보내기/가져오기', async () => {
   assert.equal(after2.agents.length, before.agents.length);
   const bad = await t.api('POST', '/api/plugins/import', { hello: 1 });
   assert.equal(bad.status, 400);
+  // 회의 단계: 진행자와 반대편 모두 새 에이전트 id로 바뀐다
+  const b = (await t.api('POST', '/api/agents', { name: '반대러', role: '분석', provider: 'claude', model: 'opus' })).json;
+  const meetTeam = (await t.api('POST', '/api/teams', { name: '회의 팀', stages: [{ label: '회의', agentIds: [a.id, b.id], meeting: { rounds: 2, chairId: a.id, opposeId: b.id } }] })).json;
+  const p2 = (await t.api('POST', '/api/plugins/import', (await t.api('POST', '/api/plugins/export', { name: '회의 묶음', teamIds: [meetTeam.id] })).json)).json;
+  const st = (await t.api('GET', '/api/bootstrap')).json.teams.find((x) => x.pluginId === p2.id).stages[0];
+  assert.equal(st.meeting.chairId, st.agentIds[0], '진행자는 새 id');
+  assert.equal(st.meeting.opposeId, st.agentIds[1], '반대편도 새 id');
+  assert.ok(![a.id, b.id].includes(st.meeting.opposeId));
+  await t.api('DELETE', `/api/plugins/${p2.id}`);
 });
 
 test('설정: API 키는 가려서 내보내고, 가린 값으로 저장하면 원래 키 유지', async () => {

@@ -45,13 +45,15 @@ async function pump() {
     out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: `tu${turn}`, content: '검색 결과' }] } });
     out({ type: 'stream_event', event: { type: 'message_start' } });
   }
+  // 신호어는 이번 요청 부분에서만 본다([이전 대화]에 남은 옛 신호어는 무시)
+  const req = text.includes('[사용자 요청]') ? text.slice(text.lastIndexOf('[사용자 요청]')) : text;
   // EMPTYANSWER: 도구만 쓰고 글 없이 끝남(실측#1 흉내). 재요청을 받으면 그때 답한다
   // 스킬 설명 한글화 요청([{"i":0,"d":...}] 목록)이면 ```json 블록으로 번역을 돌려준다
   const koReq = text.match(/\[\{"i":0,"d":[\s\S]*\}\]/);
   const koItems = koReq ? (() => { try { return JSON.parse(koReq[0]); } catch { return null; } })() : null;
   const chunks = koItems ? ['```json\n', JSON.stringify(Object.fromEntries(koItems.map((x) => [String(x.i), `가짜 한글 설명 ${x.i}`]))), '\n```']
     // 회의 판정 차례: 판정 블록으로 답한다. AGREEFAST 는 합의, BADVERDICT 는 틀린 형식, 그 밖은 계속
-    : text.includes('[회의 — 판정') ? ['판정할게.\n\n', text.includes('BADVERDICT') ? '```oc-verdict\n{"verdict":"글쎄"}\n```' : '```oc-verdict\n{"verdict":"' + (text.includes('AGREEFAST') ? 'agree' : 'continue') + '","reason":"가짜 판정"}\n```']
+    : text.includes('[회의 — 판정') ? ['판정할게.\n\n', req.includes('BADVERDICT') ? '```oc-verdict\n{"verdict":"글쎄"}\n```' : '```oc-verdict\n{"verdict":"' + (req.includes('AGREEFAST') ? 'agree' : 'continue') + '","reason":"가짜 판정"}\n```']
     // ASKME: 사용자에게 선택지를 묻고 멈춘다. 답을 받으면 이어서 쓴다. ASKMORE 는 답을 받아도 계속 묻고, ASKBAD 는 형식을 틀린다
     : text.includes('[사용자 답변]') && !text.includes('ASKMORE') ? ['답 받았어. ', '이어서 진행했어']
     : /ASKME|ASKMORE/.test(text) ? ['먼저 확인할게.\n\n', '```oc-ask\n{"questions":[{"header":"범위","question":"' + (text.includes('ASKMORE') ? 'ASKMORE ' : '') + '어디까지 할까?","options":[{"label":"전부 (추천)","description":"처음부터 끝까지"},{"label":"일부만","description":"앞부분만"}],"multi":false},{"question":"무엇을 넣을까?","options":["표","그림","요약"],"multi":true}]}\n```']
@@ -61,8 +63,6 @@ async function pump() {
     out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: ch } } });
     await sleep(20);
   }
-  // 신호어는 이번 요청 부분에서만 본다([이전 대화]에 남은 옛 신호어는 무시)
-  const req = text.includes('[사용자 요청]') ? text.slice(text.lastIndexOf('[사용자 요청]')) : text;
   // READTALK: 건네받은 대화 전체 파일을 Read 도구로 여는 흉내
   const talkFile = text.match(/^.*conversation\.md$/m)?.[0];
   if (req.includes('READTALK') && talkFile) {

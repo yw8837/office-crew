@@ -11,7 +11,7 @@ import { Cooldown, isQuotaError, nearLimit, avoidUntil, resetTime, resetFromText
 import { nextMidnight, lowerEffort } from './budget.js';
 import { tr } from './i18n.js';
 import { ASK_MAX, parseAsk, cleanAnswers, answered, answerPrompt, answerRecord, askNote, stripAsks } from './ask.js';
-import { pickOpposer, turnOrder, parseVerdict, VERDICT_BLOCK } from './meeting.js';
+import { pickOpposer, turnOrder, parseVerdict, verdictBlock } from './meeting.js';
 import { writeConversation, readImported, saveImported, pickEarlier, toolNames, handoffRequest, NOTE_MAX } from './handoff.js';
 import { readTranscript } from './importer.js';
 
@@ -316,7 +316,7 @@ export class Orchestrator {
   }
 
   // ── 회의 단계 ──
-  // 1바퀴: 서로의 글을 보지 않고 각자 의견(동시에). 2바퀴부터: 진행자를 뺀 참석자가 한 명씩 차례로, 지금까지 나온 말을 다 보고 답한다(반대편은 맨 뒤).
+  // 1바퀴: 서로의 글을 보지 않고 각자 의견(동시에). 2바퀴부터: 진행자를 뺀 참석자가 한 명씩 차례로, 지금까지 나온 말을 다 보고 답한다(반대편이 맨 앞).
   // 차례 바퀴가 끝날 때마다(마지막 바퀴 빼고) 진행자가 합의인지 판정하고, 합의면 남은 바퀴를 건너뛴다. 마지막: 진행자가 결론.
   // 바퀴 수와 사용량 상한을 넘지 않고, 사용자가 '회의 끝내기'를 누르면 그때까지 나온 말로 결론을 낸다.
   // 다음 단계에는 결론만 넘어간다(오간 말 전체를 다시 넘기지 않는다).
@@ -451,20 +451,23 @@ export class Orchestrator {
         tr('앞에 나온 말 중 하나를 골라 답해. 300자 안팎으로, 아래 형식에 맞춰.'),
         `- ${tr('답하는 말: 누구의 어떤 말인지')}\n- ${tr('내 말: 동의하면 무엇을 더할지, 반대하면 왜인지')}\n- ${tr('입장: 지금 미는 안 한 줄(바꿨으면 무엇을 보고 바꿨는지도)')}`,
         meet.opposer ? tr('너는 이번 회의에서 반대편이야. 지금 가장 힘을 받는 안의 약점, 빠진 것, 틀릴 조건을 찾아서 말해. 근거 없이 꾸며 내지는 마. 반대할 게 정말 없으면 무엇을 확인했는지 적어.') : '',
+        !meet.opposer && meet.opposerId && meet.round >= 2 ? tr('반대편이 짚은 약점이 있으면 그것부터 답해.') : '',
         noEdit,
       ].filter(Boolean).join('\n');
     }
     if (meet.phase === 'judge') {
       return [
         tr('[회의 — 판정 ({r}/{n}바퀴)]', { r: meet.round, n: meet.rounds }), head, who, guard, talk,
-        tr('너는 이 회의의 진행자야. 지금 결론을 낼 수 있는지 판정해. 반대편을 뺀 참석자들의 "입장"이 같은 안을 가리키면 합의야. 반대편의 지적에 답이 안 된 채로 남은 게 있으면 합의가 아니야.'),
+        tr('너는 이 회의의 진행자야. 지금 결론을 낼 수 있는지 판정해. 반대편을 뺀 참석자들의 "입장"이 같은 안을 가리키고, 반대편의 지적 중에 결론을 바꿀 만한 것이 답 없이 남아 있지 않으면 합의야.'),
         noEdit,
         tr('한두 문장으로 이유를 쓰고, 답 맨 끝에 아래 블록 하나만 써. 블록 뒤에는 아무것도 쓰지 마.'),
-        VERDICT_BLOCK,
+        verdictBlock(),
       ].filter(Boolean).join('\n');
     }
+    // 결론에는 반대편이 이번 회의에서 차례 발언을 한 번이라도 했을 때만 이름을 적는다(1바퀴 회의·차례 전에 끝난 회의에는 반대편 말이 없다)
+    const opposerSpoke = meet.said.some((x) => x.phase === 'turn' && x.agent?.id === meet.opposerId);
     return [
-      tr('[회의 — 결론 내기]'), head, who,
+      tr('[회의 — 결론 내기]'), head, opposerSpoke ? who : '',
       tr('너는 이 회의의 진행자야. 참석자들이 낸 의견 전체를 읽고 결론을 내.'), guard,
       talk,
       tr('아래 형식으로 써. 의견이 갈리면 억지로 합치지 말고 갈린 채로 적어.'),

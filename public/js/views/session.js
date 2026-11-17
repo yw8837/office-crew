@@ -259,35 +259,95 @@ function HireCard({ m }) {
 }
 
 // ── 메시지 ──
-// 에이전트의 질문: 보기를 고르거나 직접 써서 답한다. 답하면 그 에이전트가 같은 답 안에서 이어 쓴다
-function AskCard({ sid, ask }) {
-  const [ans, setAns] = useState(() => ask.questions.map(() => ({ picked: [], other: '' })));
-  const [busy, setBusy] = useState(false);
-  const set = (i, p) => setAns((a) => a.map((x, k) => (k === i ? { ...x, ...p } : x)));
-  const pick = (i, n, multi) => set(i, { picked: multi ? (ans[i].picked.includes(n) ? ans[i].picked.filter((x) => x !== n) : [...ans[i].picked, n]) : [n] });
-  const ready = ans.every((a) => a.picked.length || a.other.trim());
-  const send = (body) => {
-    setBusy(true);
-    post(`/api/sessions/${sid}/control`, { action: 'answer', askId: ask.id, ...body })
+// 에이전트의 질문 창: 입력창 바로 위에 뜬다. 보기를 한 번 누르거나 숫자 키로 고르면 바로 답한다.
+// 질문이 여럿이면 하나씩 보여 주고, 마지막 답에서 한꺼번에 보낸다. 접어 두면 한 줄로 남는다
+function AskPanel({ s }) {
+  const open = [];
+  for (const m of s.messages) for (const x of m.asks || []) if (x.status === 'open') open.push({ ask: x, agent: agentById(m.agentId) });
+  const cur = open[0];
+  const id = cur ? cur.ask.id : null;
+  const blank = { id, i: 0, ans: [], sel: [], other: '', busy: false, closed: false };
+  const [st, setSt] = useState(blank);
+  const v = st.id === id ? st : blank; // 다른 질문으로 바뀌면 처음부터(접어 뒀어도 새 질문은 펼친다)
+  const n = cur ? cur.ask.questions.length : 0;
+  const q = cur ? cur.ask.questions[Math.min(v.i, n - 1)] : null;
+  // 키를 빠르게 연달아 눌러도 앞의 선택을 잃지 않게, 손잡이들은 화면에 그려진 값이 아니라 가장 최근 값을 본다
+  const live = useRef(v);
+  live.current = v;
+  const set = (patch) => { const next = { ...live.current, ...patch }; live.current = next; setSt(next); };
+  const post1 = (body, patch) => {
+    set({ ...patch, busy: true });
+    post(`/api/sessions/${s.id}/control`, { action: 'answer', askId: id, ...body })
       .then((r) => { if (r?.ok === false) toast(r.reason || t('이미 답했거나 끝난 질문이야.'), 'warn'); })
       .catch((e) => toast(e.message, 'error'))
-      .finally(() => setBusy(false));
+      .finally(() => setSt((x) => (x.id === id ? { ...x, busy: false } : x)));
   };
-  return html`<div class="ask" role="group" aria-label=${t('에이전트의 질문')}>
-    <div class="ask-title">🙋 ${t('답이 필요해')}</div>
-    ${ask.questions.map((q, i) => html`<fieldset class="ask-q" key=${i}>
-      <legend>${q.header && html`<span class="chip accent">${q.header}</span>`}<span>${q.question}</span>${q.multi && html`<span class="muted small">${t('여러 개 고를 수 있어')}</span>`}</legend>
-      <div class="ask-opts" role=${q.multi ? 'group' : 'radiogroup'} aria-label=${q.question}>
-        ${q.options.map((o, n) => html`<button type="button" key=${n} class=${`ask-opt${ans[i].picked.includes(n) ? ' on' : ''}`} role=${q.multi ? 'checkbox' : 'radio'} aria-checked=${ans[i].picked.includes(n) ? 'true' : 'false'} disabled=${busy} onClick=${() => pick(i, n, q.multi)}>
-          <b>${o.label}</b>${o.description && html`<span>${o.description}</span>`}
-        </button>`)}
-      </div>
-      <input class="input" placeholder=${t('보기에 없으면 직접 써')} aria-label=${t('직접 쓰는 답')} maxlength="1000" value=${ans[i].other} disabled=${busy}
-        onInput=${(e) => set(i, { other: e.target.value })} onKeyDown=${(e) => { if (e.key === 'Enter' && !e.isComposing && ready && !busy) { e.preventDefault(); send({ answers: ans }); } }} />
-    </fieldset>`)}
-    <div class="row">
-      <button class="btn primary sm" disabled=${!ready || busy} onClick=${() => send({ answers: ans })}>${t('답 보내기')}</button>
-      <button class="btn sm" disabled=${busy} title=${t('답하지 않고 넘겨. 에이전트가 가정을 정해서 진행해.')} onClick=${() => send({ skip: true })}>${t('넘기기')}</button>
+  // 이 질문의 답을 정한다: 다음 질문이 있으면 넘어가고, 마지막이면 보낸다
+  const commit = (answer) => {
+    const c = live.current;
+    const ans = c.ans.slice();
+    ans[c.i] = answer;
+    if (c.i + 1 < n) set({ ans, i: c.i + 1, sel: [], other: '' });
+    else post1({ answers: ans }, { ans });
+  };
+  const pick = (k) => {
+    const c = live.current;
+    const now = cur ? cur.ask.questions[c.i] : null;
+    if (c.busy || c.closed || !now || k < 0 || k >= now.options.length) return;
+    if (now.multi) set({ sel: c.sel.includes(k) ? c.sel.filter((x) => x !== k) : [...c.sel, k] });
+    else commit({ picked: [k], other: '' });
+  };
+  const typed = v.other.trim();
+  const canSend = !!q && !v.busy && (!!typed || (q.multi && v.sel.length > 0));
+  const sendTyped = () => {
+    const c = live.current;
+    const now = cur ? cur.ask.questions[c.i] : null;
+    const text = c.other.trim();
+    if (!now || c.busy || !(text || (now.multi && c.sel.length))) return;
+    commit({ picked: now.multi ? c.sel : [], other: text });
+  };
+  // 숫자 키로 고르기: 글을 쓰는 중(입력칸)이거나 다른 창이 떠 있으면 건드리지 않는다
+  useEffect(() => {
+    if (!cur || v.closed) return undefined;
+    const onKey = (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+      const el = e.target;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      if (document.querySelector('.backdrop')) return;
+      if (!/^[1-9]$/.test(e.key)) return;
+      e.preventDefault();
+      pick(Number(e.key) - 1);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  });
+  if (!cur) return null;
+  const who = cur.agent ? cur.agent.name : t('에이전트');
+  if (v.closed) {
+    return html`<button type="button" class="ask-mini" onClick=${() => set({ closed: false })}>
+      🙋 ${t('질문 {n}개가 답을 기다려', { n: open.length })} <b>${t('열기')}</b>
+    </button>`;
+  }
+  return html`<div class="ask-panel" role="group" aria-label=${t('에이전트의 질문')}>
+    <div class="ask-head">
+      <span class="ask-who">🙋 ${t('{name}의 질문', { name: who })}${n > 1 ? html` <span class="chip">${v.i + 1}/${n}</span>` : ''}${open.length > 1 ? html` <span class="muted small">${t('뒤에 {n}개 더', { n: open.length - 1 })}</span>` : ''}</span>
+      <button type="button" class="icon-btn" title=${t('접어 두기 (답은 나중에)')} aria-label=${t('접어 두기 (답은 나중에)')} onClick=${() => set({ closed: true })}>✕</button>
+    </div>
+    <div class="ask-question">${q.header && html`<span class="chip accent">${q.header}</span>`}<span>${q.question}</span>${q.multi && html`<span class="muted small">${t('여러 개 고를 수 있어')}</span>`}</div>
+    <div class="ask-rows" role=${q.multi ? 'group' : 'radiogroup'} aria-label=${q.question}>
+      ${q.options.map((o, k) => html`<button type="button" key=${`${v.i}-${k}`} class=${`ask-row${v.sel.includes(k) ? ' on' : ''}`} role=${q.multi ? 'checkbox' : 'radio'}
+        aria-checked=${v.sel.includes(k) ? 'true' : 'false'} aria-label=${`${k + 1}. ${o.label}${o.description ? `. ${o.description}` : ''}`} disabled=${v.busy} onClick=${() => pick(k)}>
+        <span class="ask-num" aria-hidden="true">${k + 1}</span>
+        <span class="ask-row-text"><b>${o.label}</b>${o.description && html`<span>${o.description}</span>`}</span>
+        ${!q.multi && html`<span class="ask-go" aria-hidden="true">→</span>`}
+      </button>`)}
+    </div>
+    <div class="ask-foot">
+      ${v.i > 0 && html`<button type="button" class="btn sm" disabled=${v.busy} onClick=${() => set({ i: v.i - 1, sel: [], other: '' })}>${t('이전')}</button>`}
+      <input class="input" placeholder=${t('또는 직접 답을 써')} aria-label=${t('직접 쓰는 답')} maxlength="1000" value=${v.other} disabled=${v.busy}
+        onInput=${(e) => set({ other: e.target.value })} onKeyDown=${(e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); sendTyped(); } }} />
+      <button type="button" class="btn sm" disabled=${v.busy} title=${t('답하지 않고 넘겨. 에이전트가 가정을 정해서 진행해.')} onClick=${() => post1({ skip: true }, {})}>${t('건너뛰기')}</button>
+      <button type="button" class="btn primary sm" disabled=${!canSend} onClick=${sendTyped}>${v.i + 1 < n ? t('다음') : t('보내기')}</button>
     </div>
   </div>`;
 }
@@ -324,7 +384,7 @@ class Message extends Component {
     const u = m.usage || {};
     // 긴 답은 접어 둔다(앞부분만 보이고 '전체 보기'로 편다). 쓰는 중인 답과, 펼쳐 두기로 한 답(가장 최근 실행의 마지막 결과)은 펼친다
     this.seen ||= streaming; // 쓰는 걸 지켜본 답은 끝나도 접지 않는다(읽던 답이 갑자기 줄지 않게)
-    const asks = this.props.panel ? [] : (m.asks || []).filter((x) => x.status === 'open'); // 오른쪽 패널에는 카드를 또 띄우지 않는다
+    const asks = (m.asks || []).filter((x) => x.status === 'open'); // 답은 입력창 위의 질문 창에서 한다
     const body = hideAsks(m.text, m.asks, streaming); // 질문 블록은 아래 선택 카드로 보여 준다
     const long = !streaming && body.length > FOLD_CHARS;
     const folded = long && !(open ?? (!fold || this.seen));
@@ -350,7 +410,7 @@ class Message extends Component {
         </div>` : ''}
         ${notices.map((b) => html`<div class="notice">${b.text}${b.count > 1 ? html` <span class="chip">×${b.count}</span>` : ''}</div>`)}
         <div class=${`msg-body md${folded ? ' folded' : ''}`} id=${`body-${m.id}`} onFocusCapture=${folded ? () => { this.props.onToggle?.(); this.setState({ open: true }); } : undefined} dangerouslySetInnerHTML=${{ __html: body.trim() ? renderMarkdown(body) : (streaming && !asks.length ? `<p class="muted">${t('작업 중…')}</p>` : '') }}></div>
-        ${asks.map((x) => html`<${AskCard} key=${x.id} sid=${state.route.id} ask=${x} />`)}
+        ${asks.length > 0 && html`<div class="notice">🙋 ${t('아래 질문 창에서 답해 줘.')}</div>`}
         ${long && html`<button class="fold-btn" aria-expanded=${!folded} aria-controls=${`body-${m.id}`} onClick=${toggle}>${folded ? t('전체 보기 ({n}자)', { n: body.length.toLocaleString(locale()) }) : t('접기')}</button>`}
         ${m.error && html`<div class="msg-err">⚠ ${m.error}</div>`}
         <div class="msg-foot">
@@ -696,6 +756,7 @@ function Composer({ s, run }) {
   const notReady = workers.filter((a) => { const p = state.providers.find((x) => x.id === a.provider); return p && !p.checking && !p.loggedIn; });
 
   return html`<div class="composer-wrap">
+    <${AskPanel} s=${s} />
     ${notReady.length > 0 && !active && html`<div class="warnbox" style="max-width:860px;margin:0 auto 8px">
       ⚠ ${notReady.map((a) => `${a.name}(${state.providers.find((p) => p.id === a.provider)?.label})`).join(', ')} — ${t('로그인(또는 API 키)이 필요해 보여.')}
       <a href="#" onClick=${(e) => { e.preventDefault(); state.ui.settingsTab = 'accounts'; import('../state.js').then((m) => m.go('settings')); }}>${t('AI 계정 확인')}</a>

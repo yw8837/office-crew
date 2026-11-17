@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-15
-- Related: `server/ask.js`, `server/orchestrator.js` (`#ask`, the ask loop in `#runAgent`, `control` action `answer`), `server/store.js` (`attentionOf`), `public/js/views/session.js` (`AskCard`), `public/js/chat-tools.js` (`hideAsks`), `test/agent-asks.test.js`
+- Related: `server/ask.js`, `server/orchestrator.js` (`#ask`, the ask loop in `#runAgent`, `control` action `answer`), `server/store.js` (`attentionOf`), `public/js/views/session.js` (`AskPanel`), `public/js/chat-tools.js` (`hideAsks`), `test/agent-asks.test.js`
 
 ## Context
 
@@ -28,6 +28,7 @@ Option 3.
 
 ## Consequences
 
+- The question is shown in a box above the message box, not inside the reply: one question at a time, numbered choices that answer with one click or a number key, a line for a typed answer, skip, and collapse. Number keys are ignored while the user types in a text field or another dialog is open.
 - No CLI's question tool or permission prompt is touched, and nothing about how CLIs are started changes.
 - The choices and the question text come from the agent, so they are shown as text only. The text the user types goes to the agent as the user's own words.
 - An agent could write a block that looks like a question to make the run wait. That is limited to 3 per task, the user can skip or stop, and scheduled runs never wait.

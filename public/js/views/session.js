@@ -8,7 +8,7 @@ import { renderMarkdown } from '../markdown.js';
 import { t, getLang, locale, tmap } from '../i18n/index.js';
 import { MemoryBadge } from './memory.js';
 import { continueList, findInMessages, hideAsks, hideCheck } from '../chat-tools.js';
-import { researcherOf } from '../office/meeting.js';
+import { researcherOf, meetingView } from '../office/meeting.js';
 
 export const sessionAgents = (s) => {
   if (!s) return [];
@@ -90,7 +90,11 @@ function OfficePanel({ s, full, onCollapse }) {
   const meta = (a) => ({ id: a.id, name: a.name, role: a.role, model: agentModelText(a, state.sessionData[s.id]), color: providerColorOf(a), avatar: a.avatar || {} });
   const meetKey = meetingIds(s).join(',');
   // 회의 중 조사하러 간 사람(참석자가 아니어도): 그 동안 조사 자리로 간다
-  const errandId = researcherOf(liveMeeting(s).now) || '';
+  const lm = liveMeeting(s);
+  const errandId = researcherOf(lm.now) || '';
+  // 그림의 회의 표시: 말하는 사람·반대편·바퀴와 단계
+  const meetView = meetingView(lm.now, lm.chairId);
+  const meetViewKey = JSON.stringify(meetView);
 
   useEffect(() => {
     if (!mod || !host.current) return undefined;
@@ -114,6 +118,7 @@ function OfficePanel({ s, full, onCollapse }) {
       o.setState(a.id, { state: l?.state || 'idle', text: l?.detail || '', tool: l?.tool || null, tokens: usageTotal(u), badge: badgeFor(a, u), meeting: meetKey.split(',').includes(a.id), errand: a.id === errandId ? 'search' : null });
     }
   }, [key, s.id, mod, meetKey, errandId]);
+  useEffect(() => { officeRef.current?.setMeeting?.(meetView); }, [meetViewKey, mod]);
 
   useEffect(() => { officeRef.current?.setSkin(skinValue()); }, [state.settings.skin, state.skins.length]);
   useEffect(() => { officeRef.current?.setLanguage?.(uiLang()); }, [state.settings.lang]);

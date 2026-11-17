@@ -6,6 +6,7 @@ import { buildVillageScene } from './village.js';
 import { buildRig } from './character.js';
 import { renderScreen, SCREEN_OF } from './screens.js';
 import { tr, normLang } from './i18n.js';
+import { isTalking, MEET_PHASES } from './meeting.js';
 
 const QUALITIES = ['full', 'lite', 'static'];
 
@@ -132,6 +133,8 @@ export function createOffice(container, opts = {}) {
   let selected = null;
   let raf = 0, lastT = 0, gen = 0, helperSeq = 0, destroyed = false, doorTimer = 0;
   const spotOcc = new Map();
+  let meet = null, meetSig = 'null'; // 지금 회의(setMeeting): { phase, round, rounds, speakerId, opposerId } | null
+  const talking = (ch) => isTalking(meet, ch.id, !!ch.st.meeting && !ch.helper);
 
   // ── 깊이 정렬 ──
   function insertItem(item) {
@@ -170,7 +173,8 @@ export function createOffice(container, opts = {}) {
     o.dot = document.createElement('i'); o.dot.className = 'oc-dot';
     o.name = document.createElement('b'); o.name.className = 'oc-name';
     o.chip = document.createElement('span'); o.chip.className = 'oc-chip';
-    l1.append(o.dot, o.name, o.chip);
+    o.opp = document.createElement('span'); o.opp.className = 'oc-opp'; o.opp.hidden = true; // 회의의 반대편 표시
+    l1.append(o.dot, o.name, o.opp, o.chip);
     o.l2 = div('oc-tag-l2');
     o.tok = document.createElement('span'); o.tok.className = 'oc-tok';
     o.badge = document.createElement('span'); o.badge.className = 'oc-badge';
@@ -237,6 +241,7 @@ export function createOffice(container, opts = {}) {
     if (selected === ch.id) c += ' sel';
     if (ch.helper) c += ' helper';
     if (ch.gone) c += ' gone';
+    if (talking(ch)) c += ' talk'; // 회의에서 지금 말하는 사람(끄덕임은 office.css)
     return c;
   }
   function applyClass(ch) {
@@ -250,7 +255,9 @@ export function createOffice(container, opts = {}) {
     if (ch.flash) return ['recv', ch.flash.icon, ch.flash.text];
     if (ch.carry != null) return ['carry', '📄', head(ch.carry, 18) || T('bub.carry')];
     const s = ch.st, t = s.text;
-    if (ch.id !== selected && s.state !== 'waiting' && s.state !== 'error') return null;
+    // 회의에서 지금 말하는 사람은 고르지 않아도 말풍선을 띄운다
+    const talk = talking(ch);
+    if (ch.id !== selected && !talk && s.state !== 'waiting' && s.state !== 'error') return null;
     switch (s.state) {
       case 'thinking': return ['think', '', ''];
       case 'typing': return ['say', '', tail(t, 40) || '…'];
@@ -262,7 +269,7 @@ export function createOffice(container, opts = {}) {
       case 'error': return ['err', '!', tail(t, 24) || T('bub.error')];
       case 'done': return ch.doneQuiet ? null : ['done', '✓', T('bub.done')];
       case 'paused': return ['pause', '⏸', T('bub.paused')];
-      default: return null;
+      default: return talk ? ['say', '', '…'] : null;
     }
   }
   function updateBubble(ch) {
@@ -284,19 +291,21 @@ export function createOffice(container, opts = {}) {
     const chip = ch.helper ? T('misc.helperChip') : (a.model || '');
     const tok = fmtTokens(s.tokens);
     const badge = s.badge ? String(s.badge) : '';
-    const key = [name, chip, tok, badge, s.state, lang].join('\u0001');
+    const opp = !!(meet && meet.opposerId === ch.id && s.meeting && !ch.helper);
+    const key = [name, chip, tok, badge, s.state, lang, opp].join('\u0001');
     if (key === o.key.tag) return;
     o.key.tag = key;
     o.dirty = true;
     scheduleLayout();
     o.name.textContent = name;
     o.dot.textContent = STATE_GLYPH[s.state] || '';
+    o.opp.textContent = opp ? T('meet.opposer') : ''; o.opp.hidden = !opp;
     o.chip.textContent = chip; o.chip.hidden = !chip;
     o.tok.textContent = tok; o.tok.hidden = !tok;
     o.badge.textContent = badge; o.badge.hidden = !badge;
     o.l2.hidden = !tok && !badge;
     o.root.dataset.state = s.state;
-    o.tag.title = `${name}${a.role ? ' · ' + a.role : ''}${chip ? ' · ' + chip : ''} — ${T('st.' + s.state)}${tok ? ' · ' + tok : ''}${badge ? ' · ' + badge : ''}`;
+    o.tag.title = `${name}${a.role ? ' · ' + a.role : ''}${chip ? ' · ' + chip : ''} — ${T('st.' + s.state)}${tok ? ' · ' + tok : ''}${badge ? ' · ' + badge : ''}${opp ? ' · ' + T('meet.opposer') : ''}`;
   }
   function updateScreen(ch) {
     const d = ch.desk;
@@ -464,10 +473,26 @@ export function createOffice(container, opts = {}) {
     ch.lift = d.lift || 0;
     const s = ch.st.state;
     ch.face = d.at === 'desk' ? ((s === 'typing' || s === 'tool') ? 'back' : 'front') : d.face;
-    ch.flip = d.flip ?? 1;
+    ch.flip = d.at === 'meeting' ? meetFlip(ch, d) : d.flip ?? 1;
     place(ch);
     apply(ch);
     updateZones();
+    if (d.at === 'meeting' && meet && meet.speakerId === ch.id) lookAtSpeaker(); // 말하는 사람이 도착하면 다른 참석자가 그쪽을 본다
+  }
+  // 모임 자리의 참석자는 지금 말하는 한 사람 쪽을 본다(좌우 뒤집기만). 말하는 사람이 없거나 여럿이면 자리의 기본 방향
+  function meetFlip(ch, d) {
+    const sp = meet && meet.speakerId ? chars.get(meet.speakerId) : null;
+    if (!sp || sp === ch || !ch.st.meeting || !talking(sp) || !sp.dest || sp.dest.at !== 'meeting') return d.flip ?? 1;
+    const [tx] = scene.toScreen(sp.dest.pos), [mx] = scene.toScreen(d.pos);
+    return Math.abs(tx - mx) < 1 ? d.flip ?? 1 : tx < mx ? -1 : 1;
+  }
+  function lookAtSpeaker() {
+    if (!scene) return;
+    for (const ch of chars.values()) {
+      if (ch.helper || ch.walking || ch.busy || !ch.dest || ch.dest.at !== 'meeting' || ch.at !== 'meeting') continue;
+      const f = meetFlip(ch, ch.dest);
+      if (f !== ch.flip) { ch.flip = f; applyClass(ch); }
+    }
   }
   // 건물 이름표의 열쇠 → 그 건물에 해당하는 자리 이름(마을과 사무실 스킨이 이름을 다르게 쓴다)
   const ZONE_SPOT = { library: 'shelf', tower: 'search', workshop: 'server', plaza: 'meeting', company: 'desk', dev: 'desk' };
@@ -843,12 +868,16 @@ export function createOffice(container, opts = {}) {
     for (const z of scene.zones || []) {
       const d = div('oc-zone');
       const t = div('oc-zone-in');
-      zoneEls.push({ el: d, t, key: z.key, x: z.x, y: z.y, w: 0, h: 0, dim: false });
+      // 모임 자리(마을 광장·사무실 회의실) 이름표 밑에는 회의 진행(회의 2/3 · 차례)을 붙인다
+      const sub = (ZONE_SPOT[z.key] || z.key) === 'meeting' ? div('oc-zone-sub') : null;
+      zoneEls.push({ el: d, t, sub, key: z.key, x: z.x, y: z.y, w: 0, h: 0, dim: false });
       d.style.transform = `translate(${z.x.toFixed(1)}px,${z.y.toFixed(1)}px)`;
       t.textContent = T('zone.' + z.key);
       d.append(t);
+      if (sub) d.append(sub);
       ovl.append(d);
     }
+    updateMeetLabel();
     if (scene.neon) {
       const n = div('oc-neon');
       const [ox, oy] = scene.neon.origin;
@@ -922,6 +951,26 @@ export function createOffice(container, opts = {}) {
   function setSkin(s) {
     skin = resolveSkin(s);
     rebuild();
+  }
+  /**
+   * 지금 회의(없으면 null): { phase, round, rounds, speakerId, opposerId }. speakerId 는 지금 말하는 한 사람(판정·결론은 진행자),
+   * 의견 단계는 참석자(setState 의 meeting) 모두가 말한다. 바뀔 때만 다시 그린다
+   */
+  function setMeeting(m) {
+    const next = m && typeof m === 'object' && MEET_PHASES.includes(m.phase)
+      ? { phase: m.phase, round: Number(m.round) || 1, rounds: Number(m.rounds) || 1, speakerId: m.speakerId != null ? String(m.speakerId) : null, opposerId: m.opposerId != null ? String(m.opposerId) : null }
+      : null;
+    const sig = JSON.stringify(next);
+    if (sig === meetSig) return;
+    meetSig = sig;
+    meet = next;
+    updateMeetLabel();
+    for (const ch of chars.values()) apply(ch);
+    lookAtSpeaker();
+  }
+  function updateMeetLabel() {
+    const txt = meet ? T('meet.progress', { r: meet.round, n: meet.rounds, phase: T('meet.phase.' + meet.phase) }) : '';
+    for (const z of zoneEls) if (z.sub) { z.sub.textContent = txt; z.sub.hidden = !txt; }
   }
   function select(id) {
     const prev = selected;
@@ -1188,6 +1237,7 @@ export function createOffice(container, opts = {}) {
       ch.ov.dirty = true;
       if (ch.holdEl) ch.holdEl.firstChild.textContent = T('meet.away');
     }
+    updateMeetLabel();
     scheduleLayout();
   }
   /** 품질: full(기본) | lite(장식 반복 애니메이션 끔·장식 요소 축소, 걷기 유지) | static(애니메이션 0, 순간이동, 렌더 루프 없음) */
@@ -1206,6 +1256,7 @@ export function createOffice(container, opts = {}) {
   return {
     setAgents,
     setState,
+    setMeeting,
     handoff,
     setSkin,
     select,

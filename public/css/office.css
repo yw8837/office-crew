@@ -498,6 +498,24 @@
 /* 가리킨 이름표는 겹침 때문에 접혀 있어도 토큰·비용 줄을 보여 준다 */
 .office-root .oc-ov.compact .oc-tag:hover .oc-tag-l2:not([hidden]) { display: flex; }
 @keyframes oc-nudge { 0%, 100% { transform: none; } 6% { transform: translateY(-3px); } 12% { transform: none; } }
+/* 회의에서 지금 말하는 사람: 가볍게 끄덕인다(사람 그림은 머리, 머리가 없는 크리처·그림 아바타는 몸). 걷는 중·움직임 줄이기에서는 멈춘다 */
+.office-root .oc-char.talk:not(.pose-walk) .oc-head { animation: oc-talk 1.6s ease-in-out infinite; animation-delay: var(--oc-d, 0s); }
+.office-root .oc-char.talk:not(.pose-walk):not(:has(.oc-head)) .oc-bodyw { animation: oc-talk-bob 1.6s ease-in-out infinite; animation-delay: var(--oc-d, 0s); }
+@keyframes oc-talk { 0%, 45%, 100% { transform: rotate(0); } 15% { transform: translateY(1.2px) rotate(2.5deg); } 30% { transform: rotate(0); } }
+@keyframes oc-talk-bob { 0%, 45%, 100% { transform: translateY(0); } 15% { transform: translateY(1.6px); } }
+@media (prefers-reduced-motion: reduce) {
+  .office-root .oc-char.talk .oc-head, .office-root .oc-char.talk .oc-bodyw { animation: none !important; }
+}
+/* 이름표의 반대편 표시(고르지 않아도 늘 보인다) */
+.office-root .oc-opp { font: 800 9px/1 var(--oc-font); padding: 2px 4px; border-radius: 4px; background: #fee2e2; color: #991b1b; box-shadow: inset 0 0 0 1px #fca5a5; }
+.office-root .oc-opp[hidden] { display: none; }
+/* 모임 자리 이름표 밑의 회의 진행("회의 2/3 · 차례") */
+.office-root .oc-zone-sub {
+  position: absolute; left: 0; top: calc(12px * var(--ui, 1)); transform: translateX(-50%) scale(calc(var(--ui, 1) * .82)); transform-origin: 50% 0;
+  white-space: nowrap; padding: 2px 8px; border-radius: 7px; background: #2563eb; color: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, .25); font: 700 11px/1.2 var(--oc-font);
+}
+.office-root .oc-zone-sub[hidden] { display: none; }
 /* 회의 중 조사하러 간 참석자의 빈 모임 자리 표("조사 중") */
 .office-root .oc-away { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 1; pointer-events: none; }
 .office-root .oc-away-in {

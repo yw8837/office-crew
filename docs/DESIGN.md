@@ -24,7 +24,7 @@ server/store.js             JSON 저장소(원자적 쓰기, 디바운스)
 server/bus.js               SSE 이벤트 허브
 server/orchestrator.js      실행(run) 엔진: 단계 진행, 병렬, 승인 게이트, 개입
 server/ask.js               에이전트가 사용자에게 묻기: 답 끝의 oc-ask 블록 읽기, 답을 돌려주는 글(결정 0009)
-server/meeting.js           회의 차례: 반대편 고르기, 차례 순서, 진행자 답 끝의 oc-verdict 판정 블록 읽기(결정 0010)
+server/meeting.js           회의 차례: 반대편 고르기, 차례 순서, 진행자 답 끝의 oc-verdict 판정 블록 읽기(결정 0010), 차례 답 끝의 oc-check 질문 블록 읽기와 조사 담당 고르기(결정 0011)
 server/usage.js             토큰·비용 집계, 계정 한도
 server/catalog.js           스킬·커넥터·플러그인 목록
 server/routing.js           자동 라우팅(역할×프로필 → 프로바이더·모델·노력)
@@ -53,12 +53,13 @@ Session  { id, title, titleFrom?(제목을 만든 사용자 말 id), titleLocal?
            providerSessions:{ [agentId]: string }, sessionProvider:{ [agentId]: providerId },
            importedFrom?:{ source:'claude'|'codex', id, cwd, total, at, agentId?(불러올 때 만든 에이전트), remembered?(불러온 대화를 프로젝트 기억에 다 넣었음), cleared?(대화를 비웠음: 불러온 대화를 더는 건네지 않는다), checked?(원문이 없어 원래 기록을 다시 읽어 봤음) }, messages:[Message], runs:[Run] }
 Message  { id, role:'user'|'agent'|'system'|'proposal'(영입 제안 카드, 결정 0006), agentId?, runId?, stageIndex?, text, handoffAsk?(사용자 말: 인수인계 메모를 써 달라는 정해진 요청. 대화·기억에 싣지 않는다), handoff?(에이전트 답: 인수인계 메모. 이어받는 다른 AI가 먼저 받는다. 결정 0008), local?(사용자 말: 보낼 때 계획의 AI가 모두 내 PC 모델이면 true, 클라우드 AI가 실제로 받으면 지운다. true 면 클라우드 AI로 넘기는 대화·기억에서 뺀다. 결정 0007), remembered?(사용자 말: 프로젝트 기억에 넣기 시작했음. 두 번 넣지 않는다), cut?(대기열에 있다가 앱이 꺼진 말. 다시 켤 때 기억에 넣고 지운다),
-           meeting?:{ phase:'opinion'|'turn'|'judge'|'conclude'(옛 메시지는 'review'), round, rounds, opposer?:true }(회의 차례), verdict?:{ verdict:'agree'|'continue', reason }(진행자 판정에서 읽은 블록. 결정 0010),
+           meeting?:{ phase:'opinion'|'turn'|'research'|'judge'|'conclude'(옛 메시지는 'review'), round, rounds, opposer?:true }(회의 차례), verdict?:{ verdict:'agree'|'continue', reason }(진행자 판정에서 읽은 블록. 결정 0010),
+           check?:{ question, from, to, status:'asked'|'answered'|'no-researcher'|'over'|'failed' }(차례 답 끝에서 읽은 조사 질문 블록. 블록은 글에 남고 from·to 자리를 화면이 감춘다), checkOf?(조사 결과: 질문한 차례 메시지 id. 결정 0011),
            attachments:[{id,name,mime,size,path}], blocks:[Block], status:'streaming'|'done'|'error'|'stopped',
            usage?:{input,output,cacheRead,cacheWrite,cost,durationMs}, createdAt }
 Block    { id, kind:'tool'|'thinking'|'notice', name?, input?, output?, status:'running'|'done'|'error' }
 Run      { id, cut?(실행 중에 앱이 꺼졌다는 표시. 다시 켤 때 그 사용자 말을 기억에 넣고 지운다), teamId|null, status:'running'|'paused'|'waiting'|'done'|'error'|'stopped',
-           stageIndex, stages:[{ label, agentIds, status }], startedAt, endedAt }
+           stageIndex, stages:[{ label, agentIds, status, meetingNow?:null|{ phase, round, rounds, speakerId?(차례·조사 중인 사람), opposerId?(반대편이 있으면 늘), askedBy?(조사 중일 때 질문한 사람) }(회의 진행 표시. 결정 0010·0011) }], startedAt, endedAt }
 ```
 
 ## 프로바이더 어댑터 계약

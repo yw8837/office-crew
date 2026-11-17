@@ -6,7 +6,7 @@ import { buildVillageScene } from './village.js';
 import { buildRig } from './character.js';
 import { renderScreen, SCREEN_OF } from './screens.js';
 import { tr, normLang } from './i18n.js';
-import { isTalking, MEET_PHASES } from './meeting.js';
+import { isTalking, MEET_PHASES, sayText } from './meeting.js';
 
 const QUALITIES = ['full', 'lite', 'static'];
 
@@ -264,7 +264,7 @@ export function createOffice(container, opts = {}) {
     if (ch.id !== selected && !talk && s.state !== 'waiting' && s.state !== 'error') return null;
     switch (s.state) {
       case 'thinking': return ['think', '', ''];
-      case 'typing': return ['say', '', tail(t, 40) || '…'];
+      case 'typing': return ['say', '', sayText(t, 40) || '…'];
       case 'tool': return ['tool', toolIcon(s.tool), head(s.tool || T('bub.tool'), 18)];
       case 'searching': return ['tool', '🔎', tail(t, 22) || T('bub.searching')];
       case 'reading': return ['tool', '📖', tail(t, 22) || T('bub.reading')];

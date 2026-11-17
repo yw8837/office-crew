@@ -76,3 +76,17 @@ export function boardCards(messages, n = 3) {
   }
   return out;
 }
+
+/**
+ * 말풍선에 넣을 글: 쓰는 중인 답의 끝부분 n글자. 약속한 블록(``` 뒤)과 마크다운 기호는 뺀다.
+ * 앞이 잘려 블록 안쪽(JSON 조각)만 남았으면 '…'만 준다.
+ */
+export function sayText(text, n = 40) {
+  let s = String(text || '');
+  const fence = s.indexOf('```');
+  if (fence >= 0) s = s.slice(0, fence);
+  if (/"\s*:\s*["{[\d]|^\s*[{}]/.test(s)) return '…';
+  s = s.split(/\r?\n/).map(plain).filter(Boolean).join(' ').trim();
+  const chars = [...s];
+  return chars.length > n ? `…${chars.slice(-n).join('')}` : s;
+}

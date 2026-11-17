@@ -1,7 +1,7 @@
 // 회의 장면(사무실 그림) 계산: 조사하러 간 사람 고르기. 그림 자체는 자동 테스트가 없어 DOM 없이 도는 계산만 본다
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { researcherOf, meetingView, isTalking, cardText, boardCards } from '../public/js/office/meeting.js';
+import { researcherOf, meetingView, isTalking, cardText, boardCards, sayText } from '../public/js/office/meeting.js';
 import { tr } from '../public/js/office/i18n.js';
 
 // 그림 안의 새 글자(사무실 사전은 test/i18n.test.js 가 보지 않는다): 네 언어 모두 따로 있어야 한다(없으면 영어로 떨어진다)
@@ -83,4 +83,14 @@ test('그림의 새 글자는 네 언어 모두 있다', () => {
     assert.notEqual(en, k, `en ${k}`);
     for (const l of ['ko', 'zh', 'ja']) assert.notEqual(tr(l, k), en, `${l} ${k}`);
   }
+});
+
+test('말풍선 글: 약속한 블록과 마크다운 기호는 빼고 끝부분만 보여 준다', () => {
+  assert.equal(sayText('## 회의 결론\n\n- **결정**: 합침. 작게 먼저 만든다.', 40), '회의 결론 결정: 합침. 작게 먼저 만든다.');
+  assert.equal(sayText('남은 이견에 적을게.\n\n```oc-verdict\n{"verdict":"ag', 40), '남은 이견에 적을게.', '쓰는 중인 블록은 통째로 뺀다');
+  assert.equal(sayText('…은 이견에 적을게. ``', 40), '…은 이견에 적을게.', '블록이 열리는 중인 따옴표도 뺀다');
+  assert.equal(sayText('…"verdict":"agree","reason":"같은 안"}', 40), '…', '앞이 잘려 블록 안쪽만 남은 글은 점으로');
+  assert.equal(sayText('`A안`으로 가자', 40), 'A안으로 가자');
+  assert.equal(sayText('가'.repeat(50), 10), '…' + '가'.repeat(10));
+  assert.equal(sayText('', 40), '');
 });

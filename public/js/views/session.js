@@ -74,7 +74,7 @@ function liveMeeting(s) {
 // 회의 차례 이름: 의견 1/3, 차례 2/3, 조사 2/3, 판정 2/3, 결론. 그 밖(옛 세션의 'review')은 검토 2/2
 const meetLabel = (m) => (m.phase === 'conclude' ? t('결론') : m.phase === 'opinion' ? t('의견 {r}/{n}', { r: m.round, n: m.rounds }) : m.phase === 'turn' ? t('차례 {r}/{n}', { r: m.round, n: m.rounds }) : m.phase === 'research' ? t('조사 {r}/{n}', { r: m.round, n: m.rounds }) : m.phase === 'judge' ? t('판정 {r}/{n}', { r: m.round, n: m.rounds }) : t('검토 {r}/{n}', { r: m.round, n: m.rounds }));
 // 회의 차례 글에 붙은 질문(msg.check)의 상태 칩: [글, 칩 모양]
-const checkChip = (status) => ({ asked: [t('조사 중'), ''], answered: [t('조사해 옴'), ' ok'], 'no-researcher': [t('조사 역할 없음'), ' warn'], over: [t('조사 상한'), ' warn'], failed: [t('확인 못 함'), ' warn'] }[status] || [status, '']);
+const checkChip = (status) => ({ asked: [t('조사 중'), ''], answered: [t('조사해 옴'), ' ok'], 'no-researcher': [t('조사할 사람 없음'), ' warn'], over: [t('조사 상한'), ' warn'], failed: [t('확인 못 함'), ' warn'] }[status] || [status, '']);
 
 // ── 사무실 패널 ──
 // 사무실 기본 높이: 화면의 30%쯤, 200~300px 사이(대화가 주인공이라 절반을 넘지 않게)

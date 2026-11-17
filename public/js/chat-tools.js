@@ -45,11 +45,12 @@ export function hideAsks(text, asks = [], streaming = false) {
 }
 
 // 회의 차례 답 끝의 질문 블록(oc-check)은 글 아래 "확인 필요" 줄로 보여 주니 본문에서는 뺀다(hideAsks 와 같은 방식).
-// check: 서버가 질문으로 받은 블록({ from, to } = 글에서의 자리). 쓰는 중이면 끝에 오는 블록(아직 서버가 읽기 전이거나 쓰다 만 것)도 감춘다.
-// 다 쓴 뒤에 서버가 받지 않은 블록(형식이 틀린 것)은 그대로 보인다
+// check: 서버가 질문으로 받은 블록({ from, to } = 글에서의 자리). 그 자리에서 글이 정말 ```oc-check 로 시작할 때만 감춘다(아니면 글을 그대로 둔다).
+// 쓰는 중이면 끝에 오는 블록(아직 서버가 읽기 전이거나 쓰다 만 것)도 감춘다. 다 쓴 뒤에 서버가 받지 않은 블록(형식이 틀린 것)은 그대로 보인다
 export function hideCheck(text, check = null, streaming = false) {
   const src = String(text || '');
-  const ok = check && Number.isInteger(check.from) && Number.isInteger(check.to) && check.from >= 0 && check.to > check.from && check.to <= src.length;
+  const ok = check && Number.isInteger(check.from) && Number.isInteger(check.to) && check.from >= 0 && check.to > check.from && check.to <= src.length
+    && src.startsWith('```oc-check', check.from);
   const out = ok ? src.slice(0, check.from) + src.slice(check.to) : src;
   return streaming ? out.replace(/```oc-check[\s\S]*$/, '') : out;
 }

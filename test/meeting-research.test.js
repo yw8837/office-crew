@@ -67,6 +67,8 @@ test('화면: 받은 질문 블록은 감추고, 쓰는 중이면 끝에 오는 
   assert.equal(hideCheck('쓰는 중\n\n```oc-check\n{"quest', null, true).trim(), '쓰는 중');
   assert.equal(hideCheck(text, null, false), text, '서버가 받지 않은 블록(형식 오류)은 글로 보인다');
   assert.equal(hideCheck(text, { from: 999, to: 1000 }), text, '자리가 글과 맞지 않으면 그대로');
+  const moved = `앞에 더 쓴 글.\n${text}`;
+  assert.equal(hideCheck(moved, { ...c, status: 'asked' }), moved, '그 자리가 질문 블록으로 시작하지 않으면 감추지 않는다');
   assert.equal(hideCheck('', null), '');
 });
 

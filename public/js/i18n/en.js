@@ -1374,7 +1374,7 @@ export default {
   "조사 {r}/{n}": "Research {r}/{n}",
   "조사 중": "Researching",
   "조사해 옴": "Researched",
-  "조사 역할 없음": "No research role",
+  "조사할 사람 없음": "No one to research",
   "조사 상한": "Research limit reached",
   "확인 못 함": "Not checked",
   "확인 필요: {q}": "Needs checking: {q}",

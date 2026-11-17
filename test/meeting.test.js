@@ -393,6 +393,12 @@ test('데모(가짜 AI) 팀으로 회의하면 차례에 맞는 짧은 답이 �
     assert.equal(new Set(of('opinion').map((m) => m.text)).size, 3, '역할마다 다른 의견');
     for (const m of of('turn')) { assert.match(m.text, /\*\*답하는 말\*\*/); assert.match(m.text, /\*\*입장\*\*/); }
     assert.equal(new Set(of('turn').map((m) => m.text)).size, 2, '차례 발언도 역할마다 다르다');
+    const [opp] = of('turn');
+    assert.equal(opp.agentId, c.id);
+    assert.equal(opp.meeting.opposer, true, '반대편이 그 바퀴에 먼저 말한다');
+    assert.match(opp.text, /\*\*내 말\*\*: 그 안의 약점은/, '반대편 차례의 데모 답은 약점을 말한다');
+    assert.doesNotMatch(opp.text, /\*\*내 말\*\*: 동의해/, '반대편 답은 "동의해"로 시작하지 않는다');
+    for (const m of of('turn')) assert.doesNotMatch(m.text, /담당의/, '회의에 없을 수 있는 역할 이름을 인용하지 않는다');
     assert.match(of('conclude')[0].text, /^## 회의 결론/);
     assert.match(of('conclude')[0].text, /\*\*남은 이견\*\*/);
     assert.match(of('conclude')[0].text, /\*\*버린 안\*\*/);
@@ -413,5 +419,7 @@ test('데모(가짜 AI) 팀으로 회의하면 차례에 맞는 짧은 답이 �
     assert.equal(j.verdict?.verdict, 'agree');
     assert.doesNotMatch(j.text, /oc-verdict/);
     assert.ok(j.text.trim(), '판정 이유 한 문장은 남는다');
+    assert.match(j.text, /반대편이 짚은 약점은 결론의 남은 이견에 적을게/);
+    assert.doesNotMatch(j.text, /담당의|출처 문제/, '판정 답도 특정 역할·내용을 짚지 않는다');
   } finally { t.app.store.settings.mockSpeed = speed; }
 });

@@ -50,24 +50,28 @@ const OPINIONS = () => ({
   분석: [tr('위험이 가장 작은 안을 작게 먼저 해 보자.'), tr('되돌리기 쉽고, 틀려도 드는 비용이 작아.'), tr('작게 해 봤는데 효과가 안 보이면 버릴게.'), tr('높음')],
   빌드: [tr('지금 있는 것으로 이번 주 안에 만들 수 있는 안으로 가자.'), tr('새로 들일 것이 없고, 시험해 보기도 쉬워.'), tr('새로 만들 부품이 둘 넘게 필요해지면 버릴게.'), tr('중간')],
 });
+// 차례 답은 누가 말했는지 특정하지 않는다(회의에 그 역할이 없을 수 있다)
 const TURNS = () => ({
-  조사: [tr('분석 담당의 "작게 먼저 해 보자"는 말'), tr('동의해. 자료로 수요가 확인된 안부터 작게 시작하면 돼.'), tr('수요가 확인된 안을 작게 먼저 해 보자.')],
-  정리: [tr('조사 담당의 "수요가 확인된 안"이라는 말'), tr('동의해. 그 안이면 설명도 한 문장으로 줄일 수 있어.'), tr('자료 3건을 보고 수요가 확인된 안 쪽으로 바꿨어.')],
-  분석: [tr('빌드 담당의 "이번 주 안에 된다"는 말'), tr('반대해. 시험할 시간이 빠져 있어.'), tr('작게 먼저 해 보고, 일정은 시험까지 넣어서 잡자.')],
-  빌드: [tr('조사 담당의 "자료 3건"이라는 말'), tr('자료 3건 중 2건은 출처가 같아. 하나로 세면 근거가 약해져.'), tr('범위를 작게 잡으면 이번 주 안에 만들 수 있어.')],
+  조사: [tr('앞에서 나온 "작게 먼저 해 보자"는 말'), tr('동의해. 자료로 수요가 확인된 안부터 작게 시작하면 돼.'), tr('수요가 확인된 안을 작게 먼저 해 보자.')],
+  정리: [tr('앞에서 나온 "수요가 확인된 안"이라는 말'), tr('동의해. 그 안이면 설명도 한 문장으로 줄일 수 있어.'), tr('자료 3건을 보고 수요가 확인된 안 쪽으로 바꿨어.')],
+  분석: [tr('앞에서 나온 "이번 주 안에 된다"는 말'), tr('반대해. 시험할 시간이 빠져 있어.'), tr('작게 먼저 해 보고, 일정은 시험까지 넣어서 잡자.')],
+  빌드: [tr('앞에서 나온 "자료 3건"이라는 말'), tr('자료 3건 중 2건은 출처가 같아. 하나로 세면 근거가 약해져.'), tr('범위를 작게 잡으면 이번 주 안에 만들 수 있어.')],
 });
-function meetingAnswer(phase, role) {
+// 반대편 차례: 역할과 상관없이 가장 힘을 받는 안의 약점 하나와 틀릴 조건을 짚는다
+const OPPOSE = () => [tr('지금 가장 힘을 받는 안'), tr('그 안의 약점은 근거가 한쪽 자료에만 기대고 있다는 거야. 다른 자료에서 반대 결과가 나오면 이 안은 틀려.'), tr('다른 자료 하나만 더 확인해서 같은 결과가 나오면 그 안을 따를게.')];
+const isOpposer = (prompt) => prompt.includes(tr('너는 이번 회의에서 반대편이야. 지금 가장 힘을 받는 안의 약점, 빠진 것, 틀릴 조건을 찾아서 말해. 근거 없이 꾸며 내지는 마. 반대할 게 정말 없으면 무엇을 확인했는지 적어.'));
+function meetingAnswer(phase, role, opposer) {
   if (phase === 'opinion') {
     const [claim, why, wrong, sure] = OPINIONS()[role] || OPINIONS().분석;
     return [`- **${tr('주장')}**: ${claim}`, `- **${tr('근거')}**: ${why}`, `- **${tr('내가 틀렸다고 볼 기준')}**: ${wrong}`, `- **${tr('확신')}**: ${sure}`].join('\n');
   }
   if (phase === 'turn') {
-    const [to, mine, stand] = TURNS()[role] || TURNS().분석;
+    const [to, mine, stand] = opposer ? OPPOSE() : TURNS()[role] || TURNS().분석;
     return [`- **${tr('답하는 말')}**: ${to}`, `- **${tr('내 말')}**: ${mine}`, `- **${tr('입장')}**: ${stand}`].join('\n');
   }
   // 판정: 데모 진행자는 한 바퀴 만에 합의한다
   if (phase === 'judge') {
-    return `${tr('반대편을 뺀 참석자 모두 수요가 확인된 안을 작게 먼저 해 보자는 쪽이고, 반대편이 짚은 출처 문제는 결론의 남은 이견에 적을게.')}\n\n\`\`\`oc-verdict\n${JSON.stringify({ verdict: 'agree', reason: tr('모두 같은 안을 가리켜.') })}\n\`\`\``;
+    return `${tr('반대편을 뺀 참석자들의 입장이 같은 안을 가리켜. 반대편이 짚은 약점은 결론의 남은 이견에 적을게.')}\n\n\`\`\`oc-verdict\n${JSON.stringify({ verdict: 'agree', reason: tr('모두 같은 안을 가리켜.') })}\n\`\`\``;
   }
   return [
     `## ${tr('회의 결론')}`, '',
@@ -116,7 +120,7 @@ export default {
         emit({ type: 'tool', id, name, status: 'done', output: tr('{name} 완료(데모)', { name }) });
       }
       if (phase && !stopped) await wait(1200); // 읽고 생각하는 시간
-      const body = phase ? meetingAnswer(phase, roleKey(agent.role)) : answer(roleKey(agent.role), agent.name, prompt);
+      const body = phase ? meetingAnswer(phase, roleKey(agent.role), isOpposer(prompt)) : answer(roleKey(agent.role), agent.name, prompt);
       for (let i = 0; i < body.length && !stopped;) {
         const step = 2 + Math.floor(Math.random() * 5);
         const piece = body.slice(i, i + step);

@@ -51,9 +51,15 @@ async function pump() {
   // 스킬 설명 한글화 요청([{"i":0,"d":...}] 목록)이면 ```json 블록으로 번역을 돌려준다
   const koReq = text.match(/\[\{"i":0,"d":[\s\S]*\}\]/);
   const koItems = koReq ? (() => { try { return JSON.parse(koReq[0]); } catch { return null; } })() : null;
+  // 회의 중 조사 차례(조사 지시 문장이 있음). RESEARCHFAIL 이면 조사 차례만 오류로 끝난다
+  const research = text.includes('회의에서 나온 질문 하나를 도구로 찾아서 답해');
   const chunks = koItems ? ['```json\n', JSON.stringify(Object.fromEntries(koItems.map((x) => [String(x.i), `가짜 한글 설명 ${x.i}`]))), '\n```']
     // 회의 판정 차례: 판정 블록으로 답한다. AGREEFAST 는 합의, BADVERDICT 는 틀린 형식, 그 밖은 계속
     : text.includes('[회의 — 판정') ? ['판정할게.\n\n', req.includes('BADVERDICT') ? '```oc-verdict\n{"verdict":"글쎄"}\n```' : '```oc-verdict\n{"verdict":"' + (req.includes('AGREEFAST') ? 'agree' : 'continue') + '","reason":"가짜 판정"}\n```']
+    : research ? ['가짜 조사: 비용은 한 달 10만 원이야 (출처: https://example.com/price)\n', '가짜 조사: 작년에도 같았어 (출처: docs/budget.md)']
+    // 회의 차례: CHECKME 는 답 끝에 질문 블록을 붙이고, CHECKBAD 는 깨진 블록을 붙인다
+    : text.includes('[회의 — 차례 발언') && req.includes('CHECKBAD') ? ['형식이 틀린 블록을 붙일게.\n\n', '```oc-check\n{망가진 JSON\n```']
+    : text.includes('[회의 — 차례 발언') && req.includes('CHECKME') ? ['안녕', '하세요 ', `turn${turn}`, '\n\n```oc-check\n{"question":"가짜 질문: 비용이 얼마야?"}\n```']
     // ASKME: 사용자에게 선택지를 묻고 멈춘다. 답을 받으면 이어서 쓴다. ASKMORE 는 답을 받아도 계속 묻고, ASKBAD 는 형식을 틀린다
     : text.includes('[사용자 답변]') && !text.includes('ASKMORE') ? ['답 받았어. ', '이어서 진행했어']
     : /ASKME|ASKMORE/.test(text) ? ['먼저 확인할게.\n\n', '```oc-ask\n{"questions":[{"header":"범위","question":"' + (text.includes('ASKMORE') ? 'ASKMORE ' : '') + '어디까지 할까?","options":[{"label":"전부 (추천)","description":"처음부터 끝까지"},{"label":"일부만","description":"앞부분만"}],"multi":false},{"question":"무엇을 넣을까?","options":["표","그림","요약"],"multi":true}]}\n```']
@@ -99,7 +105,7 @@ async function pump() {
     // 초기화 시각 없는 거절 이벤트가 연달아 온 뒤 정상 종료(쉬는 목록 알림이 매번 나가면 안 됨)
     for (let k = 0; k < 5; k++) { out({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour' } }); await sleep(5); }
     out({ type: 'result', subtype: 'success', is_error: false, session_id: sid, usage: { input_tokens: 1, output_tokens: 1 } });
-  } else if (req.includes('FAILME')) {
+  } else if (req.includes('FAILME') || (research && req.includes('RESEARCHFAIL'))) {
     out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: '가짜 실패', session_id: sid, usage: {} });
   } else {
     out({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', unifiedWindows: { five_hour: { utilization: 0.25, resetsAt: 1793523600 }, seven_day: { utilization: 0.5, resetsAt: 1793685600 } } } });

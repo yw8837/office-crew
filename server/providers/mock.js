@@ -4,6 +4,7 @@ import path from 'node:path';
 import { makeHandle } from './util.js';
 import { tr } from '../i18n.js';
 import { roleKind } from '../routing.js';
+import { checkBlock } from '../meeting.js';
 
 // 역할 키(조사·정리·분석·빌드)는 그대로, 보이는 문구만 설정 언어로.
 // 에이전트의 역할 이름은 첫 실행 때 OS 언어로 저장되므로(Research, 調査 …) 역할 종류로 바꿔서 키를 찾는다
@@ -38,6 +39,7 @@ function answer(role, name, prompt) {
 // 회의 단계의 프롬프트에는 차례마다 정해진 형식 문구가 들어 있다. 그 문구로 차례를 알아보고 같은 형식의 짧은 답을 낸다
 // (그러지 않으면 데모 팀으로 회의를 돌렸을 때 "조사 결과" 같은 엉뚱한 글이 나온다)
 function meetingPhase(prompt) {
+  if (prompt.includes(tr('[회의 — 조사 ({r}/{n}바퀴)]').split('{')[0])) return 'research';
   if (prompt.includes(tr('[회의 — 결론 내기]'))) return 'conclude';
   if (prompt.includes(tr('[회의 — 판정 ({r}/{n}바퀴)]').split('{')[0])) return 'judge'; // 바퀴 숫자 앞까지만 맞춰 본다
   if (prompt.includes(tr('답하는 말: 누구의 어떤 말인지'))) return 'turn';
@@ -60,14 +62,20 @@ const TURNS = () => ({
 // 반대편 차례: 역할과 상관없이 가장 힘을 받는 안의 약점 하나와 틀릴 조건을 짚는다
 const OPPOSE = () => [tr('지금 가장 힘을 받는 안'), tr('그 안의 약점은 근거가 한쪽 자료에만 기대고 있다는 거야. 다른 자료에서 반대 결과가 나오면 이 안은 틀려.'), tr('다른 자료 하나만 더 확인해서 같은 결과가 나오면 그 안을 따를게.')];
 const isOpposer = (prompt) => prompt.includes(tr('너는 이번 회의에서 반대편이야. 지금 가장 힘을 받는 안의 약점, 빠진 것, 틀릴 조건을 찾아서 말해. 근거 없이 꾸며 내지는 마. 반대할 게 정말 없으면 무엇을 확인했는지 적어.'));
-function meetingAnswer(phase, role, opposer) {
+// 반대편이 2바퀴 차례에서 질문 블록 안내를 받았으면 답 끝에 질문 하나를 붙인다(데모에서 회의 중 조사가 보이게)
+const asksCheck = (prompt) => prompt.includes(checkBlock()) && prompt.includes(tr('[회의 — 차례 발언 ({r}/{n}바퀴)]', { r: 2, n: '\u0000' }).split('\u0000')[0]);
+function meetingAnswer(phase, role, opposer, ask) {
+  if (phase === 'research') {
+    return [`- ${tr('다른 자료 2건에서도 같은 방향의 결과가 나왔어.')}`, `- ${tr('그중 1건은 표본이 작아서 근거로는 약해.')}`, `- ${tr('출처: 데모 자료')}`, `- ${tr('확인 못 함: 반대 결과를 낸 자료는 찾지 못했어.')}`].join('\n');
+  }
   if (phase === 'opinion') {
     const [claim, why, wrong, sure] = OPINIONS()[role] || OPINIONS().분석;
     return [`- **${tr('주장')}**: ${claim}`, `- **${tr('근거')}**: ${why}`, `- **${tr('내가 틀렸다고 볼 기준')}**: ${wrong}`, `- **${tr('확신')}**: ${sure}`].join('\n');
   }
   if (phase === 'turn') {
     const [to, mine, stand] = opposer ? OPPOSE() : TURNS()[role] || TURNS().분석;
-    return [`- **${tr('답하는 말')}**: ${to}`, `- **${tr('내 말')}**: ${mine}`, `- **${tr('입장')}**: ${stand}`].join('\n');
+    const check = opposer && ask ? `\n\n\`\`\`oc-check\n${JSON.stringify({ question: tr('다른 자료에서도 같은 결과가 나오는지 확인해 줄래?') })}\n\`\`\`` : '';
+    return [`- **${tr('답하는 말')}**: ${to}`, `- **${tr('내 말')}**: ${mine}`, `- **${tr('입장')}**: ${stand}`].join('\n') + check;
   }
   // 판정: 데모 진행자는 한 바퀴 만에 합의한다
   if (phase === 'judge') {
@@ -120,7 +128,7 @@ export default {
         emit({ type: 'tool', id, name, status: 'done', output: tr('{name} 완료(데모)', { name }) });
       }
       if (phase && !stopped) await wait(1200); // 읽고 생각하는 시간
-      const body = phase ? meetingAnswer(phase, roleKey(agent.role), isOpposer(prompt)) : answer(roleKey(agent.role), agent.name, prompt);
+      const body = phase ? meetingAnswer(phase, roleKey(agent.role), isOpposer(prompt), asksCheck(prompt)) : answer(roleKey(agent.role), agent.name, prompt);
       for (let i = 0; i < body.length && !stopped;) {
         const step = 2 + Math.floor(Math.random() * 5);
         const piece = body.slice(i, i + step);

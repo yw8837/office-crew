@@ -166,12 +166,18 @@ POST /api/sessions/:id/open-folder
 
 ## 사무실 렌더러 계약(public/js/office/index.js)
 ```js
-createOffice(container, { skin, reducedMotion, onSelect(agentId) }) -> office
+createOffice(container, { skin, reducedMotion, onSelect(agentId), onCard(messageId) }) -> office
 office.setAgents([{ id, name, role, model, color, avatar }])   // 책상 자동 배치(최대 12)
-office.setState(id, { state, text, tool, tokens, badge })      // 상태별 애니메이션
+office.setState(id, { state, text, tool, tokens, badge, meeting, errand })  // 상태별 애니메이션. meeting: 회의 참석 중이면 모임 자리(마을 광장·회의실)로
+                                                               // errand: 'search'|null 회의 중 조사(조사 자리로 갔다가 돌아옴. 참석자면 모임 자리를 "조사 중" 표로 맡아 둠)
+office.setMeeting({ phase, round, rounds, speakerId, opposerId } | null)  // 말하는 사람(speakerId, 의견 단계는 참석자 모두)만 말풍선·끄덕임, 나머지는 그쪽을 봄,
+                                                               // 반대편 이름표 표시, 모임 자리 이름표에 "회의 2/3 · 차례"
+office.setBoard([{ id, text }], { quiet }?)                    // 모임 자리 옆 회의 결론 게시판(최대 3장, 왼쪽이 새것). 새 카드는 한 번 눈에 띄게(quiet 면 없이),
+                                                               // 카드(button)를 누르면 onCard(id)
 office.handoff(fromId, toId, label) -> Promise                 // 서류 들고 걸어가 전달
 office.setSkin(skinIdOrObject); office.select(id|null); office.destroy()
 SKINS (내장 3종 + custom: 배경 이미지 + 책상 좌표)
 createSkinEditor(container, { skin, onSave(skinObj), onCancel })
 ```
 SVG 아이소메트릭(2.5D) 일러스트, CSS transform 애니메이션, 탭 숨김 시 정지, 줄이기 모드 지원.
+회의 장면 계산(그림에 넘길 회의 상태 `meetingView`, 말하는 사람 `isTalking`, 조사하러 간 사람 `researcherOf`, 결론 카드 글 `cardText`·`boardCards`)은 DOM 없는 `public/js/office/meeting.js`(시험: `test/meeting-scene.test.js`).

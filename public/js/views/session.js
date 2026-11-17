@@ -275,12 +275,13 @@ function AskPanel({ s }) {
   const live = useRef(v);
   live.current = v;
   const set = (patch) => { const next = { ...live.current, ...patch }; live.current = next; setSt(next); };
+  const unlock = () => { if (live.current.id === id) live.current = { ...live.current, busy: false }; setSt((x) => (x.id === id ? { ...x, busy: false } : x)); };
   const post1 = (body, patch) => {
     set({ ...patch, busy: true });
     post(`/api/sessions/${s.id}/control`, { action: 'answer', askId: id, ...body })
-      .then((r) => { if (r?.ok === false) toast(r.reason || t('이미 답했거나 끝난 질문이야.'), 'warn'); })
-      .catch((e) => toast(e.message, 'error'))
-      .finally(() => setSt((x) => (x.id === id ? { ...x, busy: false } : x)));
+      // 성공하면 질문이 사라질 때까지 잠근 채로 둔다(그 틈에 숫자 키가 또 먹히지 않게). 실패했을 때만 다시 고칠 수 있게 푼다
+      .then((r) => { if (r?.ok === false) { toast(r.reason || t('이미 답했거나 끝난 질문이야.'), 'warn'); unlock(); } })
+      .catch((e) => { toast(e.message, 'error'); unlock(); });
   };
   // 이 질문의 답을 정한다: 다음 질문이 있으면 넘어가고, 마지막이면 보낸다
   const commit = (answer) => {
@@ -310,10 +311,11 @@ function AskPanel({ s }) {
   useEffect(() => {
     if (!cur || v.closed) return undefined;
     const onKey = (e) => {
-      if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+      // 키를 누르고 있어도 질문이 연달아 넘어가지 않게, 다른 창이나 우클릭 메뉴가 떠 있으면 그쪽 키로 둔다
+      if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.repeat || e.defaultPrevented) return;
       const el = e.target;
       if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
-      if (document.querySelector('.backdrop')) return;
+      if (document.querySelector('.backdrop, .ctx-menu, [role="dialog"], [role="menu"]')) return;
       if (!/^[1-9]$/.test(e.key)) return;
       e.preventDefault();
       pick(Number(e.key) - 1);
@@ -333,7 +335,7 @@ function AskPanel({ s }) {
       <span class="ask-who">🙋 ${t('{name}의 질문', { name: who })}${n > 1 ? html` <span class="chip">${v.i + 1}/${n}</span>` : ''}${open.length > 1 ? html` <span class="muted small">${t('뒤에 {n}개 더', { n: open.length - 1 })}</span>` : ''}</span>
       <button type="button" class="icon-btn" title=${t('접어 두기 (답은 나중에)')} aria-label=${t('접어 두기 (답은 나중에)')} onClick=${() => set({ closed: true })}>✕</button>
     </div>
-    <div class="ask-question">${q.header && html`<span class="chip accent">${q.header}</span>`}<span>${q.question}</span>${q.multi && html`<span class="muted small">${t('여러 개 고를 수 있어')}</span>`}</div>
+    <div class="ask-question" aria-live="polite">${q.header && html`<span class="chip accent">${q.header}</span>`}<span>${q.question}</span>${q.multi && html`<span class="muted small">${t('여러 개 고를 수 있어')}</span>`}</div>
     <div class="ask-rows" role=${q.multi ? 'group' : 'radiogroup'} aria-label=${q.question}>
       ${q.options.map((o, k) => html`<button type="button" key=${`${v.i}-${k}`} class=${`ask-row${v.sel.includes(k) ? ' on' : ''}`} role=${q.multi ? 'checkbox' : 'radio'}
         aria-checked=${v.sel.includes(k) ? 'true' : 'false'} aria-label=${`${k + 1}. ${o.label}${o.description ? `. ${o.description}` : ''}`} disabled=${v.busy} onClick=${() => pick(k)}>
@@ -385,7 +387,7 @@ class Message extends Component {
     // 긴 답은 접어 둔다(앞부분만 보이고 '전체 보기'로 편다). 쓰는 중인 답과, 펼쳐 두기로 한 답(가장 최근 실행의 마지막 결과)은 펼친다
     this.seen ||= streaming; // 쓰는 걸 지켜본 답은 끝나도 접지 않는다(읽던 답이 갑자기 줄지 않게)
     const asks = (m.asks || []).filter((x) => x.status === 'open'); // 답은 입력창 위의 질문 창에서 한다
-    const body = hideAsks(m.text, m.asks, streaming); // 질문 블록은 아래 선택 카드로 보여 준다
+    const body = hideAsks(m.text, m.asks, streaming); // 질문 블록은 입력창 위의 질문 창으로 보여 준다
     const long = !streaming && body.length > FOLD_CHARS;
     const folded = long && !(open ?? (!fold || this.seen));
     // 펼치고 접을 때: 대화가 맨 아래로 끌려가지 않게 알리고, 접은 뒤에는 버튼이 화면 밖으로 밀리지 않게 한다

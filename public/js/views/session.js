@@ -7,7 +7,7 @@ import { post, patch, upload, uploadUrl } from '../api.js';
 import { renderMarkdown } from '../markdown.js';
 import { t, getLang, locale, tmap } from '../i18n/index.js';
 import { MemoryBadge } from './memory.js';
-import { continueList, findInMessages, hideAsks } from '../chat-tools.js';
+import { continueList, findInMessages, hideAsks, hideCheck } from '../chat-tools.js';
 
 export const sessionAgents = (s) => {
   if (!s) return [];
@@ -64,8 +64,10 @@ function meetingIds(s) {
   const st = r && !r.endedAt && r.stages[r.stageIndex];
   return st && st.meetingNow ? st.agentIds : [];
 }
-// 회의 차례 이름: 의견 1/3, 차례 2/3, 판정 2/3, 결론. 그 밖(옛 세션의 'review')은 검토 2/2
-const meetLabel = (m) => (m.phase === 'conclude' ? t('결론') : m.phase === 'opinion' ? t('의견 {r}/{n}', { r: m.round, n: m.rounds }) : m.phase === 'turn' ? t('차례 {r}/{n}', { r: m.round, n: m.rounds }) : m.phase === 'judge' ? t('판정 {r}/{n}', { r: m.round, n: m.rounds }) : t('검토 {r}/{n}', { r: m.round, n: m.rounds }));
+// 회의 차례 이름: 의견 1/3, 차례 2/3, 조사 2/3, 판정 2/3, 결론. 그 밖(옛 세션의 'review')은 검토 2/2
+const meetLabel = (m) => (m.phase === 'conclude' ? t('결론') : m.phase === 'opinion' ? t('의견 {r}/{n}', { r: m.round, n: m.rounds }) : m.phase === 'turn' ? t('차례 {r}/{n}', { r: m.round, n: m.rounds }) : m.phase === 'research' ? t('조사 {r}/{n}', { r: m.round, n: m.rounds }) : m.phase === 'judge' ? t('판정 {r}/{n}', { r: m.round, n: m.rounds }) : t('검토 {r}/{n}', { r: m.round, n: m.rounds }));
+// 회의 차례 글에 붙은 질문(msg.check)의 상태 칩: [글, 칩 모양]
+const checkChip = (status) => ({ asked: [t('조사 중'), ''], answered: [t('조사해 옴'), ' ok'], 'no-researcher': [t('조사 역할 없음'), ' warn'], over: [t('조사 상한'), ' warn'], failed: [t('확인 못 함'), ' warn'] }[status] || [status, '']);
 
 // ── 사무실 패널 ──
 // 사무실 기본 높이: 화면의 30%쯤, 200~300px 사이(대화가 주인공이라 절반을 넘지 않게)
@@ -387,7 +389,11 @@ class Message extends Component {
     // 긴 답은 접어 둔다(앞부분만 보이고 '전체 보기'로 편다). 쓰는 중인 답과, 펼쳐 두기로 한 답(가장 최근 실행의 마지막 결과)은 펼친다
     this.seen ||= streaming; // 쓰는 걸 지켜본 답은 끝나도 접지 않는다(읽던 답이 갑자기 줄지 않게)
     const asks = (m.asks || []).filter((x) => x.status === 'open'); // 답은 입력창 위의 질문 창에서 한다
-    const body = hideAsks(m.text, m.asks, streaming); // 질문 블록은 입력창 위의 질문 창으로 보여 준다
+    // 질문 블록은 입력창 위의 질문 창으로, 회의 차례의 조사 질문 블록은 글 아래 "확인 필요" 줄로 보여 준다
+    const body = hideCheck(hideAsks(m.text, m.asks, streaming), m.check, streaming);
+    // 조사 결과: 누구의 어떤 질문에 답했는지(질문이 든 차례 글에서 찾는다)
+    const asker = m.checkOf ? state.sessionData[state.currentId]?.messages.find((x) => x.id === m.checkOf) : null;
+    const chip = m.check ? checkChip(m.check.status) : null;
     const long = !streaming && body.length > FOLD_CHARS;
     const folded = long && !(open ?? (!fold || this.seen));
     // 펼치고 접을 때: 대화가 맨 아래로 끌려가지 않게 알리고, 접은 뒤에는 버튼이 화면 밖으로 밀리지 않게 한다
@@ -411,8 +417,10 @@ class Message extends Component {
             : tools.map((b) => html`<${ToolBlock} b=${b} />`)}
         </div>` : ''}
         ${notices.map((b) => html`<div class="notice">${b.text}${b.count > 1 ? html` <span class="chip">×${b.count}</span>` : ''}</div>`)}
+        ${asker?.check && html`<div class="msg-check"><span class="q">🔎 ${t('{name}의 질문', { name: agentById(asker.agentId)?.name || '?' })}: ${asker.check.question}</span></div>`}
         <div class=${`msg-body md${folded ? ' folded' : ''}`} id=${`body-${m.id}`} onFocusCapture=${folded ? () => { this.props.onToggle?.(); this.setState({ open: true }); } : undefined} dangerouslySetInnerHTML=${{ __html: body.trim() ? renderMarkdown(body) : (streaming && !asks.length ? `<p class="muted">${t('작업 중…')}</p>` : '') }}></div>
         ${asks.length > 0 && html`<div class="notice">🙋 ${t('아래 질문 창에서 답해 줘.')}</div>`}
+        ${chip && html`<div class="msg-check"><span class="q">🔎 ${t('확인 필요: {q}', { q: m.check.question })}</span><span class=${`chip${chip[1]}`}>${chip[0]}</span></div>`}
         ${long && html`<button class="fold-btn" aria-expanded=${!folded} aria-controls=${`body-${m.id}`} onClick=${toggle}>${folded ? t('전체 보기 ({n}자)', { n: body.length.toLocaleString(locale()) }) : t('접기')}</button>`}
         ${m.error && html`<div class="msg-err">⚠ ${m.error}</div>`}
         <div class="msg-foot">

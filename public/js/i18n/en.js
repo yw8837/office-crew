@@ -1370,4 +1370,11 @@ export default {
   "그중 1건은 표본이 작아서 근거로는 약해.": "One of them has a small sample, so it is weak as grounds.",
   "출처: 데모 자료": "Source: demo data",
   "확인 못 함: 반대 결과를 낸 자료는 찾지 못했어.": "Not checked: no source with the opposite result was found.",
+  "조사 {r}/{n}": "Research {r}/{n}",
+  "조사 중": "Researching",
+  "조사해 옴": "Researched",
+  "조사 역할 없음": "No research role",
+  "조사 상한": "Research limit reached",
+  "확인 못 함": "Not checked",
+  "확인 필요: {q}": "Needs checking: {q}",
 };

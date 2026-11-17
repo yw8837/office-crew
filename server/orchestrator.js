@@ -11,6 +11,7 @@ import { Cooldown, isQuotaError, nearLimit, avoidUntil, resetTime, resetFromText
 import { nextMidnight, lowerEffort } from './budget.js';
 import { tr } from './i18n.js';
 import { ASK_MAX, parseAsk, cleanAnswers, answered, answerPrompt, answerRecord, askNote, stripAsks } from './ask.js';
+import { pickOpposer, turnOrder, parseVerdict, verdictBlock } from './meeting.js';
 import { writeConversation, readImported, saveImported, pickEarlier, toolNames, handoffRequest, NOTE_MAX } from './handoff.js';
 import { readTranscript } from './importer.js';
 
@@ -26,13 +27,16 @@ const localOnly = (m) => m.provider === 'local' || m.local === true;
 const MEET_CAP = 1000000; // 회의 사용량 상한 기본값(meetingSpend 기준)
 
 // 회의 단계 설정 정리: 참석자가 둘 이상일 때만 회의다. 바퀴 1~3(기본 2), 진행자는 참석자 중 한 명(기본 첫 번째),
-// 사용량 상한은 토큰(기본 1,000,000, 0 = 없음). 값이 없거나 숫자가 아니면 기본값을 쓴다
+// 사용량 상한은 토큰(기본 1,000,000, 0 = 없음). 값이 없거나 숫자가 아니면 기본값을 쓴다.
+// 반대편은 진행자가 아닌 참석자 한 명. 아니면 null(실행 때 자동으로 고른다)
 export function normMeeting(meeting, agentIds) {
   const ids = [...new Set((agentIds || []).map(String))];
   if (!meeting || ids.length < 2) return null;
   const m = typeof meeting === 'object' ? meeting : {};
   const num = (v, d, lo, hi) => { const n = v === null || v === undefined || v === '' ? NaN : Math.round(Number(v)); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
-  return { rounds: num(m.rounds, 2, 1, 3), chairId: ids.includes(String(m.chairId)) ? String(m.chairId) : ids[0], tokenCap: num(m.tokenCap, MEET_CAP, 0, 20000000) };
+  const chairId = ids.includes(String(m.chairId)) ? String(m.chairId) : ids[0];
+  const opposeId = ids.includes(String(m.opposeId)) && String(m.opposeId) !== chairId ? String(m.opposeId) : null;
+  return { rounds: num(m.rounds, 2, 1, 3), chairId, tokenCap: num(m.tokenCap, MEET_CAP, 0, 20000000), opposeId };
 }
 
 // 회의 사용량 세기: 새로 읽은 글(입력 + 캐시에 새로 쓴 것)과 쓴 글(출력)은 그대로, 캐시에서 다시 읽은 글은 10분의 1로 센다.
@@ -312,8 +316,9 @@ export class Orchestrator {
   }
 
   // ── 회의 단계 ──
-  // 1바퀴: 서로의 글을 보지 않고 각자 의견(동시에). 2바퀴부터: 남의 의견을 보고 검토(동시에). 마지막: 진행자가 결론.
-  // 바퀴 수와 사용량 상한을 넘지 않고, 사용자가 '회의 끝내기'를 누르면 그때까지 나온 의견으로 결론을 낸다.
+  // 1바퀴: 서로의 글을 보지 않고 각자 의견(동시에). 2바퀴부터: 진행자를 뺀 참석자가 한 명씩 차례로, 지금까지 나온 말을 다 보고 답한다(반대편이 맨 앞).
+  // 차례 바퀴가 끝날 때마다(마지막 바퀴 빼고) 진행자가 합의인지 판정하고, 합의면 남은 바퀴를 건너뛴다. 마지막: 진행자가 결론.
+  // 바퀴 수와 사용량 상한을 넘지 않고, 사용자가 '회의 끝내기'를 누르면 그때까지 나온 말로 결론을 낸다.
   // 다음 단계에는 결론만 넘어간다(오간 말 전체를 다시 넘기지 않는다).
   async #meeting(ctx, stageIdx, feedback) {
     const { s, run } = ctx;
@@ -321,46 +326,92 @@ export class Orchestrator {
     const ids = st.agentIds;
     const { rounds, tokenCap } = st.meeting;
     const chair = ids.includes(st.meeting.chairId) ? st.meeting.chairId : ids[0];
+    const opposer = pickOpposer(ids, chair, st.meeting.opposeId, (id) => baseProvider(this.store.get('agents', id)?.provider));
+    const order = turnOrder(ids, chair, opposer);
     const from = s.messages.length; // 이번 시도에서 만든 메시지만 센다(다시 시도 전에 쓴 양은 빼고)
     const spent = () => s.messages.slice(from).filter((m) => m.runId === run.id && m.stageIndex === stageIdx && m.meeting)
       .reduce((sum, m) => sum + meetingSpend(m.usage), 0);
     const progress = (now) => { st.meetingNow = now; this.#emitRun(ctx); };
-    const log = []; // [{ round, outs: [{ agent, text }] }]
+    const said = []; // 이번 회의에서 나온 글 [{ agent, text, round, phase }]
     ctx.meet = new Map();
     ctx.meetSeen = new Set(); // 이번 회의의 앞 차례를 자기 CLI 대화로 기억하는 참석자
     ctx.concludeNow = false;
+    // 다음 차례(판정 포함)를 시작해도 되나: 중지·회의 끝내기면 아니다. 일시정지면 풀릴 때까지 기다렸다가 다시 본다.
+    // 1바퀴 뒤에는 사용량 상한도 본다(닿았으면 알리고 결론으로)
+    const go = async (capped) => {
+      if (ctx.stopped || ctx.concludeNow) return false;
+      if (ctx.pauseRequested) {
+        const d = await this.#hold(ctx, 'paused', { reason: 'pause', stageIndex: stageIdx });
+        if (d.action === 'stop' || ctx.stopped || ctx.concludeNow) return false;
+      }
+      if (capped && tokenCap && spent() >= tokenCap) {
+        this.#systemNote(s, tr('회의에서 쓴 양(약 {used} 토큰)이 상한({cap} 토큰)에 닿아서 남은 바퀴를 건너뛰고 결론으로 넘어가.', { used: spent().toLocaleString('en-US'), cap: tokenCap.toLocaleString('en-US') }));
+        return false;
+      }
+      return true;
+    };
     let last = null;
     try {
-      for (let r = 1; r <= rounds; r++) {
-        if (ctx.stopped || ctx.concludeNow) break;
-        if (ctx.pauseRequested) {
-          const d = await this.#hold(ctx, 'paused', { reason: 'pause', stageIndex: stageIdx });
-          if (d.action === 'stop' || ctx.stopped || ctx.concludeNow) break;
-        }
-        if (r > 1 && tokenCap && spent() >= tokenCap) {
-          this.#systemNote(s, tr('회의에서 쓴 양(약 {used} 토큰)이 상한({cap} 토큰)에 닿아서 남은 바퀴를 건너뛰고 결론으로 넘어가.', { used: spent().toLocaleString('en-US'), cap: tokenCap.toLocaleString('en-US') }));
-          break;
-        }
-        const prev = log.at(-1)?.outs || [];
-        ctx.meet.clear();
-        for (const id of ids) ctx.meet.set(id, { phase: r === 1 ? 'opinion' : 'review', round: r, rounds, chair, others: prev.filter((o) => o.agent?.id !== id) });
-        progress({ phase: r === 1 ? 'opinion' : 'review', round: r, rounds });
+      if (await go(false)) {
+        for (const id of ids) ctx.meet.set(id, { phase: 'opinion', round: 1, rounds, chair });
+        progress({ phase: 'opinion', round: 1, rounds });
         last = await this.#together(ctx, stageIdx, ids, feedback);
         if (ctx.stopped) return last;
-        const outs = last.filter((o) => o.text && o.text.trim() && !o.error).map((o) => ({ agent: o.agent, text: o.stopped ? `${o.text.trim()}\n${tr('(쓰는 도중에 끊긴 글이야)')}` : o.text }));
-        if (outs.length) log.push({ round: r, outs });
+        for (const o of last) {
+          if (o.text && o.text.trim() && !o.error) said.push({ agent: o.agent, text: o.stopped ? `${o.text.trim()}\n${tr('(쓰는 도중에 끊긴 글이야)')}` : o.text, round: 1, phase: 'opinion' });
+        }
         // 낸 의견이 하나도 없으면 결론을 낼 수 없다 → 이 단계의 오류로 넘긴다(다시 시도·건너뛰기·중지를 고른다)
-        if (!log.length) return last.some((o) => o.error) ? last : [{ agent: this.store.get('agents', chair), error: tr('회의에서 나온 의견이 없어.') }];
+        if (!said.length) return last.some((o) => o.error) ? last : [{ agent: this.store.get('agents', chair), error: tr('회의에서 나온 의견이 없어.') }];
         const failed = last.filter((o) => o.error);
+        if (failed.length) this.#systemNote(s, tr('회의 {r}바퀴에서 {names}의 답을 받지 못했어. 나머지 의견으로 이어가.', { r: 1, names: failed.map((o) => o.agent?.name || '?').join(', ') }));
+      }
+      for (let r = 2; r <= rounds && said.length; r++) {
+        const before = said.length;
+        const failed = [];
+        let open = true;
+        for (const id of order) {
+          if (!(open = await go(true))) break;
+          ctx.meet.clear();
+          ctx.meet.set(id, { phase: 'turn', round: r, rounds, chair, opposer: id === opposer, opposerId: opposer, said: said.slice() });
+          progress({ phase: 'turn', round: r, rounds, speakerId: id });
+          last = await this.#together(ctx, stageIdx, [id], feedback);
+          if (ctx.stopped) return last;
+          const [o] = last;
+          // 오류·중지·건너뛰기·빈 답인 차례는 빼고 다음 사람으로
+          if (o.error) failed.push(o);
+          else if (!o.stopped && o.text && o.text.trim()) said.push({ agent: o.agent, text: o.text, round: r, phase: 'turn' });
+        }
         if (failed.length) this.#systemNote(s, tr('회의 {r}바퀴에서 {names}의 답을 받지 못했어. 나머지 의견으로 이어가.', { r, names: failed.map((o) => o.agent?.name || '?').join(', ') }));
-        if (outs.length < 2) break; // 의견이 하나뿐이면 서로 검토할 게 없다
+        // 끊겼거나, 이번 바퀴에 아무도 말하지 못했거나, 마지막 바퀴였으면 판정 없이 결론으로
+        if (!open || said.length === before || r === rounds || !(await go(true))) break;
+        // 판정: 진행자가 합의인지 본다. 답 끝의 판정 블록만 읽고, 없거나 못 읽으면 "계속"
+        ctx.meet.clear();
+        ctx.meet.set(chair, { phase: 'judge', round: r, rounds, chair, opposerId: opposer, said: said.slice() });
+        progress({ phase: 'judge', round: r, rounds });
+        const mark = s.messages.length;
+        last = await this.#together(ctx, stageIdx, [chair], feedback);
+        if (ctx.stopped) return last;
+        const [j] = last;
+        const jm = s.messages.slice(mark).find((m) => m.runId === run.id && m.stageIndex === stageIdx && m.agentId === chair && m.meeting?.phase === 'judge');
+        const v = jm && !j.error && !j.stopped ? parseVerdict(jm.text) : null;
+        if (v?.error) {
+          this.#notice(s, jm, tr('판정 형식이 맞지 않아서 "계속"으로 봤어.')); // 못 읽은 블록은 글로 남긴다
+          this.store.saveSession(s, 100);
+        } else if (v) {
+          // 읽은 블록은 글에서 지우고 판정으로 남긴다
+          jm.verdict = { verdict: v.verdict, reason: v.reason };
+          jm.text = `${jm.text.slice(0, v.from)}${jm.text.slice(v.to)}`.trimEnd();
+          this.bus.emit('message', { sessionId: s.id, message: jm });
+          this.store.saveSession(s, 100);
+          if (v.verdict === 'agree') break;
+        }
       }
       if (ctx.stopped) return last || [];
-      if (!log.length) return [{ agent: this.store.get('agents', chair), error: tr('회의에서 나온 의견이 없어.') }];
+      if (!said.length) return [{ agent: this.store.get('agents', chair), error: tr('회의에서 나온 의견이 없어.') }];
       ctx.meet.clear();
-      ctx.meet.set(chair, { phase: 'conclude', rounds, chair, log });
+      ctx.meet.set(chair, { phase: 'conclude', rounds, chair, opposerId: opposer, said });
       ctx.concludeNow = false;
-      progress({ phase: 'conclude', round: log.length, rounds });
+      progress({ phase: 'conclude', round: said.at(-1).round, rounds });
       const [conclusion] = await this.#together(ctx, stageIdx, [chair], feedback);
       if (!ctx.stopped && !conclusion.error && !conclusion.stopped) for (const id of ids) this.#state(s.id, id, 'done', tr('회의 끝'));
       return [conclusion];
@@ -390,24 +441,40 @@ export class Orchestrator {
         noEdit,
       ].join('\n');
     }
-    if (meet.phase === 'review') {
+    // 지금까지 나온 글(1바퀴 의견 + 차례 발언)을 바퀴별로 묶는다
+    const talk = [...new Set(meet.said.map((x) => x.round))]
+      .map((r) => `## ${tr('{r}바퀴', { r })}\n\n${meet.said.filter((x) => x.round === r).map(wrap).join('\n\n')}`).join('\n\n');
+    const who = meet.opposerId ? tr('반대편: {name}.', { name: name(meet.opposerId) }) : '';
+    if (meet.phase === 'turn') {
       return [
-        tr('[회의 — 서로 검토 ({r}/{n}바퀴)]', { r: meet.round, n: meet.rounds }), head, guard,
-        meet.others.map(wrap).join('\n\n'),
-        tr('위 의견을 읽고 아래 형식에 맞춰 400자 안팎으로 써.'),
-        `- ${tr('가장 설득력 있는 점: 누구의 무엇')}\n- ${tr('가장 약한 가정: 누구의 무엇이고 왜')}\n- ${tr('내 의견에서 고칠 점: 없으면 "없음"')}\n- ${tr('지금 내 입장: 한 문장(바뀌었으면 바뀌었다고)')}`,
+        tr('[회의 — 차례 발언 ({r}/{n}바퀴)]', { r: meet.round, n: meet.rounds }), head, who, guard, talk,
+        tr('앞에 나온 말 중 하나를 골라 답해. 300자 안팎으로, 아래 형식에 맞춰.'),
+        `- ${tr('답하는 말: 누구의 어떤 말인지')}\n- ${tr('내 말: 동의하면 무엇을 더할지, 반대하면 왜인지')}\n- ${tr('입장: 지금 미는 안 한 줄(바꿨으면 무엇을 보고 바꿨는지도)')}`,
+        meet.opposer ? tr('너는 이번 회의에서 반대편이야. 지금 가장 힘을 받는 안의 약점, 빠진 것, 틀릴 조건을 찾아서 말해. 근거 없이 꾸며 내지는 마. 반대할 게 정말 없으면 무엇을 확인했는지 적어.') : '',
+        !meet.opposer && meet.opposerId && meet.round >= 2 ? tr('반대편이 짚은 약점이 있으면 그것부터 답해.') : '',
         noEdit,
-      ].join('\n');
+      ].filter(Boolean).join('\n');
     }
+    if (meet.phase === 'judge') {
+      return [
+        tr('[회의 — 판정 ({r}/{n}바퀴)]', { r: meet.round, n: meet.rounds }), head, who, guard, talk,
+        tr('너는 이 회의의 진행자야. 지금 결론을 낼 수 있는지 판정해. 반대편을 뺀 참석자들의 "입장"이 같은 안을 가리키고, 반대편의 지적 중에 결론을 바꿀 만한 것이 답 없이 남아 있지 않으면 합의야.'),
+        noEdit,
+        tr('한두 문장으로 이유를 쓰고, 답 맨 끝에 아래 블록 하나만 써. 블록 뒤에는 아무것도 쓰지 마.'),
+        verdictBlock(),
+      ].filter(Boolean).join('\n');
+    }
+    // 결론에는 반대편이 이번 회의에서 차례 발언을 한 번이라도 했을 때만 이름을 적는다(1바퀴 회의·차례 전에 끝난 회의에는 반대편 말이 없다)
+    const opposerSpoke = meet.said.some((x) => x.phase === 'turn' && x.agent?.id === meet.opposerId);
     return [
-      tr('[회의 — 결론 내기]'), head,
+      tr('[회의 — 결론 내기]'), head, opposerSpoke ? who : '',
       tr('너는 이 회의의 진행자야. 참석자들이 낸 의견 전체를 읽고 결론을 내.'), guard,
-      meet.log.map((x) => `## ${tr('{r}바퀴', { r: x.round })}\n\n${x.outs.map(wrap).join('\n\n')}`).join('\n\n'),
+      talk,
       tr('아래 형식으로 써. 의견이 갈리면 억지로 합치지 말고 갈린 채로 적어.'),
-      `## ${tr('회의 결론')}\n- ${tr('결정: 하나를 고름 / 합침 / 전부 버림 / 새 안 중 무엇인지와 그 내용')}\n- ${tr('근거: 어느 의견의 어떤 점 때문인지')}\n- ${tr('남은 이견: 없으면 "없음"')}\n- ${tr('다음 할 일: 누가 무엇을')}`,
+      `## ${tr('회의 결론')}\n- ${tr('결정: 하나를 고름 / 합침 / 전부 버림 / 새 안 중 무엇인지와 그 내용')}\n- ${tr('근거: 어느 의견의 어떤 점 때문인지')}\n- ${tr('남은 이견: 없으면 "없음"')}\n- ${tr('버린 안: 무엇을 왜 버렸는지(없으면 "없음")')}\n- ${tr('다음 할 일: 누가 무엇을')}`,
       tr('다음 단계 담당은 이 결론만 보고 일해. 결론만 읽어도 알 수 있게 써.'),
       noEdit,
-    ].join('\n');
+    ].filter(Boolean).join('\n');
   }
 
   #hold(ctx, status, info) {
@@ -590,7 +657,7 @@ export class Orchestrator {
       usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, durationMs: 0 }, createdAt: Date.now(),
     };
     const meet = ctx.meet?.get(agentId);
-    if (meet) msg.meeting = { phase: meet.phase, round: meet.round || null, rounds: meet.rounds };
+    if (meet) msg.meeting = { phase: meet.phase, round: meet.round || null, rounds: meet.rounds, ...(meet.opposer ? { opposer: true } : {}) };
     if (ctx.userMsg?.handoffAsk) msg.handoff = true; // 이 답이 인수인계 메모다
     s.messages.push(msg);
     this.bus.emit('message', { sessionId: s.id, message: msg });

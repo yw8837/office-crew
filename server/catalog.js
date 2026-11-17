@@ -289,7 +289,7 @@ export class Catalog {
         ...t, id: undefined, pluginId,
         stages: (t.stages || []).map((s) => {
           const agentIds = [...new Set((s.agentIds || []).map((id) => idMap.get(id)).filter(Boolean))];
-          const meeting = s.meeting && typeof s.meeting === 'object' ? { ...s.meeting, chairId: idMap.get(s.meeting.chairId) } : s.meeting;
+          const meeting = s.meeting && typeof s.meeting === 'object' ? { ...s.meeting, chairId: idMap.get(s.meeting.chairId), opposeId: idMap.get(s.meeting.opposeId) } : s.meeting;
           return { ...s, id: newId('st'), agentIds, meeting: normMeeting(meeting, agentIds) };
         }),
       }, 'team');

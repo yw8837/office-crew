@@ -10,8 +10,9 @@ Keep a record under about 100 lines. When a decision changes, add a dated "Revis
 | [0002](0002-no-antigravity-cli.md) | Google Antigravity CLI isn't supported | Accepted |
 | [0003](0003-dual-license.md) | AGPL-3.0 or a commercial license | Accepted |
 | [0004](0004-project-memory-on-disk.md) | Project memory is verbatim text on disk with a rebuildable keyword index | Accepted |
-| [0005](0005-meeting-stage.md) | A team stage can be a meeting with fixed rounds and a chair | Accepted |
+| [0005](0005-meeting-stage.md) | A team stage can be a meeting with fixed rounds and a chair | Accepted (its flow from round 2 is replaced by 0010) |
 | [0006](0006-hire-proposal-in-chat.md) | A hire request in the chat becomes a proposal the user approves | Accepted |
 | [0007](0007-local-only-user-messages.md) | What you type to a local model stays away from cloud AIs | Accepted |
 | [0008](0008-handoff-to-another-ai.md) | Another AI that takes over a session gets the earlier conversation three ways | Accepted |
 | [0009](0009-agents-ask-with-a-marked-block.md) | An agent asks the user by writing a marked block in its answer | Accepted |
+| [0010](0010-meetings-take-turns.md) | Meetings take turns, and the chair judges after each round (replaces the flow part of 0005) | Accepted |

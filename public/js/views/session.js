@@ -8,6 +8,7 @@ import { renderMarkdown } from '../markdown.js';
 import { t, getLang, locale, tmap } from '../i18n/index.js';
 import { MemoryBadge } from './memory.js';
 import { continueList, findInMessages, hideAsks, hideCheck } from '../chat-tools.js';
+import { researcherOf } from '../office/meeting.js';
 
 export const sessionAgents = (s) => {
   if (!s) return [];
@@ -64,6 +65,12 @@ function meetingIds(s) {
   const st = r && !r.endedAt && r.stages[r.stageIndex];
   return st && st.meetingNow ? st.agentIds : [];
 }
+// 지금 진행 중인 회의의 진행 표시(run.stages[i].meetingNow)와 진행자. 회의 중이 아니면 now 가 null
+function liveMeeting(s) {
+  const r = latestRun(s);
+  const st = r && !r.endedAt && r.stages[r.stageIndex];
+  return { now: (st && st.meetingNow) || null, chairId: (st && ((st.meeting && st.meeting.chairId) || st.agentIds[0])) || null };
+}
 // 회의 차례 이름: 의견 1/3, 차례 2/3, 조사 2/3, 판정 2/3, 결론. 그 밖(옛 세션의 'review')은 검토 2/2
 const meetLabel = (m) => (m.phase === 'conclude' ? t('결론') : m.phase === 'opinion' ? t('의견 {r}/{n}', { r: m.round, n: m.rounds }) : m.phase === 'turn' ? t('차례 {r}/{n}', { r: m.round, n: m.rounds }) : m.phase === 'research' ? t('조사 {r}/{n}', { r: m.round, n: m.rounds }) : m.phase === 'judge' ? t('판정 {r}/{n}', { r: m.round, n: m.rounds }) : t('검토 {r}/{n}', { r: m.round, n: m.rounds }));
 // 회의 차례 글에 붙은 질문(msg.check)의 상태 칩: [글, 칩 모양]
@@ -82,6 +89,8 @@ function OfficePanel({ s, full, onCollapse }) {
 
   const meta = (a) => ({ id: a.id, name: a.name, role: a.role, model: agentModelText(a, state.sessionData[s.id]), color: providerColorOf(a), avatar: a.avatar || {} });
   const meetKey = meetingIds(s).join(',');
+  // 회의 중 조사하러 간 사람(참석자가 아니어도): 그 동안 조사 자리로 간다
+  const errandId = researcherOf(liveMeeting(s).now) || '';
 
   useEffect(() => {
     if (!mod || !host.current) return undefined;
@@ -102,9 +111,9 @@ function OfficePanel({ s, full, onCollapse }) {
     for (const a of agents) {
       const l = live[a.id];
       const u = agentUsage(s, a.id);
-      o.setState(a.id, { state: l?.state || 'idle', text: l?.detail || '', tool: l?.tool || null, tokens: usageTotal(u), badge: badgeFor(a, u), meeting: meetKey.split(',').includes(a.id) });
+      o.setState(a.id, { state: l?.state || 'idle', text: l?.detail || '', tool: l?.tool || null, tokens: usageTotal(u), badge: badgeFor(a, u), meeting: meetKey.split(',').includes(a.id), errand: a.id === errandId ? 'search' : null });
     }
-  }, [key, s.id, mod, meetKey]);
+  }, [key, s.id, mod, meetKey, errandId]);
 
   useEffect(() => { officeRef.current?.setSkin(skinValue()); }, [state.settings.skin, state.skins.length]);
   useEffect(() => { officeRef.current?.setLanguage?.(uiLang()); }, [state.settings.lang]);
@@ -120,7 +129,8 @@ function OfficePanel({ s, full, onCollapse }) {
       const a = agentById(d.agentId);
       const u = agentUsage(state.sessionData[s.id], d.agentId);
       if (a && !agents.some((x) => x.id === a.id)) o.setAgents([...agents, a].map(meta));
-      o.setState(d.agentId, { state: d.state, text: d.detail, tool: d.tool, tokens: usageTotal(u), badge: a ? badgeFor(a, u) : '', meeting: meetingIds(state.sessionData[s.id] || s).includes(d.agentId) });
+      const cur = state.sessionData[s.id] || s;
+      o.setState(d.agentId, { state: d.state, text: d.detail, tool: d.tool, tokens: usageTotal(u), badge: a ? badgeFor(a, u) : '', meeting: meetingIds(cur).includes(d.agentId), errand: researcherOf(liveMeeting(cur).now) === d.agentId ? 'search' : null });
       // 도우미는 Task/Agent 도구가 실행 중이거나(끝나면 state 가 thinking 으로 바뀜) 하위 도구(↳)가 도는 동안만 머문다
       const tool = d.tool || '';
       const keep = (/^(Task|Agent)$/i.test(tool) && !['thinking', 'done', 'error', 'paused', 'idle'].includes(d.state)) || tool.startsWith('↳');

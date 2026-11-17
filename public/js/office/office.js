@@ -191,9 +191,9 @@ export function createOffice(container, opts = {}) {
   function makeChar(agent, extra = {}) {
     const ch = {
       id: agent.id, agent, helper: !!extra.helper, parentId: extra.parentId || null,
-      st: { state: 'idle', text: '', tool: '', tokens: null, badge: '' },
+      st: { state: 'idle', text: '', tool: '', tokens: null, badge: '', errand: null },
       desk: null, pos: [0, 0], lift: 0, face: 'front', flip: 1, pose: 'stand', at: 'desk',
-      dest: null, targetKey: null, spot: null, walking: null, dist: 0,
+      dest: null, targetKey: null, spot: null, hold: null, holdEl: null, walking: null, dist: 0,
       busy: false, queue: Promise.resolve(), carry: null, flash: null, visitors: 0,
       timers: {}, longThink: false, relax: false, leaving: false, gone: false,
       scale: extra.helper ? 0.7 : 1, home: null, house: null, screenKey: null,
@@ -222,6 +222,7 @@ export function createOffice(container, opts = {}) {
     clearTimers(ch);
     clearTimeout(ch.flashTimer);
     releaseSpot(ch);
+    releaseHold(ch);
     removeItem(ch.item);
     ch.ov.root.remove();
     chars.delete(ch.id);
@@ -356,6 +357,8 @@ export function createOffice(container, opts = {}) {
   function desired(ch) {
     const s = ch.st.state, t = ch.st.tool;
     if (ch.leaving) return 'door';
+    // 회의 중 조사를 맡으면 모임 자리보다 먼저 조사 자리(마을은 전망탑, 사무실은 정보검색실)로 간다. 그 자리가 없는 스킨이면 건너뛴다
+    if (ch.st.errand && !ch.helper && scene.spots[ch.st.errand] && scene.spots[ch.st.errand].length) return ch.st.errand;
     // 회의 중인 참석자는 차례가 아니어도 모임 자리(마을은 광장, 사무실은 회의실)에 머문다
     if (ch.st.meeting && !ch.helper && scene.spots.meeting && scene.spots.meeting.length) return 'meeting';
     // 마을: 쉬거나 퇴근(완료 후)이면 자기 집으로
@@ -369,11 +372,12 @@ export function createOffice(container, opts = {}) {
     if (spot && scene.spots[spot] && scene.spots[spot].length) return spot;
     return 'home';
   }
-  function claimSpot(ch, name) {
+  // keep: 맡아 둔 자리 번호(조사하러 갔다 돌아올 때 그 자리로)
+  function claimSpot(ch, name, keep) {
     const defs = scene.spots[name];
     let occ = spotOcc.get(name);
     if (!occ) spotOcc.set(name, (occ = []));
-    let k = occ.findIndex((x) => !x);
+    let k = keep != null && occ[keep] === ch.id ? keep : occ.findIndex((x) => !x);
     if (k < 0) k = occ.length;
     occ[k] = ch.id;
     ch.spot = { name, k };
@@ -388,19 +392,59 @@ export function createOffice(container, opts = {}) {
     if (occ && occ[ch.spot.k] === ch.id) occ[ch.spot.k] = null;
     ch.spot = null;
   }
+  // 회의 참석자가 조사하러 가 있는 동안 모임 자리를 맡아 둔다: 다른 사람이 차지하지 않고, 그 자리에 "조사 중" 표가 붙는다
+  function holdSeat(ch, want) {
+    const away = !!(ch.st.meeting && ch.st.errand && want !== 'meeting' && !ch.helper && scene.spots.meeting && scene.spots.meeting.length);
+    if (!away) {
+      if (ch.hold && want !== 'meeting') releaseHold(ch);
+      return;
+    }
+    if (ch.hold) return;
+    if (ch.spot && ch.spot.name === 'meeting') {
+      ch.hold = { ...ch.spot, pos: (ch.dest && ch.dest.at === 'meeting' ? ch.dest.pos : ch.pos).slice() };
+      ch.spot = null;
+    } else {
+      const prev = ch.spot;
+      const d = claimSpot(ch, 'meeting');
+      ch.hold = { ...ch.spot, pos: d.pos };
+      ch.spot = prev;
+    }
+    const m = div('oc-away');
+    const t = div('oc-away-in');
+    t.textContent = T('meet.away');
+    m.append(t);
+    const [sx, sy] = scene.toScreen(ch.hold.pos, 0);
+    m.style.transform = `translate(${sx.toFixed(1)}px,${sy.toFixed(1)}px)`;
+    ovl.append(m);
+    ch.holdEl = m;
+  }
+  // keep: 그 자리를 다시 차지했으니 표만 떼고 자리는 놓지 않는다
+  function releaseHold(ch, keep) {
+    if (!ch.hold) return;
+    if (!keep) {
+      const occ = spotOcc.get(ch.hold.name);
+      if (occ && occ[ch.hold.k] === ch.id) occ[ch.hold.k] = null;
+    }
+    if (ch.holdEl) ch.holdEl.remove();
+    ch.hold = null;
+    ch.holdEl = null;
+  }
   function reconcile(ch, instant) {
     if (!scene || ch.busy || destroyed) return;
     const want = desired(ch);
+    holdSeat(ch, want);
     if (ch.targetKey === want) {
       if (!ch.walking) settle(ch);
       else apply(ch);
       return;
     }
     releaseSpot(ch);
+    const keep = want === 'meeting' && ch.hold ? ch.hold.k : null;
     const dest = want === 'home' ? homeDef(ch) : want === 'door'
       ? { pos: scene.doorPos.slice(), pose: 'stand', face: 'back', flip: -1, at: 'door' }
       : want === 'house' ? { pos: ch.house.door.slice(), pose: 'stand', face: 'back', flip: 1, at: 'house' }
-      : claimSpot(ch, want);
+      : claimSpot(ch, want, keep);
+    if (keep != null) releaseHold(ch, true);
     ch.targetKey = want;
     ch.dest = dest;
     if (instant || still()) {
@@ -615,11 +659,12 @@ export function createOffice(container, opts = {}) {
     const ch = chars.get(id);
     if (!ch || !patch || typeof patch !== 'object') return;
     const prev = ch.st.state, prevTool = ch.st.tool;
-    const prevMeet = !!ch.st.meeting;
+    const prevMeet = !!ch.st.meeting, prevErrand = ch.st.errand;
     for (const k of ['state', 'text', 'tool', 'tokens', 'badge', 'meeting']) if (patch[k] !== undefined) ch.st[k] = patch[k];
+    if (patch.errand !== undefined) ch.st.errand = patch.errand === 'search' ? 'search' : null; // 심부름: 지금은 회의 중 조사('search')만
     if (!STATES.has(ch.st.state)) ch.st.state = 'idle';
     if (ch.st.state !== prev) onStateChange(ch);
-    else if (ch.st.tool !== prevTool || !!ch.st.meeting !== prevMeet) reconcile(ch);
+    else if (ch.st.tool !== prevTool || !!ch.st.meeting !== prevMeet || ch.st.errand !== prevErrand) reconcile(ch);
     apply(ch);
   }
 
@@ -828,6 +873,8 @@ export function createOffice(container, opts = {}) {
       ch.screenKey = null;
       ch.targetKey = null;
       ch.spot = null;
+      ch.hold = null; // 맡아 둔 모임 자리와 그 표도 새 씬에서 다시 잡는다(표는 위에서 ovl 과 함께 지워졌다)
+      ch.holdEl = null;
       attach(ch);
     }
     for (const ch of chars.values()) {
@@ -1139,6 +1186,7 @@ export function createOffice(container, opts = {}) {
       updateTag(ch);
       updateBubble(ch);
       ch.ov.dirty = true;
+      if (ch.holdEl) ch.holdEl.firstChild.textContent = T('meet.away');
     }
     scheduleLayout();
   }

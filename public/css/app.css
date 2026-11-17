@@ -530,16 +530,20 @@ pre.raw { background: var(--code-bg); padding: 10px 12px; border-radius: 10px; f
 @media (max-width: 860px) { .chat-top { padding: 6px 14px; } .msg.agent { padding: 10px 10px 9px; gap: 8px; } .msg-body { font-size: 15px; } }
 .msg.flash { border-radius: 14px; }
 
-/* 에이전트의 질문(선택 카드) */
-.ask { margin-top: 10px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border-2)); background: var(--accent-soft); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; }
-.ask-title { font-weight: 700; font-size: 14px; }
-.ask .chip.accent { background: var(--panel); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border-2)); }
-.ask-q { border: 0; padding: 0; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-.ask-q legend { padding: 0; margin-bottom: 8px; font-weight: 600; font-size: 15px; line-height: 1.5; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.ask-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
-.ask-opt { text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 9px 12px; border-radius: 10px; border: 1.5px solid var(--border-2); background: var(--panel); color: var(--text); cursor: pointer; font-size: 14px; line-height: 1.45; }
-.ask-opt span { font-size: 13px; color: var(--text-2); }
-.ask-opt:hover:not(:disabled) { border-color: var(--accent); }
-.ask-opt.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
-.ask-opt:disabled { opacity: .6; cursor: default; }
-.ask .row { flex-wrap: wrap; }
+/* 에이전트의 질문 창(입력창 바로 위) */
+.ask-panel { max-width: 800px; margin: 0 auto 8px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border-2)); background: var(--panel); border-radius: 16px; box-shadow: var(--shadow); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.ask-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--text-2); }
+.ask-who { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-weight: 600; }
+.ask-question { font-weight: 700; font-size: 15px; line-height: 1.5; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ask-rows { display: flex; flex-direction: column; gap: 4px; max-height: 38vh; overflow: auto; }
+.ask-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 8px 10px; border-radius: 10px; border: 1px solid transparent; background: var(--panel-2); color: var(--text); cursor: pointer; font-size: 14px; line-height: 1.45; }
+.ask-row:hover:not(:disabled), .ask-row:focus-visible { border-color: var(--accent); }
+.ask-row.on { border-color: var(--accent); background: var(--accent-soft); }
+.ask-row:disabled { opacity: .6; cursor: default; }
+.ask-num { flex: none; width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--panel); font-size: 12px; font-weight: 700; display: grid; place-items: center; color: var(--text-2); }
+.ask-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; overflow-wrap: anywhere; }
+.ask-row-text span { font-size: 13px; color: var(--text-2); }
+.ask-go { flex: none; color: var(--text-2); }
+.ask-foot { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ask-foot .input { flex: 1; min-width: 160px; }
+.ask-mini { display: block; max-width: 800px; width: 100%; margin: 0 auto 8px; padding: 7px 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border-2)); background: var(--accent-soft); color: var(--text); font-size: 13px; text-align: left; cursor: pointer; }

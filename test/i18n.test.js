@@ -122,3 +122,21 @@ test('첫 실행 기본 데이터는 OS 언어로 만들어지고, 번역된 역
   }
   if (saved === undefined) delete process.env.LANG; else process.env.LANG = saved;
 });
+
+test('사전에 같은 키가 두 번 나오지 않는다(뒤에 온 값이 앞의 뜻을 조용히 덮는다)', () => {
+  const KEY = /^\s{2}("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')\s*:/;
+  const plain = (lit) => lit.slice(1, -1).replace(/\\(['"\\])/g, '$1');
+  for (const lang of ['en', 'zh', 'ja']) {
+    const file = new URL(`../public/js/i18n/${lang}.js`, import.meta.url);
+    const seen = new Set();
+    const twice = [];
+    for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+      const m = line.match(KEY);
+      if (!m) continue;
+      const k = plain(m[1]);
+      if (seen.has(k)) twice.push(k);
+      seen.add(k);
+    }
+    assert.deepEqual(twice, [], `${lang}: 두 번 나온 키`);
+  }
+});

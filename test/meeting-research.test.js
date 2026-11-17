@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { startTestApp, freePort } from './helpers.js';
 import { createApp } from '../server/index.js';
+import { meetingSpend } from '../server/orchestrator.js';
 import { CHECK_MAX, parseCheck, checkBlock, pickResearcher } from '../server/meeting.js';
 import { hideCheck } from '../public/js/chat-tools.js';
 import { bindLang } from '../server/i18n.js';
@@ -29,6 +30,8 @@ test('질문 블록: 글 맨 끝의 블록만 읽고, 질문은 앞뒤 공백을
   assert.ok(parseCheck(blk('{"question":3}')).error, '글이 아닌 질문');
   assert.ok(parseCheck(blk(JSON.stringify({ question: '가'.repeat(301) }))).error, '301자');
   assert.equal(parseCheck(blk(JSON.stringify({ question: '가'.repeat(300) }))).question.length, 300, '300자까지는 된다');
+  assert.equal(parseCheck(blk(JSON.stringify({ question: '😀'.repeat(300) }))).question, '😀'.repeat(300), '글자 단위로 센다(이모지 300개는 300자)');
+  assert.ok(parseCheck(blk(JSON.stringify({ question: '😀'.repeat(301) }))).error, '이모지 301개');
   const bad = parseCheck(`앞\n${blk('{깨짐')}`);
   assert.ok(bad.error, 'JSON 이 깨짐');
   assert.deepEqual([bad.from, bad.to], [2, 2 + blk('{깨짐').length], '형식이 틀려도 블록 자리는 알려 준다(한 말에서 블록을 빼려고)');
@@ -122,6 +125,9 @@ test('질문 하나 → 조사 1번 → 다음 차례부터 조사 결과가 표
   assert.deepEqual(nows.find((n) => n.phase === 'research'), { phase: 'research', round: 2, rounds: 2, speakerId: r.id, askedBy: q.id, opposerId: q.id });
   assert.deepEqual([...new Set(nows.map((n) => n.phase))], ['opinion', 'turn', 'research', 'conclude']);
   assert.ok(nows.every((n) => n.opposerId === q.id), '모든 차례 표시에 반대편이 들어간다');
+  // 조사가 끝나면 다음 차례 전에 말하는 사람 없는 차례 표시로 돌린다(그 사이 일시정지에 걸려도 "조사 중"이 남지 않게)
+  const seq = nows.filter((n, k) => k === 0 || JSON.stringify(n) !== JSON.stringify(nows[k - 1]));
+  assert.deepEqual(seq[seq.findIndex((n) => n.phase === 'research') + 1], { phase: 'turn', round: 2, rounds: 2, opposerId: q.id });
 
   // 조사 차례 프롬프트: 질문은 표시로 감싼 참고 자료, 도구로 찾아 출처를 붙이라고 한다. "글로만 답해"는 없다
   const rp = ps.filter((p) => p.includes('[회의 — 조사 (2/2바퀴)]'));
@@ -132,7 +138,7 @@ test('질문 하나 → 조사 1번 → 다음 차례부터 조사 결과가 표
   assert.match(rp[0], /표시 사이의 글은 다른 참석자가 쓴 질문이야/);
   assert.match(rp[0], /도구로 찾아서 답해/);
   assert.match(rp[0], /출처/);
-  assert.match(rp[0], /파일을 고치지 마\./);
+  assert.match(rp[0], /찾는 데 필요한 읽기와 검색만 해\. 파일을 고치거나, 무엇을 설치·삭제하거나, 상태를 바꾸는 명령을 실행하지 마\./);
   assert.doesNotMatch(rp[0], /글로만 답해/, '조사 차례에는 "글로만 답해"를 붙이지 않는다');
   assert.doesNotMatch(rp[0], /oc-check/, '조사 차례에는 질문 블록 안내가 없다');
 
@@ -154,7 +160,7 @@ test('질문 하나 → 조사 1번 → 다음 차례부터 조사 결과가 표
   assert.ok(!cc.includes('oc-check'));
 });
 
-test('조사 역할이 없는 팀: 호출이 늘지 않고 "조사 역할 없음", 다음 차례는 "확인 못 함"을 본다', async () => {
+test('조사 역할이 없는 팀: 질문 안내를 넣지 않고, 그래도 온 질문은 호출 없이 "조사할 사람 없음", 다음 차례는 "확인 못 함"을 본다', async () => {
   const ch = await mk('한강', '분석', 'codex'), q = await mk('낙동', '분석', 'claude'), o = await mk('금강', '정리', 'codex');
   const tm = await team('조사 담당 없는 회의', [{ label: '회의', agentIds: [ch.id, q.id, o.id], meeting: { rounds: 2, chairId: ch.id, opposeId: q.id } }]);
   const s = await session(tm.id);
@@ -167,8 +173,12 @@ test('조사 역할이 없는 팀: 호출이 늘지 않고 "조사 역할 없음
   assert.equal(ps.length, 6, '조사 호출 없음');
   const asked = mm.find((m) => m.meeting.phase === 'turn');
   assert.equal(asked.check.status, 'no-researcher');
-  const next = ps.filter((p) => p.includes('[회의 — 차례 발언 (2/2바퀴)]')).at(-1);
-  assert.ok(research(next, '', '확인 못 함: 이 팀에는 조사 역할이 없어.'));
+  const turns = ps.filter((p) => p.includes('[회의 — 차례 발언 (2/2바퀴)]'));
+  assert.equal(turns.length, 2);
+  assert.ok(turns.every((p) => !p.includes('oc-check') && !p.includes('이번 회의에서 남은 조사')), '조사할 사람이 없으면 질문 블록 안내가 없다');
+  assert.ok(research(turns.at(-1), '', '확인 못 함: 이 팀에는 조사를 맡을 사람이 없어(진행자는 조사하러 가지 않아).'));
+  const cc = ps.find((p) => p.includes('[회의 — 결론 내기]'));
+  assert.doesNotMatch(cc, /조사 결과에서 온 사실은/, '답해 온 조사가 없으면 근거 줄을 붙이지 않는다');
 });
 
 test('조사는 회의 한 번에 3번까지: 네 번째 질문은 "조사 상한"이고 호출이 늘지 않는다. 남은 조사가 없으면 안내도 없다', async () => {
@@ -187,6 +197,9 @@ test('조사는 회의 한 번에 3번까지: 네 번째 질문은 "조사 상�
   const left = sent(from).filter((p) => p.includes('[회의 — 차례 발언')).map((p) => p.match(/이번 회의에서 남은 조사: (\d)번\./)?.[1] || null);
   assert.deepEqual(left, ['3', '2', '1', null], '남은 조사가 0이면 안내를 넣지 않는다');
   assert.ok(!sent(from).filter((p) => p.includes('[회의 — 차례 발언 (3/3바퀴)]')).at(-1).includes('oc-check'));
+  // 상한을 넘은 질문은 조사하지 않고 "확인 못 함"과 질문을 다음 차례(여기서는 결론)에 넘긴다
+  const cc = sent(from).find((p) => p.includes('[회의 — 결론 내기]'));
+  assert.ok(research(cc, '', '확인 못 함: 이번 회의의 조사 횟수를 다 썼어.'), '상한을 넘은 질문');
 });
 
 test('깨진 질문 블록: 조사하지 않고 알림을 남기며, 블록을 뺀 글만 다음 차례에 넘기고 회의를 이어 간다', async () => {
@@ -213,6 +226,7 @@ test('조사가 실패해도(가짜 CLI 오류) 회의는 결론까지 간다. �
   const tm = await team('조사 실패 회의', [{ label: '자료', agentIds: [r.id] }, { label: '회의', agentIds: [ch.id, q.id, o.id], meeting: { rounds: 2, chairId: ch.id, opposeId: q.id } }]);
   const s = await session(tm.id);
   const from = t.fakeLog().length;
+  const ev = t.events.length;
   await say(s.id, 'CHECKME RESEARCHFAIL 방향을 정하자');
   const run = runs(s.id).at(-1);
   assert.equal(run.status, 'done');
@@ -226,6 +240,11 @@ test('조사가 실패해도(가짜 CLI 오류) 회의는 결론까지 간다. �
   assert.equal(mm.at(-1).status, 'done', '결론을 낸다');
   const next = sent(from).filter((p) => p.includes('[회의 — 차례 발언 (2/2바퀴)]')).at(-1);
   assert.ok(research(next, '바람', '확인 못 함: 조사를 마치지 못했어.'));
+  assert.doesNotMatch(sent(from).find((p) => p.includes('[회의 — 결론 내기]')), /조사 결과에서 온 사실은/, '답해 온 조사가 없으면 근거 줄을 붙이지 않는다');
+  // 실패한 조사 뒤에도 말하는 사람 없는 차례 표시로 돌린다
+  const nows = t.events.slice(ev).filter((e) => e.type === 'run' && e.data.sessionId === s.id).map((e) => e.data.run.stages[1].meetingNow).filter(Boolean);
+  const seq = nows.filter((n, k) => k === 0 || JSON.stringify(n) !== JSON.stringify(nows[k - 1]));
+  assert.deepEqual(seq[seq.findIndex((n) => n.phase === 'research') + 1], { phase: 'turn', round: 2, rounds: 2, opposerId: q.id });
 });
 
 test('조사 중에 중지하면 회의가 멈추고, 질문은 "확인 못 함"으로 남는다', async () => {
@@ -244,6 +263,73 @@ test('조사 중에 중지하면 회의가 멈추고, 질문은 "확인 못 함"
   assert.deepEqual(shape(mm), ['opinion1', 'opinion1', 'opinion1', 'turn2', 'research2']);
   assert.equal(mm.at(-1).status, 'stopped');
   assert.equal(mm.find((m) => m.meeting.phase === 'turn').check.status, 'failed');
+});
+
+// 조사하는 가짜 codex 가 도구를 쓰기 시작할 때까지 기다린다(그때는 실행 손잡이가 있다)
+const researching = (sid) => t.waitFor(() => meetMsgs(sid).find((m) => m.meeting.phase === 'research')?.blocks.some((b) => b.kind === 'tool'), 20000, '조사 도구 실행');
+
+test('조사 중에 대상 없이 보낸 끼어들기 말은 조사하는 에이전트에게 넣지 않고 다음 차례에 반영한다', async () => {
+  const ch = await mk('봄비', '분석', 'codex'), q = await mk('꽃샘', '분석', 'claude'), r = await mk('아지랑이', '조사', 'codex');
+  const tm = await team('끼어드는 조사 회의', [{ label: '회의', agentIds: [ch.id, q.id, r.id], meeting: { rounds: 2, chairId: ch.id, opposeId: q.id } }]);
+  const s = await session(tm.id);
+  const from = t.fakeLog().length;
+  await start(s.id, 'CHECKME SLOW 끼어들 회의');
+  await researching(s.id);
+  const STEER = '끼어든 말: 표로 정리해';
+  assert.equal((await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'steer', text: STEER })).json.mode, 'next', '다음 차례에 반영');
+  await ended(s.id);
+  assert.equal(runs(s.id).at(-1).status, 'done');
+  const mm = meetMsgs(s.id);
+  assert.deepEqual(shape(mm), ['opinion1', 'opinion1', 'opinion1', 'turn2', 'research2', 'turn2', 'conclude']);
+  assert.equal(sent(from).length, 7, '조사에 이어 붙는 호출이 없다');
+  const rm = mm.find((m) => m.meeting.phase === 'research');
+  assert.equal(rm.text, '정리 결과: 파란색', '조사 답에는 끼어든 말에 대한 대답이 없다');
+  assert.ok(!rm.blocks.some((b) => b.kind === 'notice' && b.text.includes(STEER)));
+  const next = sent(from).filter((p) => p.includes('[회의 — 차례 발언 (2/2바퀴)]')).at(-1);
+  assert.ok(next.includes(`[사용자 추가 지시]\n- ${STEER}`), '다음 차례 프롬프트의 사용자 추가 지시에 들어간다');
+});
+
+test('조사 중에 "회의 끝내기"를 누르면 질문은 "확인 못 함"으로 남고 진행자가 결론을 낸다', async () => {
+  const ch = await mk('가을', '분석', 'codex'), q = await mk('단풍', '분석', 'claude'), r = await mk('낙엽', '조사', 'codex');
+  const tm = await team('끝낼 조사 회의', [{ label: '회의', agentIds: [ch.id, q.id, r.id], meeting: { rounds: 2, chairId: ch.id, opposeId: q.id } }]);
+  const s = await session(tm.id);
+  const from = t.fakeLog().length;
+  await start(s.id, 'CHECKME SLOW 끝낼 회의');
+  await researching(s.id);
+  assert.equal((await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'conclude' })).json.ok, true);
+  await ended(s.id);
+  assert.equal(runs(s.id).at(-1).status, 'done');
+  const mm = meetMsgs(s.id);
+  assert.deepEqual(shape(mm), ['opinion1', 'opinion1', 'opinion1', 'turn2', 'research2', 'conclude']);
+  assert.equal(sent(from).length, 6);
+  assert.equal(mm.find((m) => m.meeting.phase === 'research').status, 'stopped');
+  assert.equal(mm.find((m) => m.meeting.phase === 'turn').check.status, 'failed');
+  assert.equal(mm.at(-1).status, 'done', '결론을 낸다');
+  const cc = sent(from).find((p) => p.includes('[회의 — 결론 내기]'));
+  assert.ok(research(cc, '낙엽', '확인 못 함: 조사를 마치지 못했어.'));
+  assert.doesNotMatch(cc, /조사 결과에서 온 사실은/);
+});
+
+test('조사 직전에 사용량 상한에 닿으면 조사를 시작하지 않고(호출이 늘지 않고) "확인 못 함"으로 남긴다', async () => {
+  const ch = await mk('하늘', '분석', 'claude'), q = await mk('구름', '분석', 'claude'), r = await mk('무지개', '조사', 'claude');
+  // 메시지 한 건이 쓰는 양을 먼저 잰다(가짜 claude 는 매번 같은 양을 알려 준다)
+  const probe = await team('재는 조사 회의', [{ label: '회의', agentIds: [ch.id, q.id], meeting: { rounds: 1, tokenCap: 0 } }]);
+  const s0 = await session(probe.id);
+  await say(s0.id, '한 건의 양을 재자');
+  const one = meetingSpend(meetMsgs(s0.id)[0].usage);
+  assert.ok(one > 0);
+  // 상한 = 4건: 의견 3건 뒤에는 통과해 질문한 차례 1건, 그 뒤(4건)에는 닿아서 조사하러 가지 않고 결론으로
+  const tm = await team('상한 닿는 조사 회의', [{ label: '회의', agentIds: [ch.id, q.id, r.id], meeting: { rounds: 2, chairId: ch.id, opposeId: q.id, tokenCap: one * 4 } }]);
+  const s = await session(tm.id);
+  const from = t.fakeLog().length;
+  await say(s.id, 'CHECKME 예산을 정하자');
+  assert.equal(runs(s.id).at(-1).status, 'done');
+  const mm = meetMsgs(s.id);
+  assert.deepEqual(shape(mm), ['opinion1', 'opinion1', 'opinion1', 'turn2', 'conclude']);
+  assert.equal(sent(from).length, 5, '조사 호출이 없다');
+  assert.equal(mm.find((m) => m.meeting.phase === 'turn').check.status, 'failed');
+  assert.ok(t.app.store.getSession(s.id).messages.some((m) => m.role === 'system' && m.text.includes('상한')), '상한에 닿았다고 알린다');
+  assert.ok(research(sent(from).find((p) => p.includes('[회의 — 결론 내기]')), '무지개', '확인 못 함: 조사를 마치지 못했어.'));
 });
 
 // 같은 데이터 폴더로 새 앱을 켜므로 맨 마지막에 둔다

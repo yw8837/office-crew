@@ -50,7 +50,7 @@ export function parseVerdict(text) {
 export const checkBlock = () => `\`\`\`oc-check\n${JSON.stringify({ question: tr('결론을 바꿀 수 있는 사실 하나를 묻는 질문') })}\n\`\`\``;
 
 // text 의 맨 끝에 있는 oc-check 블록을 읽는다. 없으면 null, 맞으면 { question, from, to }(블록의 자리, parseAsk 와 같은 뜻).
-// JSON 이 아니면 { error: 'json' }, 질문이 앞뒤 공백을 빼고 1~300자의 글이 아니면 { error: 'shape' }. 틀린 블록도 자리(from, to)는 같이 준다(한 말에서 블록을 빼려고).
+// JSON 이 아니면 { error: 'json' }, 질문이 앞뒤 공백을 빼고 1~300자(글자 단위. 이모지도 한 글자)의 글이 아니면 { error: 'shape' }. 틀린 블록도 자리(from, to)는 같이 준다(한 말에서 블록을 빼려고).
 // 끝이 아닌 곳의 블록(예로 든 것, 뒤에 글을 더 쓴 것)은 질문으로 보지 않는다
 export function parseCheck(text) {
   const src = String(text || '');
@@ -62,7 +62,7 @@ export function parseCheck(text) {
   let data;
   try { data = JSON.parse(m[1]); } catch { return { error: 'json', from, to }; }
   const question = typeof data?.question === 'string' ? data.question.trim() : '';
-  if (!question || question.length > 300) return { error: 'shape', from, to };
+  if (!question || [...question].length > 300) return { error: 'shape', from, to };
   return { question, from, to };
 }
 

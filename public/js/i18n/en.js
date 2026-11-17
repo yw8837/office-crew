@@ -1351,4 +1351,5 @@ export default {
   "모두 같은 안을 가리켜.": "Everyone points to the same option.",
   "버린 안": "Dropped options",
   "새 부품부터 만드는 안은 시험할 시간이 모자라서 버렸어.": "The option of building new parts first was dropped because there is not enough time to test it.",
+  "결론을 바꿀 수 있는 사실 하나를 묻는 질문": "one question about a fact that could change the conclusion",
 };

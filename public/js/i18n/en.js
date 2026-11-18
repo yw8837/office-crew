@@ -1388,4 +1388,5 @@ export default {
   "한도가 이 시간 안에 풀리면 다른 AI에게 넘기지 않고 기다렸다가 같은 AI로 이어 가.": "If the limit resets within this time, the work waits for it and goes on with the same AI instead of going to another AI.",
   "한도가 곧 풀려서 기다리는 중({m}분 남음)": "Waiting for the limit to reset ({m} min left)",
   "{name}의 한도가 {m}분 뒤에 풀려서 기다렸다가 같은 AI로 이어 갔어.": "{name}'s limit reset in {m} min, so this waited and went on with the same AI.",
+  "{name}의 다음 실행에 넣을 추가 지시: {text}": "Extra instruction for {name}'s run when it starts: {text}",
 };

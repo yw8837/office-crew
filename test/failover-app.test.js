@@ -145,7 +145,8 @@ test('곧 풀리면 기다리기: 설정 안에 풀리면 기다렸다가 같은
   assert.equal(m.provider, 'claude', '원래 AI');
   assert.ok(m.createdAt - t0 >= 300, '풀린 뒤에 시작했다');
   assert.ok(m.blocks.some((b) => b.kind === 'notice' && b.text === '⏳ Claude의 한도가 1분 뒤에 풀려서 기다렸다가 같은 AI로 이어 갔어.'), JSON.stringify(m.blocks.filter((b) => b.kind === 'notice')));
-  assert.ok(t.events.slice(from).some((e) => e.type === 'agentState' && e.data.agentId === a.id && e.data.state === 'waiting' && e.data.detail === '한도가 곧 풀려서 기다리는 중(1분 남음)'), '기다리는 동안 상태');
+  assert.ok(t.events.slice(from).some((e) => e.type === 'agentState' && e.data.agentId === a.id && e.data.state === 'paused' && e.data.detail === '한도가 곧 풀려서 기다리는 중(1분 남음)'), '기다리는 동안 상태(사람이 봐야 하는 waiting 이 아니라 paused)');
+  assert.ok(!t.events.slice(from).some((e) => e.type === 'agentState' && e.data.agentId === a.id && e.data.state === 'waiting'));
 });
 
 test('곧 풀리면 기다리기: 설정보다 멀면 바로 다른 AI', async () => {
@@ -180,7 +181,7 @@ test('곧 풀리면 기다리기: 기다리는 중에 중지하면 실행하지 
   const calls = t.fakeLog().filter((l) => l.args).length;
   const from = t.events.length;
   await t.api('POST', `/api/sessions/${s.id}/messages`, { text: '분석해줘' });
-  await t.waitFor(() => t.events.slice(from).some((e) => e.type === 'agentState' && e.data.agentId === a.id && e.data.state === 'waiting'), 5000, '기다리는 중');
+  await t.waitFor(() => t.events.slice(from).some((e) => e.type === 'agentState' && e.data.agentId === a.id && e.data.state === 'paused'), 5000, '기다리는 중');
   const t0 = Date.now();
   assert.equal((await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'stop' })).status, 200);
   await t.waitFor(() => t.app.store.getSession(s.id).runs.at(-1)?.endedAt, 5000, '실행 끝');
@@ -242,7 +243,7 @@ test('곧 풀리면 기다리기: 회의에서 기다리는 중에 회의 끝내
   const calls = t.fakeLog().filter((l) => l.cli === 'claude' && l.args).length;
   const from = t.events.length;
   await t.api('POST', `/api/sessions/${s.id}/messages`, { text: '정하자' });
-  await t.waitFor(() => t.events.slice(from).some((e) => e.type === 'agentState' && e.data.agentId === a.id && e.data.state === 'waiting'), 5000, '기다리는 중');
+  await t.waitFor(() => t.events.slice(from).some((e) => e.type === 'agentState' && e.data.agentId === a.id && e.data.state === 'paused'), 5000, '기다리는 중');
   // 진행자의 의견이 끝난 뒤에 누른다(의견이 하나도 없으면 결론을 낼 수 없다)
   await t.waitFor(() => t.app.store.getSession(s.id).messages.some((x) => x.agentId === chair.id && x.status === 'done'), 5000, '진행자 의견');
   assert.equal((await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'conclude' })).json.ok, true);
@@ -250,4 +251,72 @@ test('곧 풀리면 기다리기: 회의에서 기다리는 중에 회의 끝내
   const mm = t.app.store.getSession(s.id).messages.filter((x) => x.meeting);
   assert.deepEqual(mm.map((x) => `${x.meeting.phase}:${x.agentId === a.id ? 'claude' : 'chair'}`), ['opinion:chair', 'conclude:chair'], '기다리던 참석자는 답하지 않았다');
   assert.equal(t.fakeLog().filter((l) => l.cli === 'claude' && l.args).length, calls, 'Claude 를 실행하지 않았다');
+});
+
+const waitingOn = (from, id) => t.waitFor(() => t.events.slice(from).some((e) => e.type === 'agentState' && e.data.agentId === id && e.data.state === 'paused'), 5000, '기다리는 중');
+
+test('곧 풀리면 기다리기: 기다리는 에이전트 하나만 건너뛸 수 있다', async () => {
+  t.app.store.settings.waitForResetMin = 5;
+  t.app.store.usage.limits = resetIn(5000);
+  const a = (await t.api('POST', '/api/agents', analyst('기다림건너뛰기'))).json;
+  const s = (await t.api('POST', '/api/sessions', { teamId: null, agentId: a.id })).json;
+  const calls = t.fakeLog().filter((l) => l.args).length;
+  const from = t.events.length;
+  await t.api('POST', `/api/sessions/${s.id}/messages`, { text: '분석해줘' });
+  await waitingOn(from, a.id);
+  const t0 = Date.now();
+  const r = await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'skip', agentId: a.id });
+  assert.equal(r.json.ok, true, JSON.stringify(r.json));
+  await t.waitFor(() => t.app.store.getSession(s.id).runs.at(-1)?.endedAt, 5000, '실행 끝');
+  assert.ok(Date.now() - t0 < 2000, '건너뛰면 기다림이 바로 끝난다');
+  const sess = t.app.store.getSession(s.id);
+  assert.equal(sess.runs.at(-1).status, 'done');
+  assert.equal(sess.runs.at(-1).stages[0].status, 'skipped', '그 에이전트를 건너뛰었다');
+  assert.equal(sess.messages.filter((x) => x.role === 'agent').length, 0);
+  assert.equal(t.fakeLog().filter((l) => l.args).length, calls, '어느 CLI도 실행하지 않았다');
+  assert.ok(t.events.slice(from).some((e) => e.type === 'agentState' && e.data.agentId === a.id && e.data.state === 'idle' && e.data.detail === '건너뜀'));
+});
+
+test('곧 풀리면 기다리기: 기다리는 중에 일시정지를 눌러도 다른 AI로 넘기지 않고, 같은 AI로 끝낸 뒤 단계 경계에서 멈춘다', async () => {
+  t.app.store.settings.waitForResetMin = 5;
+  t.app.store.usage.limits = resetIn(1200);
+  const a = (await t.api('POST', '/api/agents', analyst('기다림일시정지'))).json;
+  const b = (await t.api('POST', '/api/agents', { name: '다음단계코덱스', role: '정리', provider: 'codex', model: 'gpt-6.1-sol', routing: 'manual' })).json;
+  const team = (await t.api('POST', '/api/teams', { name: '기다림 일시정지 팀', stages: [{ label: '분석', agentIds: [a.id] }, { label: '정리', agentIds: [b.id] }] })).json;
+  const s = (await t.api('POST', '/api/sessions', { teamId: team.id })).json;
+  const codex = () => t.fakeLog().filter((l) => l.cli === 'codex' && l.prompt).length;
+  const codexBefore = codex();
+  const from = t.events.length;
+  await t.api('POST', `/api/sessions/${s.id}/messages`, { text: '나눠서 해줘' });
+  await waitingOn(from, a.id);
+  assert.equal((await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'pause' })).json.ok, true);
+  await t.waitFor(() => t.app.store.getSession(s.id).runs.at(-1)?.status === 'paused', 10000, '단계 경계에서 일시정지');
+  const ma = t.app.store.getSession(s.id).messages.find((x) => x.agentId === a.id);
+  assert.equal(ma.status, 'done', ma.error);
+  assert.equal(ma.provider, 'claude', '다른 AI로 넘기지 않았다');
+  assert.ok(waited(ma));
+  assert.equal(codex(), codexBefore, '일시정지 동안 다른 AI가 실행되지 않았다');
+  await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'resume' });
+  await t.waitFor(() => t.app.store.getSession(s.id).runs.at(-1)?.endedAt, 10000, '실행 끝');
+  assert.equal(t.app.store.getSession(s.id).messages.find((x) => x.agentId === b.id)?.status, 'done', '이어 하면 다음 단계가 돈다');
+});
+
+test('곧 풀리면 기다리기: 기다리는 에이전트를 골라 보낸 지시는 그 에이전트가 시작할 때 프롬프트에 들어간다', async () => {
+  t.app.store.settings.waitForResetMin = 5;
+  t.app.store.usage.limits = resetIn(800);
+  const a = (await t.api('POST', '/api/agents', analyst('기다림지시'))).json;
+  const s = (await t.api('POST', '/api/sessions', { teamId: null, agentId: a.id })).json;
+  const from = t.events.length;
+  const logFrom = t.fakeLog().length;
+  await t.api('POST', `/api/sessions/${s.id}/messages`, { text: '분석해줘' });
+  await waitingOn(from, a.id);
+  const r = await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'steer', agentId: a.id, text: '표로 정리해' });
+  assert.equal(r.json.mode[a.id], 'start', JSON.stringify(r.json));
+  await t.waitFor(() => t.app.store.getSession(s.id).runs.at(-1)?.endedAt, 10000, '실행 끝');
+  const sess = t.app.store.getSession(s.id);
+  const m = sess.messages.find((x) => x.agentId === a.id);
+  assert.equal(m.provider, 'claude');
+  const sent = t.fakeLog().slice(logFrom).find((l) => l.cli === 'claude' && l.turn === 1)?.text || '';
+  assert.match(sent, /\[사용자 추가 지시\]\n- 표로 정리해/, '첫 프롬프트에 들어갔다');
+  assert.ok(sess.messages.some((x) => x.role === 'system' && x.text.includes('표로 정리해')), '받았다고 알린다');
 });

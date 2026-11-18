@@ -6,6 +6,7 @@ import { get, post, put, del } from '../api.js';
 import { RoutingFields, routeText, PROFILE_LABEL } from './routing.js';
 import { SkillPicker, SOURCE_LABEL, skillDesc } from './skillpick.js';
 import { t } from '../i18n/index.js';
+import { RoleNotes, DraftChip } from './rolenotes.js';
 
 const SKIN_TONES = ['#f6d5bd', '#f2c9a6', '#e3b38f', '#d9a77f', '#c98f68', '#a8714f', '#7a4e33'];
 const HAIR = ['#1d1d24', '#3a2a1e', '#5a3825', '#8a5a3b', '#b04a2f', '#d8b26a', '#9aa3ad', '#e9e4dc', '#4f46e5', '#db2777'];
@@ -34,7 +35,7 @@ export function AgentsPage() {
     </${PageHead}>
     <div class="cards">
       ${state.agents.map((a) => html`<div class="gcard" onClick=${() => setEdit(a)}>
-        <div class="hd"><${Avatar} agent=${a} size=${44} /><div style="min-width:0"><div class="nm">${a.emoji} ${a.name}</div><div class="small muted">${a.role || t('역할 없음')}</div></div></div>
+        <div class="hd"><${Avatar} agent=${a} size=${44} /><div style="min-width:0"><div class="nm">${a.emoji} ${a.name} <${DraftChip} agent=${a} /></div><div class="small muted">${a.role || t('역할 없음')}</div></div></div>
         <div class="tags">${a.routing === 'auto' ? html`<span class="chip accent">${agentModelText(a)}</span>` : html`<${ProviderChip} id=${a.provider} /><span class="chip mono">${a.model || t('기본 모델')}</span>${a.effort && html`<span class="chip accent">${EFFORT_LABEL[a.effort] || a.effort}</span>`}`}<span class="chip">${PERM_LABEL[a.permission]?.[0] || a.permission}</span></div>
         <div class="desc">${a.systemPrompt || ''}</div>
         ${(a.skills?.length || a.connectors?.length) ? html`<div class="small muted">${t('스킬 {s} · 커넥터 {c}', { s: a.skills?.length || 0, c: a.connectors?.length || 0 })}</div>` : ''}
@@ -45,7 +46,7 @@ export function AgentsPage() {
   </div></div>`;
 }
 
-export function AgentEditor({ agent, onClose }) {
+export function AgentEditor({ agent, onClose, focusNotes = false }) {
   const isNew = !agent.id;
   const [a, setA] = useState(() => ({
     name: '', role: '', emoji: '🤖', provider: 'claude', model: 'opus', effort: 'high', routing: 'auto', routingProfile: 'balanced', permission: 'default', systemPrompt: '', skills: [], connectors: [], light: false, apiProfile: '',
@@ -165,6 +166,7 @@ export function AgentEditor({ agent, onClose }) {
           <div class="hint">${t('투명 배경 PNG를 추천해. 긴 변 256px로 줄여 이 PC에만 저장돼. 작은 도트 그림은 선명하게 확대돼.')}</div></div>`}
       </div>
     </div>
+    ${isNew ? html`<div class="section">📒 ${t('역할 노트')}</div><div class="small muted">${t('저장한 뒤에 쓸 수 있어.')}</div>` : html`<${RoleNotes} agentId=${agent.id} focus=${focusNotes} />`}
   </${Modal}>`;
 }
 

@@ -9,6 +9,7 @@ export const state = {
   version: '', home: '',
   agents: [], teams: [], sessions: [], settings: {}, providers: [], usage: {}, skills: [], connectors: [], plugins: [], skins: [], schedules: [], watch: [], tasks: [],
   active: new Set(),
+  noteDrafts: {}, // 에이전트 id → 역할 노트의 받지 않은 초안 수(bootstrap 과 notes 이벤트)
   sessionData: {}, // id → 전체 세션
   live: {}, // sessionId → agentId → 상태
   route: { view: 'session', id: null },
@@ -109,6 +110,7 @@ async function resync() {
     Object.assign(state, {
       agents: b.agents, teams: b.teams, sessions: b.sessions, settings: b.settings, providers: b.providers,
       usage: b.usage, skills: b.skills, connectors: b.connectors, plugins: b.plugins, skins: b.skins, schedules: b.schedules || [], tasks: b.tasks || [], active: new Set(b.active || []), cooldown: b.cooldown || {},
+      noteDrafts: noteDraftsOf(b.agents),
     });
     setAccountNames(state.providers);
     applyLang();
@@ -118,6 +120,9 @@ async function resync() {
     changed();
   } catch { /* 다음 재연결 때 다시 */ }
 }
+
+// bootstrap 의 에이전트마다 실린 역할 노트 초안 수. 'agents' 이벤트의 목록에는 없어서 따로 들고 있는다
+function noteDraftsOf(agents) { return Object.fromEntries((agents || []).map((a) => [a.id, a.noteDrafts || 0])); }
 
 export const agentById = (id) => state.agents.find((a) => a.id === id);
 export const teamById = (id) => state.teams.find((t) => t.id === id);
@@ -196,6 +201,7 @@ function handle(type, d) {
     case 'usage': state.usage = d; break;
     case 'providers': state.providers = d; setAccountNames(d); break;
     case 'agents': state.agents = d; break;
+    case 'notes': state.noteDrafts = { ...state.noteDrafts, [d.agentId]: d.drafts || 0 }; break;
     case 'teams': state.teams = d; break;
     case 'skills': state.skills = d; break;
     case 'connectors': state.connectors = d; break;
@@ -273,7 +279,7 @@ export async function boot() {
     Object.assign(state, {
       version: b.version, home: b.home, agents: b.agents, teams: b.teams, sessions: b.sessions, settings: b.settings,
       providers: b.providers, usage: b.usage, skills: b.skills, connectors: b.connectors, plugins: b.plugins, skins: b.skins, schedules: b.schedules || [], tasks: b.tasks || [],
-      active: new Set(b.active || []), cooldown: b.cooldown || {},
+      active: new Set(b.active || []), cooldown: b.cooldown || {}, noteDrafts: noteDraftsOf(b.agents),
     });
     setAccountNames(state.providers);
     applyTheme();

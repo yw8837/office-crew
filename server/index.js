@@ -563,7 +563,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     const s = store.getSession(id);
     if (!s) throw new HttpError(404, tr('세션 없음'));
     if (orch.ctx.has(id)) throw new HttpError(409, tr('작업 중엔 비울 수 없어. 먼저 중지해줘.'));
-    s.messages = []; s.runs = []; s.providerSessions = {};
+    s.messages = []; s.runs = []; s.providerSessions = {}; delete s.usageBase; // 이어 갈 대화가 없으니 사용량 직전 누적도 버린다
     // 비운 대화는 다른 AI에게 건네지도 않는다: 불러온 대화 원문과 만들어 둔 대화 파일을 지우고 표시해 둔다(이미 프로젝트 기억에 들어간 것은 기억 화면의 설명대로 남는다)
     if (s.importedFrom) s.importedFrom.cleared = true;
     removeHandoff(dirs.handoff, id);

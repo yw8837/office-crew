@@ -29,9 +29,12 @@ function addUsage(u, m) {
 }
 function agentUsage(s, agentId) {
   const u = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
-  for (const m of s?.messages || []) if (m.agentId === agentId && m.usage) addUsage(u, m);
-  return u;
+  let partial = false, sub = 0;
+  for (const m of s?.messages || []) if (m.agentId === agentId && m.usage) { addUsage(u, m); partial ||= m.usage.partial === true; sub += m.usage.sub || 0; }
+  return Object.assign(u, partial ? { partial } : {}, sub ? { sub } : {});
 }
+// Claude 사용량 도움말 줄: 하위 에이전트 몫이 빠졌을 수 있는지(partial), 하위 에이전트 몫을 얼마나 셌는지(sub)
+const treeTip = (u) => [u.partial && t('하위 에이전트가 쓴 양이 빠졌을 수 있어.'), u.sub > 0 && t('하위 에이전트 {n} 토큰 포함', { n: fmtTok(u.sub) })].filter(Boolean);
 function sessionUsage(s) {
   const u = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
   for (const m of s?.messages || []) if (m.usage) addUsage(u, m);
@@ -454,7 +457,7 @@ class Message extends Component {
         ${m.error && html`<div class="msg-err">⚠ ${m.error}</div>`}
         <div class="msg-foot">
           ${m.status === 'stopped' && html`<span class="chip warn">${t('중지됨')}</span>`}
-          ${usageTotal(u) > 0 && html`<span title=${t('입력 {i} · 출력 {o} · 캐시 읽기 {cr} · 캐시 쓰기 {cw}', { i: u.input, o: u.output, cr: u.cacheRead, cw: u.cacheWrite })}>${t('{n} 토큰', { n: fmtTok(usageTotal(u)) })}</span>`}
+          ${usageTotal(u) > 0 && html`<span title=${[t('입력 {i} · 출력 {o} · 캐시 읽기 {cr} · 캐시 쓰기 {cw}', { i: u.input, o: u.output, cr: u.cacheRead, cw: u.cacheWrite }), ...treeTip(u)].join('\n')}>${t('{n} 토큰', { n: fmtTok(usageTotal(u)) })}${u.partial ? ' *' : ''}</span>`}
           ${!usageTotal(u) && u.estOutput > 0 && html`<span title=${t('CLI가 턴을 끝내면 실제 값으로 바뀌어')}>~${t('{n} 토큰 (작성 중 추정)', { n: fmtTok(u.estOutput) })}</span>`}
           ${u.cost > 0 && html`<span>${fmtCost(u.cost)}</span>`}
           ${u.durationMs > 0 && !streaming && html`<span>${fmtDur(u.durationMs)}</span>`}
@@ -908,7 +911,7 @@ export function RightPanel({ s }) {
               <div class="nm">${a.name}<span class=${`sbadge ${l?.state || 'idle'}`}>${STATE_LABEL[l?.state || 'idle']}</span></div>
               <div class="sub">${a.role} · ${agentModelText(a, s)}</div>
               <div class="detail">${l?.detail || ' '}</div>
-              ${usageTotal(au) > 0 && html`<div class="sub">${t('{n} 토큰', { n: fmtTok(usageTotal(au)) })} ${fmtCost(au.cost)}</div>`}
+              ${usageTotal(au) > 0 && html`<div class="sub" title=${treeTip(au).join('\n')}>${t('{n} 토큰', { n: fmtTok(usageTotal(au)) })}${au.partial ? ' *' : ''} ${fmtCost(au.cost)}</div>`}
             </div>
           </div>`;
         })}

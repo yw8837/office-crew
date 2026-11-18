@@ -214,7 +214,9 @@ export default {
         }
         case 'result': {
           const u = ev.usage || {};
-          emit({ type: 'usage', input: u.input_tokens || 0, output: u.output_tokens || 0, cacheRead: u.cache_read_input_tokens || 0, cacheWrite: u.cache_creation_input_tokens || 0, cost: ev.total_cost_usd || 0 });
+          // usage 는 주 에이전트 몫만이라 하위 에이전트까지 든 modelUsage 와 비용 누적도 그대로 싣는다. 이번 몫 계산은 오케스트레이터가 한다(결정 0012)
+          emit({ type: 'usage', input: u.input_tokens || 0, output: u.output_tokens || 0, cacheRead: u.cache_read_input_tokens || 0, cacheWrite: u.cache_creation_input_tokens || 0, cost: ev.total_cost_usd || 0,
+            tree: { modelUsage: ev.modelUsage ?? null, totalCost: ev.total_cost_usd ?? null } });
           if (ev.is_error || (ev.subtype && ev.subtype !== 'success')) errorMsg = (typeof ev.result === 'string' && ev.result) || ev.subtype || tr('실행 오류');
           else errorMsg = null;
           feeder.result();

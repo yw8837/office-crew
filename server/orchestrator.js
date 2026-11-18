@@ -9,6 +9,7 @@ import { toolCategory } from './providers/util.js';
 import { resolveRoute, roleKind, aiKey, baseProvider } from './routing.js';
 import { Cooldown, isQuotaError, nearLimit, avoidUntil, resetTime, resetFromText, availableCatalog, pickFallback, continuationPrompt, handoffFacts } from './failover.js';
 import { nextMidnight, lowerEffort } from './budget.js';
+import { settleClaude } from './usage.js';
 import { tr } from './i18n.js';
 import { ASK_MAX, parseAsk, cleanAnswers, answered, answerPrompt, answerRecord, askNote, stripAsks } from './ask.js';
 import { pickOpposer, turnOrder, parseVerdict, verdictBlock, CHECK_MAX, parseCheck, checkBlock, pickResearcher } from './meeting.js';
@@ -758,7 +759,7 @@ export class Orchestrator {
     // 이어갈 대화 id 는 그 대화를 만든 AI 와 짝으로 기억한다(다른 AI 에 엉뚱한 id 를 넘기지 않게)
     let fresh = false; // 헛돌아서 끈 대화는 이어 가지 않는다(다시 시도하면 새 대화로)
     const remember = (id) => {
-      if (fresh) { delete s.providerSessions[agentId]; return; }
+      if (fresh) { delete s.providerSessions[agentId]; delete s.usageBase?.[agentId]; return; }
       if (!id || !cur.prov.caps.resume) return;
       s.providerSessions[agentId] = id;
       (s.sessionProvider ||= {})[agentId] = cur.agent.provider;
@@ -789,7 +790,8 @@ export class Orchestrator {
           // 불러온 Claude 세션은 처음 이어갈 때 갈래(fork)로 시작해 원래 기록을 그대로 둔다
           const forkSession = !!rid && ag.provider === 'claude' && s.importedFrom?.source === 'claude' && rid === s.importedFrom.id;
           const watch = this.#watchStall(ctx, pv.caps.quiet, () => { fresh = true; });
-          const emit = (ev) => { if (watch.saw(ev) === false) return; this.#onEvent(ctx, msg, ag, ev); }; // 헛돌아서 끈 뒤에 밀려 나오는 출력은 버린다
+          const call = { rid, sid: rid, n: 0, base: null }; // 이 CLI 호출: 이어 간 대화 id, 지금 대화 id, 정산한 결과 수, 직전 결과의 누적(사용량 정산용)
+          const emit = (ev) => { if (watch.saw(ev) === false) return; this.#onEvent(ctx, msg, ag, ev, call); }; // 헛돌아서 끈 뒤에 밀려 나오는 출력은 버린다
           const h = watch.attach(pv.run({ ...base, prompt: p, resumeId: rid, forkSession }, emit));
           ctx.handles.set(agentId, { handle: h, msg, agent: ag, prov: pv });
           return h;
@@ -1399,7 +1401,7 @@ export class Orchestrator {
   }
 
   // ── 프로바이더 이벤트 → 메시지·상태 ──
-  #onEvent(ctx, msg, agent, ev) {
+  #onEvent(ctx, msg, agent, ev, call = null) {
     const { s } = ctx;
     switch (ev.type) {
       case 'text': {
@@ -1438,12 +1440,18 @@ export class Orchestrator {
         else this.#state(s.id, agent.id, b.status === 'error' ? 'tool' : 'thinking', b.status === 'error' ? tr('{name} 실패', { name: b.name }) : tr('결과 확인 중…'), b.name);
         break;
       }
-      case 'usage':
-        for (const k of ['input', 'output', 'cacheRead', 'cacheWrite', 'cost']) msg.usage[k] += ev[k] || 0;
+      case 'usage': {
+        // Claude 는 하위 에이전트까지 든 누적에서 같은 대화의 직전 누적을 빼서 이번 몫을 센다(그 밖의 AI는 받은 값 그대로).
+        // 메시지·오늘·AI별·에이전트별 합계가 모두 이 값을 더한다
+        const got = ev.tree && call ? this.#settle(s, agent.id, ev, call) : ev;
+        for (const k of ['input', 'output', 'cacheRead', 'cacheWrite', 'cost']) msg.usage[k] += got[k] || 0;
+        if (got.partial) msg.usage.partial = true; // 하위 에이전트 몫이 빠졌을 수 있다
+        if (got.sub > 0) msg.usage.sub = (msg.usage.sub || 0) + got.sub;
         delete msg.usage.estOutput; // 실제 값이 오면 추정치는 버린다
-        this.usage.record(agent.provider, agent.id, ev);
+        this.usage.record(agent.provider, agent.id, got);
         this.bus.emit('messageUsage', { sessionId: s.id, messageId: msg.id, usage: msg.usage });
         break;
+      }
       case 'limits': {
         // 쉬는(피하는) 여부나 끝나는 시각(분 단위)이 바뀌었을 때만 쉬는 목록을 다시 알린다
         // (초기화 시각 없는 거절 기록은 "관측 뒤 30분"이라 이벤트마다 ms 단위로 바뀌므로 분으로 비교)
@@ -1455,6 +1463,7 @@ export class Orchestrator {
       }
       case 'session':
         if (ev.id) msg.providerSessionId = ev.id;
+        if (ev.id && call) call.sid = ev.id;
         break;
       case 'meta':
         if (ev.model) { msg.model = ev.model; this.bus.emit('messageMeta', { sessionId: s.id, messageId: msg.id, model: ev.model }); }
@@ -1465,6 +1474,22 @@ export class Orchestrator {
       default: break;
     }
     this.store.saveSession(s, 800);
+  }
+
+  // Claude 결과 하나의 이번 몫(결정 0012). 직전 누적(baseline)은 에이전트별 CLI 대화 id(providerSessions) 옆에, 다음 호출이 이어 갈 대화 id 와 같이 둔다.
+  // 호출이 바로 그 id 를 이어 갈 때만 쓰므로 새 대화·다른 AI·불러온 대화에는 쓰이지 않는다. 한 호출에서 결과가 여러 번 오면 앞 결과의 누적을 뺀다.
+  // 누적을 모르는 결과(modelUsage 없음)는 baseline 을 지운다
+  #settle(s, agentId, ev, call) {
+    const bases = (s.usageBase ||= {});
+    const prev = bases[agentId];
+    const baseline = call.n ? call.base : (call.rid && prev?.id === call.rid ? prev : null);
+    const got = settleClaude({ usage: ev, modelUsage: ev.tree.modelUsage, totalCost: ev.tree.totalCost, baseline, resumed: !!call.rid || call.n > 0 });
+    call.n++;
+    call.base = got.cumulative;
+    const id = call.sid || call.rid;
+    if (got.cumulative && id) bases[agentId] = { id, ...got.cumulative };
+    else delete bases[agentId];
+    return got;
   }
 
   #emitBlock(s, msg, b, throttled = false) {

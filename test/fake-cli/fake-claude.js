@@ -23,6 +23,29 @@ out({ type: 'system', subtype: 'init', session_id: sid, model: val('--model') ||
 
 const queue = [];
 let busy = false, closed = false, turn = 0;
+
+// 결과의 모델별 사용량. SUBUSE: 하위 에이전트(작은 모델)도 일한 것처럼 두 모델을 싣는다(합이 usage 보다 크다).
+// CUMUL: 이어 간 대화(같은 프로세스의 다음 턴 포함)에서는 그 대화 전체의 누적을 낸다(Claude Code 2.1.277부터의 모양).
+// 대화 id별 누적은 FAKE_LOG 옆 파일에 적어 두고, 한 번 누적으로 낸 대화는 이어 갈 때 신호어가 없어도 누적으로 낸다. 둘 다 아니면 싣지 않는다(지금 형식)
+function treeUsage(req) {
+  const file = process.env.FAKE_LOG ? `${process.env.FAKE_LOG}.cumul.json` : null;
+  let all = {};
+  try { if (file) all = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* 아직 없음 */ }
+  const carried = turn > 1 || (resume && !args.includes('--fork-session')) ? all[sid] : null; // 새 대화면 같은 id의 옛 기록은 안 쓴다
+  const cumul = !!file && (req.includes('CUMUL') || !!carried);
+  if (!req.includes('SUBUSE') && !cumul) return {};
+  const now = { 'claude-x': [10, 5, 100, 50, 0.01] };
+  if (req.includes('SUBUSE')) now['claude-haiku-x'] = [200, 40, 0, 0, 0.002];
+  if (cumul) {
+    for (const [k, v] of Object.entries(carried || {})) now[k] = (now[k] || [0, 0, 0, 0, 0]).map((x, i) => x + v[i]);
+    all[sid] = now;
+    fs.writeFileSync(file, JSON.stringify(all));
+  }
+  const modelUsage = Object.fromEntries(Object.entries(now).map(([k, [i, o, cr, cw, c]]) => [k, { inputTokens: i, outputTokens: o, cacheReadInputTokens: cr, cacheCreationInputTokens: cw, costUSD: c }]));
+  const tree = { modelUsage, total_cost_usd: Object.values(now).reduce((n, v) => n + v[4], 0) };
+  if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ cli: 'claude', result: tree })}\n`);
+  return tree;
+}
 const rl = readline.createInterface({ input: process.stdin });
 rl.on('line', (line) => { if (line.trim()) { queue.push(JSON.parse(line)); pump(); } });
 rl.on('close', () => { closed = true; if (!busy && !queue.length) process.exit(0); });
@@ -109,7 +132,7 @@ async function pump() {
     out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: '가짜 실패', session_id: sid, usage: {} });
   } else {
     out({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', unifiedWindows: { five_hour: { utilization: 0.25, resetsAt: 1793523600 }, seven_day: { utilization: 0.5, resetsAt: 1793685600 } } } });
-    out({ type: 'result', subtype: 'success', is_error: false, session_id: sid, total_cost_usd: 0.01, usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100, cache_creation_input_tokens: 50 } });
+    out({ type: 'result', subtype: 'success', is_error: false, session_id: sid, total_cost_usd: 0.01, usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100, cache_creation_input_tokens: 50 }, ...treeUsage(req) });
   }
   busy = false;
   pump();

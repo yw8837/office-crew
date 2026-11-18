@@ -1378,4 +1378,7 @@ export default {
   "조사 상한": "Research limit reached",
   "확인 못 함": "Not checked",
   "확인 필요: {q}": "Needs checking: {q}",
+  // ── Claude 사용량 정산: 하위 에이전트 몫 (session.js) ──
+  "하위 에이전트가 쓴 양이 빠졌을 수 있어.": "Usage by sub-agents may be missing.",
+  "하위 에이전트 {n} 토큰 포함": "Includes {n} tokens used by sub-agents",
 };

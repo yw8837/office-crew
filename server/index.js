@@ -25,6 +25,7 @@ import { SessionWatch } from './watch.js';
 import { Board } from './board.js';
 import { PhoneNotify, checkPhoneUrl, buildRequest } from './notify.js';
 import { MemoryStore, projectKey } from './memory.js';
+import { NoteStore } from './notes.js';
 import { tr, bindLang, serverLang } from './i18n.js';
 import { Scheduler, cleanSchedule } from './scheduler.js';
 
@@ -226,7 +227,8 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   const catalog = new Catalog(store, dirs);
   const providers = new ProviderRegistry(store);
   const memory = new MemoryStore(path.join(dirs.home, 'memory'));
-  const orch = new Orchestrator({ store, bus, usage, catalog, dirs, providers, memory });
+  const notes = new NoteStore(path.join(dirs.home, 'notes')); // 역할 노트(에이전트마다 파일 하나, 결정 0013)
+  const orch = new Orchestrator({ store, bus, usage, catalog, dirs, providers, memory, notes });
   const scheduler = new Scheduler({ store, orch, bus });
   const watch = new SessionWatch(bus);
   const board = new Board({ store, orch, bus, appHome: dirs.home });
@@ -913,7 +915,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   }
 
   return {
-    server, store, bus, orch, providers, catalog, usage, token, dirs, scheduler, watch, board, phone, memory,
+    server, store, bus, orch, providers, catalog, usage, token, dirs, scheduler, watch, board, phone, memory, notes,
     listen(p = port, host = HOST) {
       return new Promise((resolve, reject) => {
         server.once('error', reject);

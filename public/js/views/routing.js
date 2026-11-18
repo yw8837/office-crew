@@ -240,7 +240,7 @@ function BudgetCard() {
   return html`<div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
     <${Toggle} checked=${on} onChange=${(v) => save({ dailyBudget: v })} title=${t('하루 예산')} />
     <div style="flex:1;min-width:240px"><b>💰 ${t('하루 예산')}</b>
-      <div class="hint">${t('주간 한도를 하루 이틀에 다 쓰지 않게 해. 오늘 쓰는 속도가 빠르면 노력을 낮추고, 하루 몫을 다 쓴 AI는 자정까지 다른 AI에게 맡겨. 맡을 AI가 없으면 낮은 노력으로 계속해. 주간 사용률을 아는 AI에만 적용돼.')}</div></div>
+      <div class="hint">${t('주간 한도를 하루 이틀에 다 쓰지 않게 해. 오늘 쓰는 속도가 빠르면 노력을 낮추고, 하루 몫을 다 쓴 AI는 자정까지 다른 AI에게 맡겨. 맡을 AI가 없으면 낮은 노력으로 계속해. 주간 사용률을 아는 AI에만 적용돼.')} ${t('검수와 회의의 판정·결론은 낮추지 않아.')}</div></div>
     <label class="row small" style="gap:6px">${t('하루 몫')}
       <select class="select sm" value=${String(pct)} disabled=${!on} onChange=${(e) => save({ dailyBudgetPercent: Number(e.target.value) })}>
         ${[...new Set([10, 13, 15, 20, 25, pct])].sort((a, b) => a - b).map((n) => html`<option value=${String(n)}>${t('주간의 {n}%', { n })}</option>`)}</select></label>
@@ -258,6 +258,11 @@ function FailoverCard() {
   const th = Number(st.failoverThreshold) || 95;
   const save = (b) => put('/api/settings', b).catch((e) => toast(e.message, 'error'));
   const release = (id) => del(`/api/cooldown/${id}`).then((d) => { state.cooldown = d; changed(); }).catch((e) => toast(e.message, 'error'));
+  const waitMin = Number(st.waitForResetMin) || 0;
+  // 범위를 넘거나 숫자가 아닌 값은 서버가 0~30 정수로 고쳐 저장한다. 저장된 값이 그대로면 다시 그려지지 않으니 입력칸에 직접 되돌려 놓는다
+  const saveWait = (el) => put('/api/settings', { waitForResetMin: Number(el.value) })
+    .then((r) => { el.value = String(Number(r?.waitForResetMin) || 0); })
+    .catch((e) => { el.value = String(Number(state.settings.waitForResetMin) || 0); toast(e.message, 'error'); });
   return html`<div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
     <${Toggle} checked=${on} onChange=${(v) => save({ failover: v })} title=${t('자동 이어받기')} />
     <div style="flex:1;min-width:240px"><b>⚡ ${t('자동 이어받기')}</b>
@@ -265,6 +270,11 @@ function FailoverCard() {
     <label class="row small" style="gap:6px">${t('미리 피하는 기준')}
       <select class="select sm" value=${String(st.failoverThreshold || 95)} disabled=${!on} onChange=${(e) => save({ failoverThreshold: Number(e.target.value) })}>
         ${[...new Set([80, 90, 95, 99, 100, th])].sort((a, b) => a - b).map((n) => html`<option value=${String(n)}>${n === 100 ? t('다 찼을 때만') : t('사용률 {n}% 이상', { n })}</option>`)}</select></label>
+    <div style="width:100%">
+      <label class="row small" style="gap:6px">${t('한도가 곧 풀리면 기다리기(분, 0이면 끔)')}
+        <input class="input" type="number" min="0" max="30" step="1" style="width:80px" value=${waitMin} disabled=${!on} aria-describedby="wait-reset-hint" onChange=${(e) => saveWait(e.target)} /></label>
+      <div class="hint" id="wait-reset-hint">${t('한도가 이 시간 안에 풀리면 다른 AI에게 넘기지 않고 기다렸다가 같은 AI로 이어 가.')}</div>
+    </div>
     ${rest.length > 0 && html`<div class="row wrap" style="gap:6px;width:100%">
       ${rest.map(([id, c]) => html`<span class="chip warn" title=${c.near ? '' : c.reason || ''}>⏸ ${PROVIDER_SHORT[id] || id} · ${restLabel(c)}
         <span class="x" role="button" title=${t('지금 다시 쓰기(한도가 풀렸거나 요금제를 올렸을 때)')} onClick=${() => release(id)}>✕</span></span>`)}

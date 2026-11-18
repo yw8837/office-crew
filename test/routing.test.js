@@ -26,6 +26,13 @@ test('역할 이름 인식(한·영·중·일)', () => {
   assert.equal(roleKind('아무거나'), 'general');
 });
 
+test('검수 역할 낱말 더: 검증·감수·점검·審査·审核·验证·校对·検証·校正·verify·audit', () => {
+  for (const r of ['검증', '코드 감수', '품질 점검', '審査', '审核', '审核员', '验证', '校对', '検証', '校正', 'Verify', 'Verifier', 'Auditor', 'security audit']) assert.equal(roleKind(r), 'review', r);
+  // 기존 판별은 그대로
+  for (const [r, k] of [['조사', 'research'], ['리서치', 'research'], ['정리', 'organize'], ['요약', 'organize'], ['검수', 'review'], ['리뷰', 'review'], ['QA', 'review'], ['审查', 'review'], ['レビュー', 'review'],
+    ['빌드', 'build'], ['구현', 'build'], ['开发', 'build'], ['분석', 'analysis'], ['설계', 'analysis'], ['計画', 'analysis'], ['글쓰기', 'writing'], ['翻訳', 'writing'], ['아무거나', 'general']]) assert.equal(roleKind(r), k, r);
+});
+
 test('균형 프로필: 분석은 Claude 최상 모델·하이, 빌드는 X하이', () => {
   const a = resolveRoute({ role: '분석', routingProfile: 'balanced' }, ctx);
   assert.deepEqual([a.provider, a.model, a.effort], ['claude', 'opus', 'high']);

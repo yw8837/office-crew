@@ -51,12 +51,13 @@ Agent    { id, name, role, emoji, provider, model, effort, systemPrompt,
 Team     { id, name, description, stages:[ { id, label, agentIds:[...], instruction, approve:boolean, meeting:null|{ rounds, chairId, tokenCap, opposeId:null|agentId(반대편. null 이면 실행 때 자동으로 고른다, 결정 0010) } } ] }
 Session  { id, title, titleFrom?(제목을 만든 사용자 말 id), titleLocal?(그 말이 내 PC 모델만 받은 말이면 true: 기억 출처 줄에 제목을 싣지 않는다), teamId|null, agentId|null, cwd, createdAt, updatedAt,
            providerSessions:{ [agentId]: string }, sessionProvider:{ [agentId]: providerId },
+           usageBase?:{ [agentId]: { id, input, output, cacheRead, cacheWrite, cost } }(Claude 사용량의 직전 누적. id 는 다음 호출이 이어 갈 CLI 대화 id 이고, 그 대화를 그대로 이어 갈 때만 뺀다. 믿을 수 없게 되면 지운다. 결정 0012),
            importedFrom?:{ source:'claude'|'codex', id, cwd, total, at, agentId?(불러올 때 만든 에이전트), remembered?(불러온 대화를 프로젝트 기억에 다 넣었음), cleared?(대화를 비웠음: 불러온 대화를 더는 건네지 않는다), checked?(원문이 없어 원래 기록을 다시 읽어 봤음) }, messages:[Message], runs:[Run] }
 Message  { id, role:'user'|'agent'|'system'|'proposal'(영입 제안 카드, 결정 0006), agentId?, runId?, stageIndex?, text, handoffAsk?(사용자 말: 인수인계 메모를 써 달라는 정해진 요청. 대화·기억에 싣지 않는다), handoff?(에이전트 답: 인수인계 메모. 이어받는 다른 AI가 먼저 받는다. 결정 0008), local?(사용자 말: 보낼 때 계획의 AI가 모두 내 PC 모델이면 true, 클라우드 AI가 실제로 받으면 지운다. true 면 클라우드 AI로 넘기는 대화·기억에서 뺀다. 결정 0007), remembered?(사용자 말: 프로젝트 기억에 넣기 시작했음. 두 번 넣지 않는다), cut?(대기열에 있다가 앱이 꺼진 말. 다시 켤 때 기억에 넣고 지운다),
            meeting?:{ phase:'opinion'|'turn'|'research'|'judge'|'conclude'(옛 메시지는 'review'), round, rounds, opposer?:true }(회의 차례), verdict?:{ verdict:'agree'|'continue', reason }(진행자 판정에서 읽은 블록. 결정 0010),
            check?:{ question, from, to, status:'asked'|'answered'|'no-researcher'|'over'|'failed' }(차례 답 끝에서 읽은 조사 질문 블록. 블록은 글에 남고 from·to 자리를 화면이 감춘다), checkOf?(조사 결과: 질문한 차례 메시지 id. 결정 0011),
            attachments:[{id,name,mime,size,path}], blocks:[Block], status:'streaming'|'done'|'error'|'stopped',
-           usage?:{input,output,cacheRead,cacheWrite,cost,durationMs}, createdAt }
+           usage?:{input,output,cacheRead,cacheWrite,cost,durationMs, partial?(true: 하위 에이전트 몫이 빠졌을 수 있다), sub?(주 에이전트 밖에서 쓴 토큰: 하위 에이전트 등. 결정 0012)}, createdAt }
 Block    { id, kind:'tool'|'thinking'|'notice', name?, input?, output?, status:'running'|'done'|'error' }
 Run      { id, cut?(실행 중에 앱이 꺼졌다는 표시. 다시 켤 때 그 사용자 말을 기억에 넣고 지운다), teamId|null, status:'running'|'paused'|'waiting'|'done'|'error'|'stopped',
            stageIndex, stages:[{ label, agentIds, status, meetingNow?:null|{ phase, round, rounds, speakerId?(차례·조사 중인 사람), opposerId?(반대편이 있으면 늘), askedBy?(조사 중일 때 질문한 사람) }(회의 진행 표시. 결정 0010·0011) }], startedAt, endedAt }
@@ -77,7 +78,7 @@ emit(ev):
   { type:'text', text }              // 출력 조각(누적 아님)
   { type:'thinking', text }
   { type:'tool', id, name, input, status:'running'|'done'|'error', output? }
-  { type:'usage', input, output, cacheRead, cacheWrite, cost }
+  { type:'usage', input, output, cacheRead, cacheWrite, cost, tree? }   // tree: Claude 만. 결과의 { modelUsage, totalCost } 그대로(하위 에이전트 포함 누적). 이번 몫은 오케스트레이터가 정산한다(결정 0012)
   { type:'limits', provider, windows:{ five_hour?:{pct,resetsAt}, seven_day?:{pct,resetsAt}, primary?:... } }
   { type:'session', id }
   { type:'notice', text }
@@ -102,7 +103,7 @@ emit(ev):
 ### 자동 이어받기(`server/failover.js`)
 - 실행 중 오류가 한도 문구(`isQuotaError`)면: 그 프로바이더를 쉬게 표시(`Cooldown`, 초기화 시각을 모르면 30분) → 같은 역할·프로필로 라우팅 엔진에 다시 물어 다른 AI를 고름(`pickFallback`, 이미 시도한 AI 제외) → `continuationPrompt`(원래 요청 + 지금까지 쓴 글)로 같은 메시지에 이어서 실행. 여러 번 연쇄 가능.
 - 실행 전: 직접 설정 에이전트의 AI가 쉬는 중이거나 한도 사용률이 기준(`failoverThreshold`, 기본 95%) 이상이면 이번 실행만 대체 AI로. 자동 라우팅은 막힌 AI를 빼고 고른다(전부 막히면 원래 목록으로 시도).
-- 설정: `failover`(기본 켬), `failoverThreshold`. API: `GET /api/cooldown`, `DELETE /api/cooldown/:provider`. 이벤트: `cooldown`.
+- 설정: `failover`(기본 켬), `failoverThreshold`, `waitForResetMin`(0~30분, 기본 0 = 끔: 직접 정한 AI의 다 찬 창이 이 안에 풀린다고 한도 기록이 알려 주면 실행을 시작할 때 다른 AI로 넘기지 않고 기다렸다가 같은 AI로 한다. 기다리는 동안 에이전트 상태는 `paused`). API: `GET /api/cooldown`, `DELETE /api/cooldown/:provider`. 이벤트: `cooldown`.
 - 쉬게 표시하는 건 계정 단위 한도가 있는 CLI(claude·codex·gemini·hermes)뿐이다. API 프로필·ACP 에이전트는 서로 다른 계정일 수 있어 통째로 막지 않는다. 내 PC 모델(local) 작업은 데이터가 밖으로 나가지 않게 다른 AI로 넘기지 않는다.
 - 크기 한도(문맥 길이·max_tokens·파일 크기)는 사용량 한도로 보지 않는다. 이어하기 중 나온 한도 오류는 "이어하기 실패"로 처리하지 않는다(원래 대화 id 유지).
 - 남은 AI가 모두 한도 임박이면 그중에서라도 마지막으로 시도한다(쉬는 중·거절 상태는 계속 제외). 이어받는 AI 기준으로 프롬프트를 다시 만들고, 이어하기가 되는 AI면 앞 대화도 넣는다.

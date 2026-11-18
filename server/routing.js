@@ -18,7 +18,7 @@ export function roleKind(role = '') {
   const r = String(role).toLowerCase();
   if (/조사|검색|리서치|research|search|调研|调查|検索|調査|リサーチ/.test(r)) return 'research';
   if (/정리|요약|organize|summar|整理|总结|要約/.test(r)) return 'organize';
-  if (/검수|리뷰|테스트|검토|review|test|qa|审查|测试|レビュー|テスト/.test(r)) return 'review';
+  if (/검수|리뷰|테스트|검토|검증|감수|점검|review|test|qa|verif|audit|审查|审核|测试|验证|校对|審査|レビュー|テスト|検証|校正/.test(r)) return 'review';
   if (/빌드|구현|개발|코딩|build|implement|code|dev|构建|开发|実装|開発|ビルド/.test(r)) return 'build';
   if (/분석|계획|기획|설계|analy|plan|design|分析|计划|設計|計画/.test(r)) return 'analysis';
   if (/글|작성|번역|write|writ|translat|写作|翻译|執筆|翻訳/.test(r)) return 'writing';

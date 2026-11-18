@@ -29,9 +29,14 @@ function addUsage(u, m) {
 }
 function agentUsage(s, agentId) {
   const u = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
-  for (const m of s?.messages || []) if (m.agentId === agentId && m.usage) addUsage(u, m);
-  return u;
+  let partial = false, sub = 0;
+  for (const m of s?.messages || []) if (m.agentId === agentId && m.usage) { addUsage(u, m); partial ||= m.usage.partial === true; sub += m.usage.sub || 0; }
+  return Object.assign(u, partial ? { partial } : {}, sub ? { sub } : {});
 }
+// Claude 사용량 도움말 줄: 하위 에이전트 몫이 빠졌을 수 있는지(partial), 주 에이전트 밖에서 쓴 양(하위 에이전트 등)을 얼마나 셌는지(sub)
+const treeTip = (u) => [u.partial && t('하위 에이전트가 쓴 양이 빠졌을 수 있어.'), u.sub > 0 && t('주 에이전트 밖에서 쓴 {n} 토큰 포함(하위 에이전트 등)', { n: fmtTok(u.sub) })].filter(Boolean);
+// 부분 집계 표시(*). 마우스 없이도 알 수 있게 도움말과 같은 글을 화면 낭독기 이름으로 단다
+const partialMark = (u) => (u.partial ? html` <span role="img" aria-label=${treeTip(u).join(' ')}>*</span>` : '');
 function sessionUsage(s) {
   const u = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
   for (const m of s?.messages || []) if (m.usage) addUsage(u, m);
@@ -454,7 +459,7 @@ class Message extends Component {
         ${m.error && html`<div class="msg-err">⚠ ${m.error}</div>`}
         <div class="msg-foot">
           ${m.status === 'stopped' && html`<span class="chip warn">${t('중지됨')}</span>`}
-          ${usageTotal(u) > 0 && html`<span title=${t('입력 {i} · 출력 {o} · 캐시 읽기 {cr} · 캐시 쓰기 {cw}', { i: u.input, o: u.output, cr: u.cacheRead, cw: u.cacheWrite })}>${t('{n} 토큰', { n: fmtTok(usageTotal(u)) })}</span>`}
+          ${usageTotal(u) > 0 && html`<span title=${[t('입력 {i} · 출력 {o} · 캐시 읽기 {cr} · 캐시 쓰기 {cw}', { i: u.input, o: u.output, cr: u.cacheRead, cw: u.cacheWrite }), ...treeTip(u)].join('\n')}>${t('{n} 토큰', { n: fmtTok(usageTotal(u)) })}${partialMark(u)}</span>`}
           ${!usageTotal(u) && u.estOutput > 0 && html`<span title=${t('CLI가 턴을 끝내면 실제 값으로 바뀌어')}>~${t('{n} 토큰 (작성 중 추정)', { n: fmtTok(u.estOutput) })}</span>`}
           ${u.cost > 0 && html`<span>${fmtCost(u.cost)}</span>`}
           ${u.durationMs > 0 && !streaming && html`<span>${fmtDur(u.durationMs)}</span>`}
@@ -891,6 +896,10 @@ export function RightPanel({ s }) {
   const today = state.usage?.today || {};
   const u = sessionUsage(s);
   const L = (logs[s.id] || []).slice(-60).reverse();
+  const run = latestRun(s);
+  const going = run && !run.endedAt;
+  // 한도가 풀리길 기다리는 에이전트(상태 paused)는 아직 실행 전이라 상세 창의 건너뛰기가 안 보여서 카드에 둔다
+  const skipWait = (e, id) => { e.stopPropagation(); post(`/api/sessions/${s.id}/control`, { action: 'skip', agentId: id }).then((r) => { if (r && r.ok === false && r.reason) toast(r.reason, 'error'); }).catch((er) => toast(er.message, 'error')); };
   return html`<aside class="right">
     <div class="right-tabs seg" style="margin:10px 10px 4px">
       <button class=${tab === 'team' ? 'on' : ''} onClick=${() => setTab('team')}>${t('팀 현황')}</button>
@@ -908,7 +917,8 @@ export function RightPanel({ s }) {
               <div class="nm">${a.name}<span class=${`sbadge ${l?.state || 'idle'}`}>${STATE_LABEL[l?.state || 'idle']}</span></div>
               <div class="sub">${a.role} · ${agentModelText(a, s)}</div>
               <div class="detail">${l?.detail || ' '}</div>
-              ${usageTotal(au) > 0 && html`<div class="sub">${t('{n} 토큰', { n: fmtTok(usageTotal(au)) })} ${fmtCost(au.cost)}</div>`}
+              ${going && l?.state === 'paused' && html`<button type="button" class="btn sm" style="margin:4px 0" title=${t('이 에이전트만 멈추고 다음으로')} onClick=${(e) => skipWait(e, a.id)}><${Icon} name="skip" /> ${t('건너뛰기')}</button>`}
+              ${usageTotal(au) > 0 && html`<div class="sub" title=${treeTip(au).join('\n')}>${t('{n} 토큰', { n: fmtTok(usageTotal(au)) })}${partialMark(au)} ${fmtCost(au.cost)}</div>`}
             </div>
           </div>`;
         })}

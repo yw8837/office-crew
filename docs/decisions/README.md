@@ -17,3 +17,4 @@ Keep a record under about 100 lines. When a decision changes, add a dated "Revis
 | [0009](0009-agents-ask-with-a-marked-block.md) | An agent asks the user by writing a marked block in its answer | Accepted |
 | [0010](0010-meetings-take-turns.md) | Meetings take turns, and the chair judges after each round (replaces the flow part of 0005) | Accepted |
 | [0011](0011-meetings-pause-for-research.md) | A meeting turn can ask a question, and the team's researcher looks it up once | Accepted |
+| [0012](0012-claude-usage-counts-the-whole-tree.md) | Claude usage counts sub-agents and is not counted twice in a continued conversation | Accepted |

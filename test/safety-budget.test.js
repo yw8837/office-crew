@@ -233,7 +233,7 @@ test('자동 라우팅도 하루 몫을 다 쓴 AI를 빼고, 이어받기를 �
   assert.equal((await t.api('GET', '/api/cooldown')).json.claude, undefined);
 });
 
-test('검수는 예산보다 교차 검증이 먼저이고, 노력만 낮춘다', async () => {
+test('검수는 예산보다 교차 검증이 먼저이고, 노력도 낮추지 않는다', async () => {
   t.app.store.settings.dailyBudget = true;
   seedBudget('claude', 10, 30);
   const mk = async (body) => (await t.api('POST', '/api/agents', { permission: 'plan', ...body })).json;
@@ -245,7 +245,34 @@ test('검수는 예산보다 교차 검증이 먼저이고, 노력만 낮춘다'
   await t.waitFor(() => t.app.store.getSession(s.id).runs.at(-1)?.endedAt, 15000, '실행 종료');
   const m = t.app.store.getSession(s.id).messages.filter((x) => x.role === 'agent').at(-1);
   assert.equal(m.provider, 'claude', '빌드한 Codex 를 다시 고르지 않는다');
-  assert.equal(m.effort, 'low');
+  assert.notEqual(m.effort, 'low');
+  assert.ok(!m.blocks.some((b) => b.kind === 'notice' && /노력을/.test(b.text)), '낮추지 않았으면 알림도 없다');
+});
+
+test('하루 몫이 빠듯해도 검수 역할과 회의의 판정·결론은 노력을 낮추지 않는다(빌드와 회의 의견·차례는 지금처럼 낮춘다)', async () => {
+  t.app.store.settings.dailyBudget = true;
+  seedBudget('claude', 10, 30);
+  seedBudget('codex', 10, 30); // 맡길 다른 AI도 없게
+  // 가짜 Codex 는 실행해도 한도 기록을 바꾸지 않아서 실행이 여러 번이어도 하루 몫이 빠듯한 채로 남는다
+  const build = await runOnce({ name: '빠듯빌드', role: '빌드', provider: 'codex', model: 'gpt-6.1-sol', effort: 'high', routing: 'manual' });
+  assert.deepEqual([build.provider, build.effort], ['codex', 'low']);
+  const review = await runOnce({ name: '빠듯검수', role: '검수', provider: 'codex', model: 'gpt-6.1-sol', effort: 'high', routing: 'manual' });
+  assert.deepEqual([review.provider, review.effort], ['codex', 'high']);
+  assert.ok(!review.blocks.some((b) => b.kind === 'notice' && /노력을/.test(b.text)), '낮추지 않았으면 알림도 없다');
+
+  const mk = async (name) => (await t.api('POST', '/api/agents', { name, role: '분석', provider: 'codex', model: 'gpt-6.1-sol', effort: 'high', permission: 'plan', routing: 'manual' })).json;
+  const a = await mk('빠듯진행'), b = await mk('빠듯참석');
+  const team = (await t.api('POST', '/api/teams', { name: '빠듯회의', stages: [{ label: '회의', agentIds: [a.id, b.id], meeting: { rounds: 3, chairId: a.id } }] })).json;
+  const s = (await t.api('POST', '/api/sessions', { teamId: team.id })).json;
+  await t.api('POST', `/api/sessions/${s.id}/messages`, { text: '정하자' });
+  await t.waitFor(() => t.app.store.getSession(s.id).runs.at(-1)?.endedAt, 30000, '회의 끝');
+  const mm = t.app.store.getSession(s.id).messages.filter((x) => x.meeting);
+  assert.deepEqual(mm.map((x) => x.meeting.phase), ['opinion', 'opinion', 'turn', 'judge', 'turn', 'conclude']);
+  for (const x of mm) {
+    const keep = x.meeting.phase === 'judge' || x.meeting.phase === 'conclude';
+    assert.equal(x.effort, keep ? 'high' : 'low', `${x.meeting.phase}`);
+    assert.equal(x.blocks.some((bl) => bl.kind === 'notice' && /노력을/.test(bl.text)), !keep, `${x.meeting.phase} 알림`);
+  }
 });
 
 test('주간 창이 빠진 이벤트가 와도 예산이 안 풀리고, 5시간 한도를 풀어도 예산은 그대로다', async () => {

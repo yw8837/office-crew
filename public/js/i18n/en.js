@@ -1381,4 +1381,6 @@ export default {
   // ── Claude 사용량 정산: 하위 에이전트 몫 (session.js) ──
   "하위 에이전트가 쓴 양이 빠졌을 수 있어.": "Usage by sub-agents may be missing.",
   "하위 에이전트 {n} 토큰 포함": "Includes {n} tokens used by sub-agents",
+  // ── 하루 예산: 낮추지 않는 차례 (routing.js) ──
+  "검수와 회의 판정은 낮추지 않아.": "Reviews and meeting verdicts keep their effort.",
 };

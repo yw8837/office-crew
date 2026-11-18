@@ -659,15 +659,16 @@ export class Orchestrator {
       return null;
     }
     this.#notice(s, msg, `⚡ ${tr('{from} 사용량 한도에 걸려서 {to}({model})가 이어받아 계속해.', { from, to: PROVIDERS[fb.provider]?.label || fb.provider, model: fb.modelLabel })}`);
-    const { agent: next, note } = this.#pace({ ...ag, provider: fb.provider, model: fb.model, effort: fb.effort });
+    const { agent: next, note } = this.#pace({ ...ag, provider: fb.provider, model: fb.model, effort: fb.effort }, msg.meeting?.phase);
     if (note) this.#notice(s, msg, note);
     return next;
   }
 
-  // 하루 예산: 오늘 속도가 빠르면 이번 실행의 노력을 낮춘다(저장된 에이전트는 그대로). 이어받는 AI에도 똑같이 적용한다
-  #pace(agent) {
+  // 하루 예산: 오늘 속도가 빠르면 이번 실행의 노력을 낮춘다(저장된 에이전트는 그대로). 이어받는 AI에도 똑같이 적용한다.
+  // 검수 역할과 회의의 판정·결론 차례(phase)는 낮추지 않는다(낮추지 않았으면 알림도 없다)
+  #pace(agent, phase = null) {
     const b = agent ? this.usage.budget(agent.provider) : null;
-    if (!b?.steps) return { agent, note: null };
+    if (!b?.steps || roleKind(agent.role) === 'review' || phase === 'judge' || phase === 'conclude') return { agent, note: null };
     const effort = lowerEffort(agent.effort, b.steps);
     if (effort === agent.effort) return { agent, note: null };
     return {
@@ -679,7 +680,7 @@ export class Orchestrator {
   async #route(ctx, stageIdx, agent) {
     if (!agent || !this.providers) return { agent, note: null, error: null };
     const fo = this.store.settings.failover !== false;
-    // 하루 예산은 약한 제한이라 검수에서는 교차 검증을 먼저 지킨다(넘겨도 노력은 낮아진다)
+    // 하루 예산은 약한 제한이라 검수에서는 교차 검증을 먼저 지킨다(노력도 낮추지 않는다, #pace)
     const budgetOpt = roleKind(agent.role) === 'review' ? { overBudget: null } : {};
     if (agent.routing !== 'auto') {
       // 직접 설정한 AI가 쉬는 중이거나 한도가 거의 찼으면, 이번 실행만 같은 역할의 다른 AI에게 맡긴다(대안이 없으면 그대로 시도)
@@ -721,7 +722,7 @@ export class Orchestrator {
       this.#state(ctx.s.id, agentId, 'idle', tr('중지됨')); // 사무실에 '자동 라우팅 중…'이 남지 않게
       return { agent: routed.agent, text: '', stopped: true };
     }
-    const { agent, note: budgetNote } = routed.error ? { agent: routed.agent, note: null } : this.#pace(routed.agent);
+    const { agent, note: budgetNote } = routed.error ? { agent: routed.agent, note: null } : this.#pace(routed.agent, ctx.meet?.get(agentId)?.phase);
     const prov = agent && !routed.error && PROVIDERS[agent.provider];
     const msg = {
       id: newId('m'), role: 'agent', agentId, runId: run.id, stageIndex: stageIdx, stageLabel: run.stages[stageIdx].label,

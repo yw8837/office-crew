@@ -1380,9 +1380,9 @@ export default {
   "확인 필요: {q}": "Needs checking: {q}",
   // ── Claude 사용량 정산: 하위 에이전트 몫 (session.js) ──
   "하위 에이전트가 쓴 양이 빠졌을 수 있어.": "Usage by sub-agents may be missing.",
-  "하위 에이전트 {n} 토큰 포함": "Includes {n} tokens used by sub-agents",
+  "주 에이전트 밖에서 쓴 {n} 토큰 포함(하위 에이전트 등)": "Includes {n} tokens used outside the main agent (sub-agents and the like)",
   // ── 하루 예산: 낮추지 않는 차례 (routing.js) ──
-  "검수와 회의 판정은 낮추지 않아.": "Reviews and meeting verdicts keep their effort.",
+  "검수와 회의의 판정·결론은 낮추지 않아.": "Reviews and a meeting's verdicts and conclusion keep their effort.",
   // ── 한도가 곧 풀리면 기다리기 (routing.js, orchestrator.js) ──
   "한도가 곧 풀리면 기다리기(분, 0이면 끔)": "Wait for a limit that resets soon (minutes, 0 = off)",
   "한도가 이 시간 안에 풀리면 다른 AI에게 넘기지 않고 기다렸다가 같은 AI로 이어 가.": "If the limit resets within this time, the work waits for it and goes on with the same AI instead of going to another AI.",

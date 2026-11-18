@@ -1,6 +1,7 @@
 // 테스트용 가짜 claude: 실측한 stream-json 형식을 그대로 흉내 낸다(실제 AI 호출 없음)
 import fs from 'node:fs';
 import readline from 'node:readline';
+import { randomUUID } from 'node:crypto';
 
 const args = process.argv.slice(2);
 const out = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
@@ -18,42 +19,48 @@ if (process.env.FAKE_LOG && settingsFile) fs.appendFileSync(process.env.FAKE_LOG
 if (process.env.FAKE_EXIT_NOW === '1') process.exit(3);
 const resume = val('--resume');
 if (resume && resume.startsWith('dead')) { process.stderr.write(`No conversation found with session ID: ${resume}\n`); process.exit(1); }
-const sid = resume && !args.includes('--fork-session') ? resume : `claude-sess-${process.pid}`; // 갈래(fork)면 새 id
+const sid = resume && !args.includes('--fork-session') ? resume : `claude-sess-${randomUUID()}`; // 새 대화·갈래(fork)면 새 id(프로세스 번호와 상관없이)
 out({ type: 'system', subtype: 'init', session_id: sid, model: val('--model') || 'claude-x', tools: [], mcp_servers: [] });
 
 const queue = [];
 let busy = false, closed = false, turn = 0;
 
 // 결과의 모델별 사용량. SUBUSE: 하위 에이전트(작은 모델)도 일한 것처럼 두 모델을 싣는다(합이 usage 보다 크다).
-// CUMUL: 이어 간 대화(같은 프로세스의 다음 턴 포함)에서는 그 대화 전체의 누적을 낸다(Claude Code 2.1.277부터의 모양).
-// 대화 id별 누적은 FAKE_LOG 옆 파일에 적어 두고, 한 번 누적으로 낸 대화는 이어 갈 때 신호어가 없어도 누적으로 낸다. 둘 다 아니면 싣지 않는다(지금 형식)
+// CUMUL: 누적을 내는 Claude Code(2.1.277부터) 흉내. 결과마다 이 프로세스에서 쓴 양의 합을 내고, 이어 가거나 갈래를 냈으면
+// 원래 대화가 저장해 둔 누적부터 센다. 누적은 정상 종료할 때만 대화 id별로 FAKE_LOG 옆 파일에 적는다(중간에 죽으면 안 적힌다).
+// 저장된 누적이 있는 대화는 이어 갈 때 신호어가 없어도 누적으로 낸다. 둘 다 아니면 싣지 않는다(지금 형식)
+const cumulFile = process.env.FAKE_LOG ? `${process.env.FAKE_LOG}.cumul.json` : null;
+const savedCumul = () => { try { return cumulFile ? JSON.parse(fs.readFileSync(cumulFile, 'utf8')) : {}; } catch { return {}; } };
+let running = resume ? savedCumul()[resume] || null : null; // 이어 간(갈래 포함) 대화가 정상 종료 때 저장한 누적
+let cumulOn = !!running;
+const modelUsageOf = (now) => Object.fromEntries(Object.entries(now).map(([k, [i, o, cr, cw, c]]) => [k, { inputTokens: i, outputTokens: o, cacheReadInputTokens: cr, cacheCreationInputTokens: cw, costUSD: c }]));
 function treeUsage(req) {
-  const file = process.env.FAKE_LOG ? `${process.env.FAKE_LOG}.cumul.json` : null;
-  let all = {};
-  try { if (file) all = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* 아직 없음 */ }
-  const carried = turn > 1 || (resume && !args.includes('--fork-session')) ? all[sid] : null; // 새 대화면 같은 id의 옛 기록은 안 쓴다
-  const cumul = !!file && (req.includes('CUMUL') || !!carried);
-  if (!req.includes('SUBUSE') && !cumul) return {};
-  const now = { 'claude-x': [10, 5, 100, 50, 0.01] };
+  if (req.includes('CUMUL') && cumulFile) cumulOn = true;
+  if (!req.includes('SUBUSE') && !cumulOn) return {};
+  let now = { 'claude-x': [10, 5, 100, 50, 0.01] };
   if (req.includes('SUBUSE')) now['claude-haiku-x'] = [200, 40, 0, 0, 0.002];
-  if (cumul) {
-    for (const [k, v] of Object.entries(carried || {})) now[k] = (now[k] || [0, 0, 0, 0, 0]).map((x, i) => x + v[i]);
-    all[sid] = now;
-    fs.writeFileSync(file, JSON.stringify(all));
+  if (cumulOn) {
+    for (const [k, v] of Object.entries(running || {})) now[k] = (now[k] || [0, 0, 0, 0, 0]).map((x, i) => x + v[i]);
+    running = now;
+    now = { ...now };
   }
-  const modelUsage = Object.fromEntries(Object.entries(now).map(([k, [i, o, cr, cw, c]]) => [k, { inputTokens: i, outputTokens: o, cacheReadInputTokens: cr, cacheCreationInputTokens: cw, costUSD: c }]));
-  const tree = { modelUsage, total_cost_usd: Object.values(now).reduce((n, v) => n + v[4], 0) };
+  const tree = { modelUsage: modelUsageOf(now), total_cost_usd: Object.values(now).reduce((n, v) => n + v[4], 0) };
   if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ cli: 'claude', result: tree })}\n`);
   return tree;
 }
+// 정상 종료: 누적을 저장하고 끝낸다(앱이 프로세스를 끄면 여기를 지나지 않는다)
+function exitNormally() {
+  if (cumulOn && running && cumulFile) fs.writeFileSync(cumulFile, JSON.stringify({ ...savedCumul(), [sid]: running }));
+  process.exit(0);
+}
 const rl = readline.createInterface({ input: process.stdin });
 rl.on('line', (line) => { if (line.trim()) { queue.push(JSON.parse(line)); pump(); } });
-rl.on('close', () => { closed = true; if (!busy && !queue.length) process.exit(0); });
+rl.on('close', () => { closed = true; if (!busy && !queue.length) exitNormally(); });
 
 async function pump() {
   if (busy) return;
   const m = queue.shift();
-  if (!m) { if (closed) process.exit(0); return; }
+  if (!m) { if (closed) exitNormally(); return; }
   busy = true;
   turn++;
   out({ type: 'user', message: m.message, isReplay: true });
@@ -130,6 +137,19 @@ async function pump() {
     out({ type: 'result', subtype: 'success', is_error: false, session_id: sid, usage: { input_tokens: 1, output_tokens: 1 } });
   } else if (req.includes('FAILME') || (research && req.includes('RESEARCHFAIL'))) {
     out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: '가짜 실패', session_id: sid, usage: {} });
+  } else if (req.includes('ZEROCRASH')) {
+    // 충돌 흉내: 값이 모두 0인 오류 결과를 내고 누적을 저장하지 않은 채 끝난다
+    const zero = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0 };
+    process.stdout.write(`${JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, result: '가짜 충돌', session_id: sid, total_cost_usd: 0,
+      usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, modelUsage: { 'claude-x': zero } })}\n`, () => process.exit(1));
+    return;
+  } else if (req.includes('LOOPTOOL')) {
+    // 헛도는 CLI 흉내: 같은 도구를 같은 입력으로 되풀이한다(앱이 끌 때까지)
+    for (let k = 0; k < 400; k++) {
+      out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: `lt${turn}_${k}`, name: 'Read', input: { file_path: 'same.txt' } }] } });
+      await sleep(5);
+    }
+    out({ type: 'result', subtype: 'success', is_error: false, session_id: sid, total_cost_usd: 0.01, usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100, cache_creation_input_tokens: 50 }, ...treeUsage(req) });
   } else {
     out({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', unifiedWindows: { five_hour: { utilization: 0.25, resetsAt: 1793523600 }, seven_day: { utilization: 0.5, resetsAt: 1793685600 } } } });
     out({ type: 'result', subtype: 'success', is_error: false, session_id: sid, total_cost_usd: 0.01, usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100, cache_creation_input_tokens: 50 }, ...treeUsage(req) });

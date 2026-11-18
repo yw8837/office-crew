@@ -9,7 +9,7 @@ import { toolCategory } from './providers/util.js';
 import { resolveRoute, roleKind, aiKey, baseProvider } from './routing.js';
 import { Cooldown, isQuotaError, nearLimit, avoidUntil, resetTime, resetFromText, availableCatalog, pickFallback, continuationPrompt, handoffFacts } from './failover.js';
 import { nextMidnight, lowerEffort } from './budget.js';
-import { settleClaude } from './usage.js';
+import { settleClaude, tokenSum } from './usage.js';
 import { tr } from './i18n.js';
 import { ASK_MAX, parseAsk, cleanAnswers, answered, answerPrompt, answerRecord, askNote, stripAsks } from './ask.js';
 import { pickOpposer, turnOrder, parseVerdict, verdictBlock, CHECK_MAX, parseCheck, checkBlock, pickResearcher } from './meeting.js';
@@ -838,9 +838,15 @@ export class Orchestrator {
           // 불러온 Claude 세션은 처음 이어갈 때 갈래(fork)로 시작해 원래 기록을 그대로 둔다
           const forkSession = !!rid && ag.provider === 'claude' && s.importedFrom?.source === 'claude' && rid === s.importedFrom.id;
           const watch = this.#watchStall(ctx, pv.caps.quiet, () => { fresh = true; });
-          const call = { rid, sid: rid, n: 0, base: null }; // 이 CLI 호출: 이어 간 대화 id, 지금 대화 id, 정산한 결과 수, 직전 결과의 누적(사용량 정산용)
+          // 이 CLI 호출: 이어 간 대화 id, 지금 대화 id, 정산한 결과 수, 직전 결과의 누적, 앱이 껐는지(사용량 정산용)
+          const call = { rid, sid: rid, n: 0, base: null, killed: false };
           const emit = (ev) => { if (watch.saw(ev) === false) return; this.#onEvent(ctx, msg, ag, ev, call); }; // 헛돌아서 끈 뒤에 밀려 나오는 출력은 버린다
-          const h = watch.attach(pv.run({ ...base, prompt: p, resumeId: rid, forkSession }, emit));
+          const raw = pv.run({ ...base, prompt: p, resumeId: rid, forkSession }, emit);
+          // 앱이 끄는 CLI(중지·건너뛰기·회의 끝내기·멈춤·헛돌기·앱 종료)는 누적을 저장하지 못할 수 있다(Claude 는 정상 종료 때만 저장).
+          // 이미 결과를 낸 호출이면 그 결과로 남긴 직전 누적을 버린다(끈 뒤에 온 결과도 #settle 이 저장하지 않는다)
+          const kill = raw.stop;
+          raw.stop = (...a) => { call.killed = true; if (call.n) delete s.usageBase?.[agentId]; return kill.apply(raw, a); };
+          const h = watch.attach(raw);
           ctx.handles.set(agentId, { handle: h, msg, agent: ag, prov: pv });
           return h;
         };
@@ -1526,17 +1532,22 @@ export class Orchestrator {
 
   // Claude 결과 하나의 이번 몫(결정 0012). 직전 누적(baseline)은 에이전트별 CLI 대화 id(providerSessions) 옆에, 다음 호출이 이어 갈 대화 id 와 같이 둔다.
   // 호출이 바로 그 id 를 이어 갈 때만 쓰므로 새 대화·다른 AI·불러온 대화에는 쓰이지 않는다. 한 호출에서 결과가 여러 번 오면 앞 결과의 누적을 뺀다.
-  // 누적을 모르는 결과(modelUsage 없음)는 baseline 을 지운다
+  // 정산 규칙은 CLI 버전(detect 가 읽은 값)으로 가른다. 믿을 수 없는 누적은 직전 누적으로 남기지 않는다:
+  // 누적을 모르는 결과(modelUsage 없음)와 직전 누적보다 작은 누적은 직전 누적을 지우고, 합이 0인 누적(충돌)은 저장하지 않고, 앱이 끈 호출의 결과도 저장하지 않는다
   #settle(s, agentId, ev, call) {
     const bases = (s.usageBase ||= {});
     const prev = bases[agentId];
     const baseline = call.n ? call.base : (call.rid && prev?.id === call.rid ? prev : null);
-    const got = settleClaude({ usage: ev, modelUsage: ev.tree.modelUsage, totalCost: ev.tree.totalCost, baseline, resumed: !!call.rid || call.n > 0 });
+    const got = settleClaude({ usage: ev, modelUsage: ev.tree.modelUsage, totalCost: ev.tree.totalCost, baseline, resumed: !!call.rid || call.n > 0,
+      sameCall: call.n > 0, cliVersion: this.providers?.detected?.claude?.version || null });
     call.n++;
-    call.base = got.cumulative;
+    const cum = got.cumulative;
     const id = call.sid || call.rid;
-    if (got.cumulative && id) bases[agentId] = { id, ...got.cumulative };
-    else delete bases[agentId];
+    if (!cum || !id || call.killed) { delete bases[agentId]; call.base = call.killed ? null : cum; return got; }
+    if (!tokenSum(cum)) return got; // 충돌로 끝난 결과는 0일 수 있다: 직전 누적으로 쓰지 않는다
+    if (baseline && (tokenSum(cum) < tokenSum(baseline) || cum.cost < baseline.cost)) { delete bases[agentId]; call.base = null; return got; }
+    bases[agentId] = { id, ...cum };
+    call.base = cum;
     return got;
   }
 

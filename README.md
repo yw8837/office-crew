@@ -38,6 +38,7 @@ Office Crew is a local workspace for running several AI agents together. It runs
 - **Model lists that match the CLI:** Claude shows versions the way Claude Code does (for example Opus 5.5, Fable 5.2, Sonnet 5.5, Haiku 5.5). The aliases always follow the latest model, and the version a run actually used is remembered. Codex lists every model in its own catalog, previous generations included, in Codex's order. Your CLI's default model and effort are marked, the lists refresh every 30 minutes and whenever a CLI update is detected, and auto-routing skips previous-generation models.
 - **Auto-routing (default for new agents):** when a run starts, Office Crew picks a model and effort from the signed-in AIs it can route to (Claude Code, Codex, OpenAI-compatible APIs and local models, plus Gemini CLI for research). It decides by role (research, organize, analysis, build, review, writing) and profile (economy, balanced, best). Review agents are routed to a different AI than the builder whenever possible.
 - **Routing board:** edit every agent's AI, model, effort and permission in one table.
+- **Role notes:** each agent keeps short notes on what its role does and what you taught it, in the agent editor or from text you select in its answer. Only what you wrote or accepted goes into its next runs; anything from an agent or an outside source waits as a draft, and every change can be undone.
 
 | Agent editor | AI accounts and sign-in |
 |---|---|

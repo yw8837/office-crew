@@ -200,7 +200,7 @@ export class NoteStore {
       const why = suspicious(text) || suspicious(source?.ref);
       if (why) throw fail(400, why);
     }
-    const body = checkText(cleanText(text));
+    const body = checkText(cleanText(typeof text === 'string' ? text : ''));
     const now = Date.now();
     const item = {
       id: newId('note'), kind: KINDS.includes(kind) ? kind : 'method', text: body, source: src,
@@ -221,7 +221,7 @@ export class NoteStore {
     if (text !== undefined) {
       // 에이전트·바깥 자료 항목은 사용자가 고칠 때도 같은 검사를 거친다(저장된 글에 그런 무늬가 남지 않게)
       if (it.source?.type !== 'user') { const why = suspicious(text); if (why) throw fail(400, why); }
-      const body = checkText(cleanText(text));
+      const body = checkText(cleanText(typeof text === 'string' ? text : ''));
       if (body !== it.text) patch.text = body;
     }
     if (kind !== undefined) { const k = KINDS.includes(kind) ? kind : 'method'; if (k !== it.kind) patch.kind = k; }

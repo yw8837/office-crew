@@ -387,8 +387,17 @@ test('데모(가짜 AI) 팀으로 회의하면 차례에 맞는 짧은 답이 �
     const s = await session(tm.id);
     await say(s.id, '새 기능 이름을 정하자');
     const mm = meetMsgs(s.id);
-    assert.deepEqual(mm.map((m) => m.meeting.phase), ['opinion', 'opinion', 'opinion', 'turn', 'turn', 'conclude']);
+    assert.deepEqual(mm.map((m) => m.meeting.phase), ['opinion', 'opinion', 'opinion', 'turn', 'research', 'turn', 'conclude'], '데모 반대편이 2바퀴에 질문 하나를 붙이고 조사 역할이 찾아 온다');
     const of = (phase) => mm.filter((m) => m.meeting.phase === phase);
+    // 데모 조사: 반대편의 질문을 조사 역할(데모 하나)이 사실 두 줄·출처·확인 못 함 한 줄로 답한다
+    const [res] = of('research');
+    assert.equal(res.agentId, a.id);
+    assert.equal(res.checkOf, of('turn')[0].id);
+    assert.match(res.text, /출처: 데모 자료/);
+    assert.match(res.text, /확인 못 함: /);
+    assert.equal(of('turn')[0].check?.status, 'answered');
+    assert.ok(of('turn')[0].check.question.trim());
+    assert.equal(of('turn')[1].check, undefined, '반대편이 아닌 차례는 묻지 않는다');
     for (const m of of('opinion')) { assert.match(m.text, /\*\*주장\*\*/); assert.match(m.text, /\*\*내가 틀렸다고 볼 기준\*\*/); assert.doesNotMatch(m.text, /조사 결과|빌드 결과/); }
     assert.equal(new Set(of('opinion').map((m) => m.text)).size, 3, '역할마다 다른 의견');
     for (const m of of('turn')) { assert.match(m.text, /\*\*답하는 말\*\*/); assert.match(m.text, /\*\*입장\*\*/); }
@@ -414,7 +423,7 @@ test('데모(가짜 AI) 팀으로 회의하면 차례에 맞는 짧은 답이 �
     const s3 = await session(tm3.id);
     await say(s3.id, '새 기능 이름을 정하자');
     const m3 = meetMsgs(s3.id);
-    assert.deepEqual(m3.map((m) => m.meeting.phase), ['opinion', 'opinion', 'opinion', 'turn', 'turn', 'judge', 'conclude']);
+    assert.deepEqual(m3.map((m) => m.meeting.phase), ['opinion', 'opinion', 'opinion', 'turn', 'research', 'turn', 'judge', 'conclude']);
     const j = m3.find((m) => m.meeting.phase === 'judge');
     assert.equal(j.verdict?.verdict, 'agree');
     assert.doesNotMatch(j.text, /oc-verdict/);

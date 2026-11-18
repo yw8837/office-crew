@@ -16,3 +16,4 @@ Keep a record under about 100 lines. When a decision changes, add a dated "Revis
 | [0008](0008-handoff-to-another-ai.md) | Another AI that takes over a session gets the earlier conversation three ways | Accepted |
 | [0009](0009-agents-ask-with-a-marked-block.md) | An agent asks the user by writing a marked block in its answer | Accepted |
 | [0010](0010-meetings-take-turns.md) | Meetings take turns, and the chair judges after each round (replaces the flow part of 0005) | Accepted |
+| [0011](0011-meetings-pause-for-research.md) | A meeting turn can ask a question, and the team's researcher looks it up once | Accepted |

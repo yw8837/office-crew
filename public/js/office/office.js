@@ -6,6 +6,7 @@ import { buildVillageScene } from './village.js';
 import { buildRig } from './character.js';
 import { renderScreen, SCREEN_OF } from './screens.js';
 import { tr, normLang } from './i18n.js';
+import { isTalking, MEET_PHASES, sayText } from './meeting.js';
 
 const QUALITIES = ['full', 'lite', 'static'];
 
@@ -70,6 +71,8 @@ function buildImageScene(skin, n) {
   return {
     mode: 'image', width: W, height: H, defs: el('defs'), stat, labels: el('g'), items: [], desks, door: null,
     spots: { search: mk('search', 'front'), shelf: mk('shelf', 'front'), server: mk('server', 'back'), meeting: mk('meeting', 'back'), lounge: mk('lounge', 'front') },
+    // 회의 결론 게시판: 회의실 자리를 찍었으면 그 오른쪽에(그림 밖으로 나가지 않게), 안 찍었으면 없음
+    board: sp.meeting && sp.meeting.x != null ? [clamp(+sp.meeting.x + 170 * cs, 100 * cs, W - 100 * cs), +sp.meeting.y] : null,
     doorPos: door, charScale: cs, speed: 120 * cs, stride: 13 * cs,
     toScreen: (p, lift = 0) => [p[0], p[1] - lift * cs],
     depth: (p) => p[1] / 10,
@@ -88,6 +91,7 @@ function buildImageScene(skin, n) {
 export function createOffice(container, opts = {}) {
   if (!container) throw new Error('createOffice: container 가 필요해');
   const onSelect = typeof opts.onSelect === 'function' ? opts.onSelect : null;
+  const onCard = typeof opts.onCard === 'function' ? opts.onCard : null; // 게시판의 결론 카드를 눌렀을 때(메시지 id)
   const mq = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
   let reducedOpt = opts.reducedMotion;
   let reduced = !!(reducedOpt ?? (mq && mq.matches));
@@ -132,6 +136,9 @@ export function createOffice(container, opts = {}) {
   let selected = null;
   let raf = 0, lastT = 0, gen = 0, helperSeq = 0, destroyed = false, doorTimer = 0;
   const spotOcc = new Map();
+  let meet = null, meetSig = 'null'; // 지금 회의(setMeeting): { phase, round, rounds, speakerId, opposerId } | null
+  let board = [], boardSig = '[]', boardEl = null, boardTitle = null, boardList = null, boardTimer = 0; // 회의 결론 게시판(setBoard)
+  const talking = (ch) => isTalking(meet, ch.id, !!ch.st.meeting && !ch.helper);
 
   // ── 깊이 정렬 ──
   function insertItem(item) {
@@ -170,7 +177,8 @@ export function createOffice(container, opts = {}) {
     o.dot = document.createElement('i'); o.dot.className = 'oc-dot';
     o.name = document.createElement('b'); o.name.className = 'oc-name';
     o.chip = document.createElement('span'); o.chip.className = 'oc-chip';
-    l1.append(o.dot, o.name, o.chip);
+    o.opp = document.createElement('span'); o.opp.className = 'oc-opp'; o.opp.hidden = true; // 회의의 반대편 표시
+    l1.append(o.dot, o.name, o.opp, o.chip);
     o.l2 = div('oc-tag-l2');
     o.tok = document.createElement('span'); o.tok.className = 'oc-tok';
     o.badge = document.createElement('span'); o.badge.className = 'oc-badge';
@@ -191,9 +199,9 @@ export function createOffice(container, opts = {}) {
   function makeChar(agent, extra = {}) {
     const ch = {
       id: agent.id, agent, helper: !!extra.helper, parentId: extra.parentId || null,
-      st: { state: 'idle', text: '', tool: '', tokens: null, badge: '' },
+      st: { state: 'idle', text: '', tool: '', tokens: null, badge: '', errand: null },
       desk: null, pos: [0, 0], lift: 0, face: 'front', flip: 1, pose: 'stand', at: 'desk',
-      dest: null, targetKey: null, spot: null, walking: null, dist: 0,
+      dest: null, targetKey: null, spot: null, hold: null, holdEl: null, walking: null, dist: 0,
       busy: false, queue: Promise.resolve(), carry: null, flash: null, visitors: 0,
       timers: {}, longThink: false, relax: false, leaving: false, gone: false,
       scale: extra.helper ? 0.7 : 1, home: null, house: null, screenKey: null,
@@ -222,6 +230,7 @@ export function createOffice(container, opts = {}) {
     clearTimers(ch);
     clearTimeout(ch.flashTimer);
     releaseSpot(ch);
+    releaseHold(ch);
     removeItem(ch.item);
     ch.ov.root.remove();
     chars.delete(ch.id);
@@ -236,6 +245,7 @@ export function createOffice(container, opts = {}) {
     if (selected === ch.id) c += ' sel';
     if (ch.helper) c += ' helper';
     if (ch.gone) c += ' gone';
+    if (talking(ch)) c += ' talk'; // 회의에서 지금 말하는 사람(끄덕임은 office.css)
     return c;
   }
   function applyClass(ch) {
@@ -249,10 +259,13 @@ export function createOffice(container, opts = {}) {
     if (ch.flash) return ['recv', ch.flash.icon, ch.flash.text];
     if (ch.carry != null) return ['carry', '📄', head(ch.carry, 18) || T('bub.carry')];
     const s = ch.st, t = s.text;
-    if (ch.id !== selected && s.state !== 'waiting' && s.state !== 'error') return null;
+    // 회의에서 지금 말하는 사람은 고르지 않아도 말풍선을 띄운다
+    const talk = talking(ch);
+    if (ch.id !== selected && !talk && s.state !== 'waiting' && s.state !== 'error') return null;
     switch (s.state) {
       case 'thinking': return ['think', '', ''];
-      case 'typing': return ['say', '', tail(t, 40) || '…'];
+      // 고르지 않았는데 회의 차례라서 뜬 말풍선은 짧게(옆 사람 이름표를 가리지 않게)
+      case 'typing': return ['say', '', sayText(t, ch.id === selected ? 40 : 22) || '…'];
       case 'tool': return ['tool', toolIcon(s.tool), head(s.tool || T('bub.tool'), 18)];
       case 'searching': return ['tool', '🔎', tail(t, 22) || T('bub.searching')];
       case 'reading': return ['tool', '📖', tail(t, 22) || T('bub.reading')];
@@ -261,7 +274,7 @@ export function createOffice(container, opts = {}) {
       case 'error': return ['err', '!', tail(t, 24) || T('bub.error')];
       case 'done': return ch.doneQuiet ? null : ['done', '✓', T('bub.done')];
       case 'paused': return ['pause', '⏸', T('bub.paused')];
-      default: return null;
+      default: return talk ? ['say', '', '…'] : null;
     }
   }
   function updateBubble(ch) {
@@ -283,19 +296,21 @@ export function createOffice(container, opts = {}) {
     const chip = ch.helper ? T('misc.helperChip') : (a.model || '');
     const tok = fmtTokens(s.tokens);
     const badge = s.badge ? String(s.badge) : '';
-    const key = [name, chip, tok, badge, s.state, lang].join('\u0001');
+    const opp = !!(meet && meet.opposerId === ch.id && s.meeting && !ch.helper);
+    const key = [name, chip, tok, badge, s.state, lang, opp].join('\u0001');
     if (key === o.key.tag) return;
     o.key.tag = key;
     o.dirty = true;
     scheduleLayout();
     o.name.textContent = name;
     o.dot.textContent = STATE_GLYPH[s.state] || '';
+    o.opp.textContent = opp ? T('meet.opposer') : ''; o.opp.hidden = !opp;
     o.chip.textContent = chip; o.chip.hidden = !chip;
     o.tok.textContent = tok; o.tok.hidden = !tok;
     o.badge.textContent = badge; o.badge.hidden = !badge;
     o.l2.hidden = !tok && !badge;
     o.root.dataset.state = s.state;
-    o.tag.title = `${name}${a.role ? ' · ' + a.role : ''}${chip ? ' · ' + chip : ''} — ${T('st.' + s.state)}${tok ? ' · ' + tok : ''}${badge ? ' · ' + badge : ''}`;
+    o.tag.title = `${name}${a.role ? ' · ' + a.role : ''}${chip ? ' · ' + chip : ''} — ${T('st.' + s.state)}${tok ? ' · ' + tok : ''}${badge ? ' · ' + badge : ''}${opp ? ' · ' + T('meet.opposer') : ''}`;
   }
   function updateScreen(ch) {
     const d = ch.desk;
@@ -356,6 +371,8 @@ export function createOffice(container, opts = {}) {
   function desired(ch) {
     const s = ch.st.state, t = ch.st.tool;
     if (ch.leaving) return 'door';
+    // 회의 중 조사를 맡으면 모임 자리보다 먼저 조사 자리(마을은 전망탑, 사무실은 정보검색실)로 간다. 그 자리가 없는 스킨이면 건너뛴다
+    if (ch.st.errand && !ch.helper && scene.spots[ch.st.errand] && scene.spots[ch.st.errand].length) return ch.st.errand;
     // 회의 중인 참석자는 차례가 아니어도 모임 자리(마을은 광장, 사무실은 회의실)에 머문다
     if (ch.st.meeting && !ch.helper && scene.spots.meeting && scene.spots.meeting.length) return 'meeting';
     // 마을: 쉬거나 퇴근(완료 후)이면 자기 집으로
@@ -369,11 +386,12 @@ export function createOffice(container, opts = {}) {
     if (spot && scene.spots[spot] && scene.spots[spot].length) return spot;
     return 'home';
   }
-  function claimSpot(ch, name) {
+  // keep: 맡아 둔 자리 번호(조사하러 갔다 돌아올 때 그 자리로)
+  function claimSpot(ch, name, keep) {
     const defs = scene.spots[name];
     let occ = spotOcc.get(name);
     if (!occ) spotOcc.set(name, (occ = []));
-    let k = occ.findIndex((x) => !x);
+    let k = keep != null && occ[keep] === ch.id ? keep : occ.findIndex((x) => !x);
     if (k < 0) k = occ.length;
     occ[k] = ch.id;
     ch.spot = { name, k };
@@ -388,19 +406,59 @@ export function createOffice(container, opts = {}) {
     if (occ && occ[ch.spot.k] === ch.id) occ[ch.spot.k] = null;
     ch.spot = null;
   }
+  // 회의 참석자가 조사하러 가 있는 동안 모임 자리를 맡아 둔다: 다른 사람이 차지하지 않고, 그 자리에 "조사 중" 표가 붙는다
+  function holdSeat(ch, want) {
+    const away = !!(ch.st.meeting && ch.st.errand && want !== 'meeting' && !ch.helper && scene.spots.meeting && scene.spots.meeting.length);
+    if (!away) {
+      if (ch.hold && want !== 'meeting') releaseHold(ch);
+      return;
+    }
+    if (ch.hold) return;
+    if (ch.spot && ch.spot.name === 'meeting') {
+      ch.hold = { ...ch.spot, pos: (ch.dest && ch.dest.at === 'meeting' ? ch.dest.pos : ch.pos).slice() };
+      ch.spot = null;
+    } else {
+      const prev = ch.spot;
+      const d = claimSpot(ch, 'meeting');
+      ch.hold = { ...ch.spot, pos: d.pos };
+      ch.spot = prev;
+    }
+    const m = div('oc-away');
+    const t = div('oc-away-in');
+    t.textContent = T('meet.away');
+    m.append(t);
+    const [sx, sy] = scene.toScreen(ch.hold.pos, 0);
+    m.style.transform = `translate(${sx.toFixed(1)}px,${sy.toFixed(1)}px)`;
+    ovl.append(m);
+    ch.holdEl = m;
+  }
+  // keep: 그 자리를 다시 차지했으니 표만 떼고 자리는 놓지 않는다
+  function releaseHold(ch, keep) {
+    if (!ch.hold) return;
+    if (!keep) {
+      const occ = spotOcc.get(ch.hold.name);
+      if (occ && occ[ch.hold.k] === ch.id) occ[ch.hold.k] = null;
+    }
+    if (ch.holdEl) ch.holdEl.remove();
+    ch.hold = null;
+    ch.holdEl = null;
+  }
   function reconcile(ch, instant) {
     if (!scene || ch.busy || destroyed) return;
     const want = desired(ch);
+    holdSeat(ch, want);
     if (ch.targetKey === want) {
       if (!ch.walking) settle(ch);
       else apply(ch);
       return;
     }
     releaseSpot(ch);
+    const keep = want === 'meeting' && ch.hold ? ch.hold.k : null;
     const dest = want === 'home' ? homeDef(ch) : want === 'door'
       ? { pos: scene.doorPos.slice(), pose: 'stand', face: 'back', flip: -1, at: 'door' }
       : want === 'house' ? { pos: ch.house.door.slice(), pose: 'stand', face: 'back', flip: 1, at: 'house' }
-      : claimSpot(ch, want);
+      : claimSpot(ch, want, keep);
+    if (keep != null) releaseHold(ch, true);
     ch.targetKey = want;
     ch.dest = dest;
     if (instant || still()) {
@@ -420,10 +478,26 @@ export function createOffice(container, opts = {}) {
     ch.lift = d.lift || 0;
     const s = ch.st.state;
     ch.face = d.at === 'desk' ? ((s === 'typing' || s === 'tool') ? 'back' : 'front') : d.face;
-    ch.flip = d.flip ?? 1;
+    ch.flip = d.at === 'meeting' ? meetFlip(ch, d) : d.flip ?? 1;
     place(ch);
     apply(ch);
     updateZones();
+    if (d.at === 'meeting' && meet && meet.speakerId === ch.id) lookAtSpeaker(); // 말하는 사람이 도착하면 다른 참석자가 그쪽을 본다
+  }
+  // 모임 자리의 참석자는 지금 말하는 한 사람 쪽을 본다(좌우 뒤집기만). 말하는 사람이 없거나 여럿이면 자리의 기본 방향
+  function meetFlip(ch, d) {
+    const sp = meet && meet.speakerId ? chars.get(meet.speakerId) : null;
+    if (!sp || sp === ch || !ch.st.meeting || !talking(sp) || !sp.dest || sp.dest.at !== 'meeting') return d.flip ?? 1;
+    const [tx] = scene.toScreen(sp.dest.pos), [mx] = scene.toScreen(d.pos);
+    return Math.abs(tx - mx) < 1 ? d.flip ?? 1 : tx < mx ? -1 : 1;
+  }
+  function lookAtSpeaker() {
+    if (!scene) return;
+    for (const ch of chars.values()) {
+      if (ch.helper || ch.walking || ch.busy || !ch.dest || ch.dest.at !== 'meeting' || ch.at !== 'meeting') continue;
+      const f = meetFlip(ch, ch.dest);
+      if (f !== ch.flip) { ch.flip = f; applyClass(ch); }
+    }
   }
   // 건물 이름표의 열쇠 → 그 건물에 해당하는 자리 이름(마을과 사무실 스킨이 이름을 다르게 쓴다)
   const ZONE_SPOT = { library: 'shelf', tower: 'search', workshop: 'server', plaza: 'meeting', company: 'desk', dev: 'desk' };
@@ -615,11 +689,12 @@ export function createOffice(container, opts = {}) {
     const ch = chars.get(id);
     if (!ch || !patch || typeof patch !== 'object') return;
     const prev = ch.st.state, prevTool = ch.st.tool;
-    const prevMeet = !!ch.st.meeting;
+    const prevMeet = !!ch.st.meeting, prevErrand = ch.st.errand;
     for (const k of ['state', 'text', 'tool', 'tokens', 'badge', 'meeting']) if (patch[k] !== undefined) ch.st[k] = patch[k];
+    if (patch.errand !== undefined) ch.st.errand = patch.errand === 'search' ? 'search' : null; // 심부름: 지금은 회의 중 조사('search')만
     if (!STATES.has(ch.st.state)) ch.st.state = 'idle';
     if (ch.st.state !== prev) onStateChange(ch);
-    else if (ch.st.tool !== prevTool || !!ch.st.meeting !== prevMeet) reconcile(ch);
+    else if (ch.st.tool !== prevTool || !!ch.st.meeting !== prevMeet || ch.st.errand !== prevErrand) reconcile(ch);
     apply(ch);
   }
 
@@ -798,12 +873,16 @@ export function createOffice(container, opts = {}) {
     for (const z of scene.zones || []) {
       const d = div('oc-zone');
       const t = div('oc-zone-in');
-      zoneEls.push({ el: d, t, key: z.key, x: z.x, y: z.y, w: 0, h: 0, dim: false });
+      // 모임 자리(마을 광장·사무실 회의실) 이름표 밑에는 회의 진행(회의 2/3 · 차례)을 붙인다
+      const sub = (ZONE_SPOT[z.key] || z.key) === 'meeting' ? div('oc-zone-sub') : null;
+      zoneEls.push({ el: d, t, sub, key: z.key, x: z.x, y: z.y, w: 0, h: 0, dim: false });
       d.style.transform = `translate(${z.x.toFixed(1)}px,${z.y.toFixed(1)}px)`;
       t.textContent = T('zone.' + z.key);
       d.append(t);
+      if (sub) d.append(sub);
       ovl.append(d);
     }
+    updateMeetLabel();
     if (scene.neon) {
       const n = div('oc-neon');
       const [ox, oy] = scene.neon.origin;
@@ -812,6 +891,22 @@ export function createOffice(container, opts = {}) {
       n.textContent = scene.neon.text;
       ovl.append(n);
     }
+    // 회의 결론 게시판(모임 자리 옆). 씬에 자리가 없으면(회의실 자리를 안 찍은 커스텀 그림) 만들지 않는다
+    boardEl = null;
+    if (scene.board) {
+      boardEl = div('oc-mboard');
+      boardEl.setAttribute('role', 'group');
+      const inner = div('oc-mboard-in');
+      boardTitle = div('oc-mboard-t');
+      boardTitle.setAttribute('aria-hidden', 'true'); // 묶음 이름(aria-label)과 같은 글
+      boardList = div('oc-mboard-cards');
+      inner.append(boardTitle, boardList);
+      boardEl.append(inner);
+      boardEl.style.transform = `translate(${scene.board[0].toFixed(1)}px,${scene.board[1].toFixed(1)}px)`;
+      boardEl.addEventListener('dblclick', (e) => e.stopPropagation()); // 카드를 두 번 눌러도 화면 맞춤이 되지 않게
+      ovl.append(boardEl);
+    }
+    drawBoard(null);
     list.forEach((a, i) => {
       const ch = chars.get(a.id);
       ch.desk = scene.desks[i] || null;
@@ -828,6 +923,8 @@ export function createOffice(container, opts = {}) {
       ch.screenKey = null;
       ch.targetKey = null;
       ch.spot = null;
+      ch.hold = null; // 맡아 둔 모임 자리와 그 표도 새 씬에서 다시 잡는다(표는 위에서 ovl 과 함께 지워졌다)
+      ch.holdEl = null;
       attach(ch);
     }
     for (const ch of chars.values()) {
@@ -875,6 +972,61 @@ export function createOffice(container, opts = {}) {
   function setSkin(s) {
     skin = resolveSkin(s);
     rebuild();
+  }
+  /**
+   * 지금 회의(없으면 null): { phase, round, rounds, speakerId, opposerId }. speakerId 는 지금 말하는 한 사람(판정·결론은 진행자),
+   * 의견 단계는 참석자(setState 의 meeting) 모두가 말한다. 바뀔 때만 다시 그린다
+   */
+  function setMeeting(m) {
+    const next = m && typeof m === 'object' && MEET_PHASES.includes(m.phase)
+      ? { phase: m.phase, round: Number(m.round) || 1, rounds: Number(m.rounds) || 1, speakerId: m.speakerId != null ? String(m.speakerId) : null, opposerId: m.opposerId != null ? String(m.opposerId) : null }
+      : null;
+    const sig = JSON.stringify(next);
+    if (sig === meetSig) return;
+    meetSig = sig;
+    meet = next;
+    updateMeetLabel();
+    for (const ch of chars.values()) apply(ch);
+    lookAtSpeaker();
+  }
+  function updateMeetLabel() {
+    const txt = meet ? T('meet.progress', { r: meet.round, n: meet.rounds, phase: T('meet.phase.' + meet.phase) }) : '';
+    for (const z of zoneEls) if (z.sub) { z.sub.textContent = txt; z.sub.hidden = !txt; }
+  }
+  /**
+   * 회의 결론 게시판: [{ id, text }](왼쪽부터, 최대 3장). 앞의 목록에 없던 카드는 한 번 눈에 띄게 붙는다.
+   * o.quiet 이면 새 카드 표시 없이(세션을 바꾸거나 처음 채울 때). 카드를 누르면 opts.onCard(id)
+   */
+  function setBoard(cards, o = {}) {
+    const next = (Array.isArray(cards) ? cards : []).filter((c) => c && c.id != null && c.text).slice(0, 3).map((c) => ({ id: String(c.id), text: String(c.text) }));
+    const sig = JSON.stringify(next);
+    if (sig === boardSig) return;
+    const prev = new Set(board.map((c) => c.id));
+    boardSig = sig;
+    board = next;
+    drawBoard(o && o.quiet ? null : new Set(next.filter((c) => !prev.has(c.id)).map((c) => c.id)));
+  }
+  function drawBoard(fresh) {
+    clearTimeout(boardTimer);
+    if (!boardEl) return;
+    boardEl.hidden = !board.length;
+    boardEl.setAttribute('aria-label', T('board.title'));
+    boardTitle.textContent = T('board.title');
+    boardList.replaceChildren(...board.map((c) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = fresh && fresh.has(c.id) ? 'oc-card new' : 'oc-card';
+      b.title = c.text;
+      b.setAttribute('aria-label', T('board.open', { text: c.text }));
+      const t = document.createElement('span');
+      t.className = 'oc-card-t';
+      t.textContent = c.text;
+      b.append(t);
+      b.addEventListener('click', (e) => { e.stopPropagation(); if (onCard) onCard(c.id); });
+      return b;
+    }));
+    // 새 카드 표시(테두리)는 잠깐만
+    if (fresh && fresh.size) boardTimer = setTimeout(() => { for (const b of boardList.children) b.classList.remove('new'); }, 4000);
   }
   function select(id) {
     const prev = selected;
@@ -1139,7 +1291,10 @@ export function createOffice(container, opts = {}) {
       updateTag(ch);
       updateBubble(ch);
       ch.ov.dirty = true;
+      if (ch.holdEl) ch.holdEl.firstChild.textContent = T('meet.away');
     }
+    updateMeetLabel();
+    drawBoard(null);
     scheduleLayout();
   }
   /** 품질: full(기본) | lite(장식 반복 애니메이션 끔·장식 요소 축소, 걷기 유지) | static(애니메이션 0, 순간이동, 렌더 루프 없음) */
@@ -1158,6 +1313,8 @@ export function createOffice(container, opts = {}) {
   return {
     setAgents,
     setState,
+    setMeeting,
+    setBoard,
     handoff,
     setSkin,
     select,
@@ -1195,6 +1352,7 @@ export function createOffice(container, opts = {}) {
       cancelAnimationFrame(layoutRaf);
       clearTimeout(wcTimer);
       clearTimeout(doorTimer);
+      clearTimeout(boardTimer);
       for (const ch of chars.values()) { stopWalk(ch, false); clearTimers(ch); clearTimeout(ch.flashTimer); }
       chars.clear();
       if (ro) ro.disconnect();

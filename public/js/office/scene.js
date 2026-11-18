@@ -851,6 +851,7 @@ export function buildVectorScene(skin, nDesks, opts = {}) {
   return {
     mode: 'vector', width, height, P, defs, stat, labels, zones, neon, items, desks, door,
     spots: SPOTS, doorPos: [0.85, 6.75], charScale: 1, speed: 3.2, stride: 0.34,
+    board: P(12.9, 0, 70), // 회의 결론 게시판(아래 가운데 기준): 회의실 오른쪽 벽(시계 옆 창문 아래쪽)
     toScreen: (p, lift = 0) => P(p[0], p[1], lift),
     depth: (p) => p[0] + p[1],
     path: (a, b) => nav.path(a, b),

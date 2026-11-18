@@ -265,6 +265,11 @@ function FailoverCard() {
     <label class="row small" style="gap:6px">${t('미리 피하는 기준')}
       <select class="select sm" value=${String(st.failoverThreshold || 95)} disabled=${!on} onChange=${(e) => save({ failoverThreshold: Number(e.target.value) })}>
         ${[...new Set([80, 90, 95, 99, 100, th])].sort((a, b) => a - b).map((n) => html`<option value=${String(n)}>${n === 100 ? t('다 찼을 때만') : t('사용률 {n}% 이상', { n })}</option>`)}</select></label>
+    <div style="width:100%">
+      <label class="row small" style="gap:6px">${t('한도가 곧 풀리면 기다리기(분, 0이면 끔)')}
+        <input class="input" type="number" min="0" max="30" style="width:80px" value=${Number(st.waitForResetMin) || 0} disabled=${!on} onChange=${(e) => save({ waitForResetMin: Number(e.target.value) })} /></label>
+      <div class="hint">${t('한도가 이 시간 안에 풀리면 다른 AI에게 넘기지 않고 기다렸다가 같은 AI로 이어 가.')}</div>
+    </div>
     ${rest.length > 0 && html`<div class="row wrap" style="gap:6px;width:100%">
       ${rest.map(([id, c]) => html`<span class="chip warn" title=${c.near ? '' : c.reason || ''}>⏸ ${PROVIDER_SHORT[id] || id} · ${restLabel(c)}
         <span class="x" role="button" title=${t('지금 다시 쓰기(한도가 풀렸거나 요금제를 올렸을 때)')} onClick=${() => release(id)}>✕</span></span>`)}

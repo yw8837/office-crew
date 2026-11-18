@@ -48,6 +48,12 @@ export function meetingSpend(u) {
   return (u.input || 0) + (u.cacheWrite || 0) + (u.output || 0) + Math.round((u.cacheRead || 0) / 10);
 }
 
+// 한도 기록이 알려 준 풀리는 시각(ms): 피하는 시각(avoidUntil)이 다 찬 창의 초기화 시각일 때만. 관측 뒤 30분 어림이면 모르는 것(0)
+const knownReset = (limit, threshold) => {
+  const until = avoidUntil(limit, threshold);
+  return until > Date.now() && Object.values(limit?.windows || {}).some((w) => w.resetsAt && w.resetsAt * 1000 === until) ? until : 0;
+};
+
 export class Orchestrator {
   constructor({ store, bus, usage, catalog, dirs, providers = null, memory = null }) {
     Object.assign(this, { store, bus, usage, catalog, dirs, providers, memory });
@@ -684,9 +690,22 @@ export class Orchestrator {
     const budgetOpt = roleKind(agent.role) === 'review' ? { overBudget: null } : {};
     if (agent.routing !== 'auto') {
       // 직접 설정한 AI가 쉬는 중이거나 한도가 거의 찼으면, 이번 실행만 같은 역할의 다른 AI에게 맡긴다(대안이 없으면 그대로 시도)
-      const opts = this.#foOpts(budgetOpt);
+      let opts = this.#foOpts(budgetOpt);
       const near = this.cooldown.active(agent.provider) || nearLimit(opts.limits[agent.provider], opts.threshold);
       if (!fo || !PROVIDERS[agent.provider] || !(near || opts.overBudget?.has(agent.provider))) return { agent, note: null, error: null };
+      // 한도가 설정한 시간 안에 풀리면 넘기지 않고 그때까지 기다렸다가 같은 AI로 한다(실행을 시작할 때 한 번만).
+      // 중지면 실행하지 않고, 회의 끝내기면 이 차례를 건너뛴다. 일시정지로 끝났거나 기다린 뒤에도 막혀 있으면 아래처럼 다른 AI에게
+      const until = near ? this.#resetSoon(ctx, agent.provider, opts) : 0;
+      if (until) {
+        const m = Math.max(1, Math.ceil((until - Date.now()) / 60000));
+        const why = await this.#waitReset(ctx, agent.id, until);
+        if (why === 'stop' || why === 'conclude') return { agent, note: null, error: null, cut: why === 'conclude' };
+        opts = this.#foOpts(budgetOpt);
+        // 기다린 창이 풀렸으면 그 창 때문에 남은 거절 기록(관측 뒤 30분 어림)으로는 막지 않는다. 쉬는 중·아직 안 풀린 다 찬 창·하루 몫은 본다
+        if (why === 'time' && !this.cooldown.active(agent.provider) && !knownReset(opts.limits[agent.provider], opts.threshold) && !opts.overBudget?.has(agent.provider)) {
+          return { agent, note: null, error: null, waited: `⏳ ${tr('{name}의 한도가 {m}분 뒤에 풀려서 기다렸다가 같은 AI로 이어 갔어.', { name: PROVIDERS[agent.provider]?.label || agent.provider, m })}` };
+        }
+      }
       try {
         const fb = pickFallback(agent, await this.providers.catalog(), opts);
         if (!fb) return { agent, note: null, error: null };
@@ -709,6 +728,33 @@ export class Orchestrator {
     }
   }
 
+  // 직접 정한 AI의 한도가 곧 풀리면 그 시각(ms), 아니면 0. 설정이 꺼져 있거나, 예약 실행이거나, 하루 몫도 다 썼거나,
+  // 풀리는 시각을 모르거나(30분 어림), 쉬는 중 표시가 그보다 늦게까지거나, 설정한 분보다 멀면 기다리지 않는다
+  #resetSoon(ctx, provider, opts) {
+    const min = Number(this.store.settings.waitForResetMin) || 0;
+    if (min <= 0 || ctx.s.scheduleId || opts.overBudget?.has(provider)) return 0;
+    const until = knownReset(opts.limits[provider], opts.threshold);
+    const rest = this.cooldown.active(provider);
+    if (!until || (rest && rest.until > until)) return 0;
+    return until - Date.now() <= min * 60000 ? until : 0;
+  }
+
+  // 한도가 풀릴 때까지(1초 여유) 기다린다. 이 에이전트만 기다리고 같은 단계의 다른 에이전트는 그대로 일한다.
+  // 중지·회의 끝내기·일시정지가 오면 바로 끝낸다 → 'time' | 'stop' | 'conclude' | 'pause'
+  async #waitReset(ctx, agentId, until) {
+    let shown = 0;
+    for (;;) {
+      if (ctx.stopped) return 'stop';
+      if (ctx.concludeNow) return 'conclude';
+      if (ctx.pauseRequested) return 'pause';
+      const left = until + 1000 - Date.now();
+      if (left <= 0) return 'time';
+      const m = Math.max(1, Math.ceil((until - Date.now()) / 60000));
+      if (m !== shown) { shown = m; this.#state(ctx.s.id, agentId, 'waiting', tr('한도가 곧 풀려서 기다리는 중({m}분 남음)', { m })); }
+      await new Promise((r) => setTimeout(r, Math.min(left, 200)));
+    }
+  }
+
   async #runAgent(ctx, stageIdx, agentId, feedback) {
     const { s, run } = ctx;
     let base = this.store.get('agents', agentId);
@@ -717,9 +763,9 @@ export class Orchestrator {
     // 뺀 Codex 계정을 가리키는 에이전트는 기본 Codex 로 실행한다
     if (base && /^codex-[a-z0-9]+$/.test(base.provider || '') && !PROVIDERS[base.provider]) base = { ...base, provider: 'codex' };
     const routed = await this.#route(ctx, stageIdx, base);
-    // 라우팅(모델 목록 읽기)을 기다리는 사이에 중지됐으면 시작하지 않는다
-    if (ctx.stopped) {
-      this.#state(ctx.s.id, agentId, 'idle', tr('중지됨')); // 사무실에 '자동 라우팅 중…'이 남지 않게
+    // 라우팅(모델 목록 읽기·한도가 풀리길 기다리기)을 기다리는 사이에 중지됐으면 시작하지 않는다. 회의 끝내기로 기다림이 끝났으면 이 차례를 건너뛴다
+    if (ctx.stopped || routed.cut) {
+      this.#state(ctx.s.id, agentId, 'idle', routed.cut && !ctx.stopped ? tr('건너뜀') : tr('중지됨')); // 사무실에 '자동 라우팅 중…'이 남지 않게
       return { agent: routed.agent, text: '', stopped: true };
     }
     const { agent, note: budgetNote } = routed.error ? { agent: routed.agent, note: null } : this.#pace(routed.agent, ctx.meet?.get(agentId)?.phase);
@@ -750,6 +796,7 @@ export class Orchestrator {
     }
     this.#received(ctx, agent.provider);
     if (routed.note) { msg.routed = true; this.#notice(s, msg, routed.note); }
+    if (routed.waited) this.#notice(s, msg, routed.waited);
     if (budgetNote) this.#notice(s, msg, budgetNote);
     if (roleKind(agent.role) === 'review') this.#flagSameAi(ctx, stageIdx, msg, agent);
     this.#state(s.id, agentId, 'thinking', tr('생각 중…'));

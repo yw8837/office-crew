@@ -25,6 +25,7 @@ export function defaultSettings() {
     acpAgents: [],              // ACP 표준 에이전트 [{id, name, command, args[], env{}}] (설정에서 프리셋 추가)
     failover: true,             // 사용량 한도에 걸리면 여유 있는 다른 AI가 이어받기
     failoverThreshold: 95,      // 한도 사용률이 이 % 이상이면 실행 전에 미리 피함
+    waitForResetMin: 0,         // 직접 정한 AI의 한도가 이 분 안에 풀리면 다른 AI로 넘기지 않고 기다린다(0이면 끔, 최대 30)
     stallMinutes: 30,           // 출력이 이만큼 없으면 멈춘 걸로 보고 끈다(도구가 도는 중엔 4배, 0이면 끔)
     dailyBudget: false,         // 하루 예산: 켜면 주간 한도의 일정 몫만 하루에 쓰게 조절
     dailyBudgetPercent: 13,     // 하루 몫(주간 사용률 %포인트, 1/7 ≈ 14)

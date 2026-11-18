@@ -1480,4 +1480,9 @@ export default {
   "그 뒤에 같은 항목이 또 바뀌어서 되돌릴 수 없어. 더 나중 변경부터 되돌려 줘.": "The same item changed again after this, so it can't be undone. Undo the later change first.",
   "변경 되돌리기": "Undo",
   "아직 바뀐 게 없어.": "No changes yet.",
+  // ── 역할 노트: 채팅에서 넣기 (contextmenu.js) ──
+  "역할 노트에 적기": "Add to role notes",
+  "앞 {max}자만 {name}의 역할 노트에 적었어.": "Added the first {max} characters to {name}'s role notes.",
+  "{name}의 역할 노트에 적었어.": "Added to {name}'s role notes.",
+  "역할 노트에 적지 못했어: {msg}": "Couldn't add it to the role notes: {msg}",
 };

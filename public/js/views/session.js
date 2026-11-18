@@ -437,7 +437,7 @@ class Message extends Component {
       this.props.onToggle?.();
       this.setState({ open: folded }, () => { if (!folded) btn.scrollIntoView?.({ block: 'nearest' }); });
     };
-    return html`<div class=${`msg agent${streaming ? ' streaming' : ''}`} data-agent=${m.agentId}>
+    return html`<div class=${`msg agent${streaming ? ' streaming' : ''}`} data-agent=${m.agentId} data-mid=${m.id}>
       <${Avatar} agent=${a} />
       <div style="min-width:0">
         <div class="msg-head">

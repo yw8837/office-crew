@@ -2,6 +2,8 @@
 // 글 입력칸은 붙여넣기·맞춤법 때문에 브라우저 메뉴를 그대로 두고, Shift+우클릭은 언제나 브라우저 메뉴다.
 import { state, changed, toast, agentById } from './state.js';
 import { t } from './i18n/index.js';
+import { post } from './api.js';
+import { cutChars } from './views/rolenotes.js';
 
 let menu = null;
 let restore = null; // 메뉴를 닫을 때 초점을 돌려줄 곳
@@ -44,6 +46,26 @@ const quote = (text) => {
   return `${cut.split('\n').map((l) => `> ${l}`).join('\n')}${more ? ' …' : ''}\n\n`;
 };
 
+// 에이전트 답에서 고른 글을 그 답을 쓴 에이전트의 역할 노트에 사용자 항목으로 넣는다(400자까지, 결정 0013).
+// 그 답이 내 PC 모델만 본 글이면 내 PC 모델 전용으로(클라우드 AI에게는 주지 않는다)
+const NOTE_MAX = 400;
+async function toNote({ agent, localOnly }, text) {
+  const body = cutChars(text, NOTE_MAX);
+  try {
+    await post(`/api/agents/${agent.id}/notes/items`, { kind: 'method', text: body, localOnly });
+    toast(body.length < text.length ? t('앞 {max}자만 {name}의 역할 노트에 적었어.', { max: NOTE_MAX, name: agent.name }) : t('{name}의 역할 노트에 적었어.', { name: agent.name }), 'ok');
+  } catch (e) { toast(t('역할 노트에 적지 못했어: {msg}', { msg: e.message }), 'error'); }
+}
+// 고른 글이 에이전트 답 하나 안에 있으면 그 답의 에이전트와 내 PC 전용 여부. 아니면 null
+function noteSource(msg) {
+  const range = getSelection?.()?.rangeCount ? getSelection().getRangeAt(0) : null;
+  if (!msg?.classList.contains('agent') || !range || !msg.contains(range.commonAncestorContainer)) return null;
+  const agent = agentById(msg.getAttribute('data-agent'));
+  const mid = msg.getAttribute('data-mid');
+  const m = mid && state.sessionData[state.route.id]?.messages.find((x) => x.id === mid);
+  return agent && m ? { agent, localOnly: m.provider === 'local' || m.local === true } : null;
+}
+
 // 누른 자리에서 메뉴 항목을 만든다. [{ label, run }] 또는 null(구분선)
 export function itemsFor(target) {
   const items = [];
@@ -51,6 +73,8 @@ export function itemsFor(target) {
   if (sel) {
     items.push({ label: t('선택한 글 복사'), run: () => copy(sel) });
     if (state.route.view === 'session') items.push({ label: t('선택한 글을 인용해서 쓰기'), run: () => { state.ui.draft = quote(sel); changed(); } });
+    const from = state.route.view === 'session' ? noteSource(target.closest?.('.msg')) : null;
+    if (from) items.push({ label: t('역할 노트에 적기'), run: () => toNote(from, sel) });
   }
   const link = target.closest?.('a[href]');
   if (link) items.push({ label: t('링크 주소 복사'), run: () => copy(link.href) });

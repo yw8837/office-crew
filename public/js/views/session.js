@@ -406,7 +406,7 @@ class Message extends Component {
           ${m.attachments?.length ? html`<div class="att">${m.attachments.map((a) => html`<${AttThumb} a=${a} />`)}</div>` : ''}
           ${ag && html`<span class="mention">@${ag.name} </span>`}${m.text}
         </div>
-        <div class="msg-foot meta" style="justify-content:flex-end">${m.status === 'queued' ? html`<span class="chip warn">${t('대기열 — 지금 작업 끝나면 실행')}</span>` : ''}${m.missionNote ? html`<span class="chip" title=${t('목표가 도는 동안 보낸 말이라 다음에 시작하는 단계에 추가 지시로 들어가')}>${t('추가 지시')}</span>` : ''}
+        <div class="msg-foot meta" style="justify-content:flex-end">${m.status === 'queued' ? html`<span class="chip warn">${t('대기열 — 지금 작업 끝나면 실행')}</span>` : ''}${m.missionNote ? html`<span class="chip" title=${t('목표가 도는 동안 보낸 말이라 그 뒤에 시작하는 단계들에 추가 지시로 들어가')}>${t('추가 지시')}</span>` : ''}
           <span class="act">
             <button class="btn ghost sm" title=${t('입력창으로 가져와 고쳐 보내기')} onClick=${() => { state.ui.draft = m.text; changed(); }}><${Icon} name="edit" /> ${t('고쳐 쓰기')}</button>
             <button class="btn ghost sm" title=${t('같은 내용으로 다시 실행')} onClick=${() => resend(m)}><${Icon} name="refresh" /> ${t('다시 보내기')}</button>
@@ -697,7 +697,8 @@ function Composer({ s, run }) {
   const [goalWhy, setGoalWhy] = useState('');
   const [goalKey, setGoalKey] = useState(0); // 바꾸지 못했을 때 스위치를 서버 값으로 다시 그린다
   const goalOn = !!s.goalMode;
-  const working = s.mission && ['active', 'waiting'].includes(s.mission.status); // 이때 보낸 말(@이름 없이)은 다음 단계의 추가 지시가 된다
+  const working = s.mission && ['active', 'waiting'].includes(s.mission.status); // 이때 보낸 말(@이름 없이)은 그 뒤에 시작하는 단계들의 추가 지시가 된다
+  const drafting = s.mission?.status === 'drafting' && active; // 이때 보낸 말(@이름 없이)은 모드와 상관없이 진행자에게 바로 들어간다
   const setGoal = async (on) => {
     try {
       await patch(`/api/sessions/${s.id}`, { goalMode: on });
@@ -772,7 +773,7 @@ function Composer({ s, run }) {
     try {
       const r = await post(`/api/sessions/${s.id}/messages`, body);
       if (r.steered) toast(t('작업 중인 에이전트에게 지시를 전달했어'), 'ok', 1800);
-      else if (r.noted) toast(t('다음에 시작하는 단계에 넣을 추가 지시로 받았어'), 'ok', 2200);
+      else if (r.noted) toast(r.late ? t('추가 지시로 받았어. 다만 뒤에 시작할 단계가 없어서 이번 목표에는 반영되지 않을 수 있어') : t('그 뒤에 시작하는 단계들에 넣을 추가 지시로 받았어'), r.late ? 'warn' : 'ok', r.late ? 4000 : 2200);
       else if (r.queued) toast(t('대기열에 넣었어 — 지금 작업이 끝나면 실행돼'), 'info', 2200);
     } catch (e) {
       toast(e.message, 'error');
@@ -842,7 +843,7 @@ function Composer({ s, run }) {
       </div>`}
       ${atts.length > 0 && html`<div class="atts">${atts.map((a) => html`<${AttThumb} a=${a} uploading=${!!a.tmp} onRemove=${() => setAtts((x) => x.filter((y) => y !== a))} />`)}</div>`}
       <textarea ref=${ta} rows="1" value=${text} onInput=${onInput} onKeyDown=${onKey} onPaste=${onPaste}
-        placeholder=${working && !mAgent ? t('다음에 시작하는 단계에 넣을 추가 지시… (Enter)') : active ? (mode === 'steer' ? t('작업 중인 에이전트에게 바로 지시하기… (Enter)') : t('대기열에 넣을 다음 요청… (Enter)')) : goalOn && !mAgent ? t('목표로 만들 요청을 적어줘 — 진행자가 먼저 목표 카드를 써') : (target ? t('{name}에게 맡길 일을 적어줘 — 이미지 붙여넣기·@·/ 가능', { name: target.name }) : t('에이전트에게 맡길 일을 적어줘 — 이미지 붙여넣기·@·/ 가능'))}></textarea>
+        placeholder=${working && !mAgent ? t('그 뒤에 시작하는 단계들에 넣을 추가 지시… (Enter)') : drafting && goalOn && !mAgent ? t('목표 카드를 쓰는 진행자에게 바로 지시하기… (Enter)') : active ? (mode === 'steer' ? t('작업 중인 에이전트에게 바로 지시하기… (Enter)') : t('대기열에 넣을 다음 요청… (Enter)')) : goalOn && !mAgent ? t('목표로 만들 요청을 적어줘 — 진행자가 먼저 목표 카드를 써') : (target ? t('{name}에게 맡길 일을 적어줘 — 이미지 붙여넣기·@·/ 가능', { name: target.name }) : t('에이전트에게 맡길 일을 적어줘 — 이미지 붙여넣기·@·/ 가능'))}></textarea>
       <div class="composer-bar">
         <input type="file" multiple hidden ref=${fileIn} onChange=${(e) => { addFiles([...e.target.files]); e.target.value = ''; }} />
         <button class="icon-btn" title=${t('파일·이미지 첨부')} aria-label=${t('첨부')} onClick=${() => fileIn.current.click()}><${Icon} name="clip" /></button>
@@ -853,7 +854,7 @@ function Composer({ s, run }) {
         </div>
         ${goalWhy && html`<span class="small muted goal-why" role="status">${goalWhy}</span>`}
         ${mAgent && html`<span class="chip accent">@${mAgent.name}<span class="x" onClick=${() => setMention(null)}>✕</span></span>`}
-        ${active && !(working && !mAgent) && html`<div class="seg mode-chip" title=${t('작업 중에 보내는 메시지 처리 방법')}>
+        ${active && !((working || (drafting && goalOn)) && !mAgent) && html`<div class="seg mode-chip" title=${t('작업 중에 보내는 메시지 처리 방법')}>
           <button class=${mode === 'steer' ? 'on' : ''} onClick=${() => setMode('steer')}>${t('지금 끼어들기')}</button>
           <button class=${mode === 'queue' ? 'on' : ''} onClick=${() => setMode('queue')}>${t('다음 차례로')}</button>
         </div>`}

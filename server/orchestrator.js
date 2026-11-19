@@ -16,7 +16,7 @@ import { pickOpposer, turnOrder, parseVerdict, verdictBlock, CHECK_MAX, parseChe
 import { writeConversation, readImported, saveImported, pickEarlier, toolNames, handoffRequest, NOTE_MAX } from './handoff.js';
 import { readTranscript } from './importer.js';
 import { pickForPrompt, promptRef } from './notes.js';
-import { parseGoal, goalBlock, goalWarn, newMission, toCriteria, cardOf, sameCard, cleanGoal, pickLead, mixedLocal, logLine } from './mission.js';
+import { parseGoal, goalBlock, goalWarn, newMission, toCriteria, cardOf, sameCard, cleanGoal, pickLead, mixedLocal, logLine, NOTE_COUNT } from './mission.js';
 
 const ACTIVE = new Set(['running', 'paused', 'waiting']);
 const FORCE_END_MS = 5000; // 멈춘 CLI를 끄라고 한 뒤 이만큼 기다려도 안 끝나면 강제로 끝낸다
@@ -94,6 +94,7 @@ export class Orchestrator {
       if (why) {
         delete s.mission.cutNotice;
         this.#systemNote(s, why === 'drafting' ? tr('목표 초안을 쓰는 중에 앱이 꺼져서 이 목표는 닫았어. 요청을 다시 보내 줘.') : tr('앱이 꺼져서 목표가 끊겼어. 저절로 다시 시작하지 않아. 목표 카드에서 버리면 새 요청을 보낼 수 있어(이어서 하기는 아직 없어).'));
+        this.#rememberNotes(s, s.mission); // 추가 지시는 목표 실행이 끝날 때 기억에 넣는다. 끊겼으면 지금(내 PC 모델 표시는 저장된 그대로)
       }
       this.store.saveSessionNow(s);
     }
@@ -141,19 +142,21 @@ export class Orchestrator {
     }
     let ctx = this.ctx.get(sessionId);
     // 목표 모드(결정 0014): @이름 지목·인수인계·예약 실행이 아닌 말은 지금 끼어들기·영입 감지보다 먼저 본다.
-    // 도는 목표가 있으면 추가 지시로 받고, 끊긴 목표가 있으면 막는다. 목표 초안을 쓰는 중에 "지금 끼어들기"로 보낸 말은 지금처럼 진행자에게 간다.
+    // 도는 목표가 있으면 추가 지시로 받고, 끊긴 목표가 있으면 막는다. 목표 초안을 쓰는 중에 온 말은 모드("지금 끼어들기"/"다음 차례로")와 상관없이 진행자에게 넣는다(새 목표로 갈아치우지 않는다).
     // 그 밖은 목표 차례가 된다(카드를 기다리던 목표는 닫는다. 다른 실행이 도는 중이면 대기열에 넣고, 차례가 오면 목표 차례로 돈다)
     let goal = false;
     if (s.goalMode && !mention && !handoff && !s.scheduleId && !s.taskId) {
       const m = s.mission;
       if (m?.status === 'cut') throw Object.assign(new Error(tr('끊긴 목표가 있어. 목표 카드에서 버리면 새 요청을 보낼 수 있어(이어서 하기는 아직 없어).')), { status: 400 });
       if (m?.status === 'active' || m?.status === 'waiting') return this.#missionNote(s, text, attachments);
-      if (!(m?.status === 'drafting' && ctx && mode === 'steer')) {
-        const why = this.missionProblem(s);
-        if (why) throw Object.assign(new Error(why), { status: 400 });
-        goal = true;
-        if (m?.status === 'draft') this.#closeDraft(s, tr('새 요청이 와서 목표 카드를 닫았어.'));
+      if (m?.status === 'drafting' && ctx?.missionTurn === 'goal') {
+        this.control(sessionId, { action: 'steer', text, agentId: null });
+        return { steered: true };
       }
+      const why = this.missionProblem(s);
+      if (why) throw Object.assign(new Error(why), { status: 400 });
+      goal = true;
+      if (m?.status === 'draft') this.#closeDraft(s, tr('새 요청이 와서 목표 카드를 닫았어.'));
     }
     if (ctx && mode === 'steer' && !goal) {
       this.control(sessionId, { action: 'steer', text, agentId: mention });
@@ -204,22 +207,34 @@ export class Orchestrator {
     if (now) this.store.saveSessionNow(s); else this.store.saveSession(s, 50);
   }
 
-  // 목표가 도는 동안 온 말: 새 실행으로 줄 세우지 않고 다음에 시작하는 단계에 넣을 추가 지시로 받는다(확정된 목표·기준은 안 바뀐다).
-  // 메시지에는 missionNote 표시를 달아 에이전트에게 넘기는 대화에서 뺀다(지시는 [사용자 추가 지시]로만 간다). 기억에는 넣는다
+  // 목표가 도는 동안 온 말: 새 실행으로 줄 세우지 않고 그 뒤에 시작하는 단계들(승인 거절·다시 하기로 같은 단계를 다시 돌 때 포함)에 넣을 추가 지시로 받는다(확정된 목표·기준은 안 바뀐다).
+  // 메시지에는 missionNote 표시를 달아 에이전트에게 넘기는 대화에서 뺀다(지시는 [사용자 추가 지시]로만 간다).
+  // 기억에는 목표 실행이 끝날 때 넣는다(그때 받은 AI 가 모두 내 PC 모델이었는지 알 수 있다. 결정 0007). 지금은 보낼 때의 팀 구성으로 표시만 해 둔다.
+  // 뒤에 시작할 단계가 없으면(마지막 단계가 이미 도는 중이고 승인·오류 대기도 아님) 응답에 late 를 싣는다(이번 목표에는 반영되지 않을 수 있다)
   #missionNote(s, text, attachments) {
     const m = s.mission;
+    if ((m.notes || []).length >= NOTE_COUNT) throw Object.assign(new Error(tr('추가 지시는 목표 하나에 {n}개까지야. 더 보내려면 목표를 멈추고 새 요청으로 보내 줘.', { n: NOTE_COUNT })), { status: 400 });
     const files = attachments.map((a) => ({ id: a.id, name: a.name, mime: a.mime, size: a.size, path: a.path }));
     const userMsg = { id: newId('m'), role: 'user', text, mention: null, createdAt: Date.now(), status: 'done', attachments: files, missionNote: true };
     s.messages.push(userMsg);
     (m.notes ||= []).push({ id: newId('nt'), text, at: userMsg.createdAt, used: false, msgId: userMsg.id, ...(files.length ? { files: files.map((f) => ({ name: f.name, path: f.path })) } : {}) });
     logLine(m, 'note', tr('추가 지시: {text}', { text: [...text.replace(/\s+/g, ' ').trim()].slice(0, 120).join('') || tr('(첨부 파일)') }), userMsg.id);
     this.#premark(s, userMsg);
-    this.#remember(s, userMsg);
     this.store.saveSession(s, 50);
     this.bus.emit('message', { sessionId: s.id, message: userMsg });
     this.bus.emit('session', this.store.sessionMeta(s));
     this.emitMission(s);
-    return { noted: true, messageId: userMsg.id };
+    const run = this.ctx.get(s.id)?.missionTurn === 'work' ? this.ctx.get(s.id).run : null;
+    const late = !run || (run.stageIndex >= run.stages.length - 1 && run.stages[run.stageIndex]?.status !== 'pending' && !run.hold);
+    return { noted: true, messageId: userMsg.id, ...(late ? { late: true } : {}) };
+  }
+
+  // 목표 실행의 추가 지시 메시지를 기억에 넣는다(목표 실행이 끝날 때·앱을 끌 때·끊긴 목표를 다시 켤 때. 두 번 넣지 않는다)
+  #rememberNotes(s, m) {
+    for (const n of m?.notes || []) {
+      const u = s.messages.find((x) => x.id === n.msgId && x.missionNote);
+      if (u) this.#remember(s, u);
+    }
   }
 
   // 카드를 기다리던 목표를 닫는다(사용자가 '그만'을 눌렀거나 새 요청이 왔다)
@@ -369,15 +384,18 @@ export class Orchestrator {
     return { ok: true };
   }
 
-  // 일 단계를 시작할 때: 아직 안 넣은 추가 지시를 이 단계부터 넣고(used), 진행 기록에 한 줄
+  // 일 단계를 시작할 때(start)와 승인 거절·다시 하기로 같은 단계를 다시 돌 때(again): 아직 안 넣은 추가 지시를 이 단계부터 넣고(used), 진행 기록에 한 줄.
+  // 다시 돌 때는 새로 넣은 지시가 있을 때만 적는다
   #missionStage(ctx, i, phase) {
     const m = ctx.mission;
     const st = ctx.run.stages[i];
-    if (phase === 'start') {
+    if (phase === 'start' || phase === 'again') {
       const fresh = (m.notes || []).filter((n) => !n.used);
       for (const n of fresh) n.used = true;
       (ctx.liveNotes ||= []).push(...fresh);
-      logLine(m, 'work', fresh.length ? tr('"{label}" 단계 시작 · 추가 지시 {n}개 넣음', { label: st.label, n: fresh.length }) : tr('"{label}" 단계 시작', { label: st.label }));
+      if (phase === 'again' && !fresh.length) return;
+      logLine(m, 'work', phase === 'again' ? tr('"{label}" 단계 다시 · 추가 지시 {n}개 넣음', { label: st.label, n: fresh.length })
+        : fresh.length ? tr('"{label}" 단계 시작 · 추가 지시 {n}개 넣음', { label: st.label, n: fresh.length }) : tr('"{label}" 단계 시작', { label: st.label }));
     } else {
       const last = ctx.s.messages.findLast((x) => x.role === 'agent' && x.runId === ctx.run.id && x.stageIndex === i);
       logLine(m, 'work', st.status === 'skipped' ? tr('"{label}" 단계 건너뜀', { label: st.label }) : tr('"{label}" 단계 끝', { label: st.label }), last?.id || null);
@@ -518,6 +536,7 @@ export class Orchestrator {
         // 사용자 말은 실행이 끝난 뒤에 기억에 넣는다. 누가 받았는지(내 PC 모델만인지) 정해진 뒤여야 표시가 맞다.
         // 세션이 지워졌어도 넣는다(답은 이미 들어갔다. 기억은 세션을 지워도 남는다)
         this.#remember(s, userMsg);
+        if (ctx.missionTurn === 'work') this.#rememberNotes(s, ctx.mission); // 목표 실행 중에 온 추가 지시도 끝난 지금(받은 AI 가 정해진 뒤에)
         if (!this.store.hasSession(s.id)) return;
         this.#missionEnd(ctx); // 대기열의 다음 말(새 목표 요청일 수 있다)을 시작하기 전에 이 목표의 끝 상태를 정한다
         this.store.saveSession(s, 50);
@@ -567,7 +586,11 @@ export class Orchestrator {
             break;
           }
           const d = await this.#hold(ctx, 'waiting', { reason: 'error', stageIndex: i, message: failed.map((f) => `${f.agent?.name || ''}: ${f.error}`).join('\n').slice(0, 600) });
-          if (d.action === 'retry') { feedback = d.text || null; continue; }
+          if (d.action === 'retry') {
+            feedback = d.text || null;
+            if (ctx.missionTurn === 'work') this.#missionStage(ctx, i, 'again'); // 기다리는 동안 온 추가 지시도 다시 도는 이 단계에
+            continue;
+          }
           if (d.action === 'skip') { st.status = 'skipped'; break; }
           ctx.stopped = true;
           break;
@@ -575,7 +598,11 @@ export class Orchestrator {
         if (st.approve) {
           st.status = 'review';
           const d = await this.#hold(ctx, 'waiting', { reason: 'approve', stageIndex: i });
-          if (d.action === 'reject' || d.action === 'retry') { feedback = d.text || tr('결과를 다시 검토해서 더 낫게 고쳐줘.'); continue; }
+          if (d.action === 'reject' || d.action === 'retry') {
+            feedback = d.text || tr('결과를 다시 검토해서 더 낫게 고쳐줘.');
+            if (ctx.missionTurn === 'work') this.#missionStage(ctx, i, 'again');
+            continue;
+          }
           if (d.action === 'stop') { ctx.stopped = true; break; }
           for (const id of st.agentIds) this.#state(ctx.s.id, id, 'done', tr('승인됨'));
         }
@@ -1547,6 +1574,17 @@ export class Orchestrator {
   // 이번 요청을 받은 AI를 적는다. 내 PC 모델만 받았으면 사용자 말에 표시를 남긴다(클라우드 AI가 하나라도 받으면 표시를 지운다)
   #received(ctx, provider) {
     if (provider === 'local') ctx.sawLocal = true; else ctx.sawCloud = true;
+    // 목표 실행: 지금까지 단계에 넣은 추가 지시도 이 AI 가 받는다. 받은 AI 가 모두 내 PC 모델이면 표시하고, 클라우드 AI 가 하나라도 받으면 지운다(기억에는 목표 실행이 끝날 때 넣는다)
+    let flipped = false;
+    for (const n of ctx.liveNotes || []) {
+      const u = ctx.s.messages.find((x) => x.id === n.msgId && x.missionNote);
+      if (!u) continue;
+      const was = u.local === true;
+      if (provider !== 'local') (ctx.noteCloud ||= new Set()).add(u.id);
+      if (ctx.noteCloud?.has(u.id)) delete u.local; else u.local = true;
+      flipped ||= was !== (u.local === true);
+    }
+    if (flipped) this.store.saveSession(ctx.s, 0); // 표시가 바뀌면 바로 저장한다(그사이 앱이 꺼져도 다시 켤 때 맞는 표시로 기억에 넣게)
     if (!ctx.userMsg) return;
     const was = ctx.userMsg.local === true;
     if (ctx.sawCloud) delete ctx.userMsg.local; else ctx.userMsg.local = true;
@@ -2110,6 +2148,7 @@ export class Orchestrator {
       if (ctx.gate) ctx.gate({ action: 'stop' });
       // 앱을 끄는 중이면 실행이 정리되기 전에 저장소가 닫힌다. 사용자 말은 지금 기억에 넣고, 넣었다는 표시도 같이 저장되게 한다
       this.#remember(ctx.s, ctx.userMsg);
+      if (ctx.missionTurn === 'work') this.#rememberNotes(ctx.s, ctx.mission); // 목표 실행 중에 온 추가 지시도
       this.store.saveSession(ctx.s, 0);
     }
   }

@@ -15,6 +15,7 @@ export const LIST_COUNT = 5; // 범위 밖·사용자가 정할 것 최대 개�
 export const ITEM_MAX = 200; // 범위 밖·사용자가 정할 것 하나 최대 글자
 export const REQUEST_MAX = 2000; // 목표에 적어 두는 요청 글 최대 글자
 export const LOG_MAX = 200; // 진행 기록 최대 줄 수(넘으면 앞을 버리고 "앞 n줄 생략" 한 줄)
+export const NOTE_COUNT = 50; // 목표 하나에 받는 추가 지시 최대 개수(넘으면 400)
 // 살아 있는 목표: 이 동안은 새 목표를 만들지 못하고, 목표 모드를 끄거나 팀을 바꾸지 못한다
 const ALIVE = new Set(['drafting', 'draft', 'active', 'waiting', 'cut']);
 const OPEN = '```oc-goal';

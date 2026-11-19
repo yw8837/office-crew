@@ -25,6 +25,7 @@ import { SessionWatch } from './watch.js';
 import { Board } from './board.js';
 import { PhoneNotify, checkPhoneUrl, buildRequest } from './notify.js';
 import { MemoryStore, projectKey } from './memory.js';
+import { NoteStore } from './notes.js';
 import { tr, bindLang, serverLang } from './i18n.js';
 import { Scheduler, cleanSchedule } from './scheduler.js';
 
@@ -226,7 +227,8 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   const catalog = new Catalog(store, dirs);
   const providers = new ProviderRegistry(store);
   const memory = new MemoryStore(path.join(dirs.home, 'memory'));
-  const orch = new Orchestrator({ store, bus, usage, catalog, dirs, providers, memory });
+  const notes = new NoteStore(path.join(dirs.home, 'notes')); // 역할 노트(에이전트마다 파일 하나, 결정 0013)
+  const orch = new Orchestrator({ store, bus, usage, catalog, dirs, providers, memory, notes });
   const scheduler = new Scheduler({ store, orch, bus });
   const watch = new SessionWatch(bus);
   const board = new Board({ store, orch, bus, appHome: dirs.home });
@@ -250,8 +252,13 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   const routes = [];
   const route = (method, pattern, fn) => routes.push({ method, re: new RegExp(`^${pattern}$`), fn });
 
+  // 에이전트를 지우면 역할 노트는 지우지 않고 이름만 바꾼다(<id>.removed.json). 못 바꿔도 에이전트 삭제는 끝낸다
+  const dropNotes = (id) => { try { notes.removeAgent(id); } catch (e) { console.error('[역할 노트 이름 바꾸기 실패]', e.message); } };
+  // 에이전트 목록에 역할 노트 초안 수(noteDrafts)와 확정 수(noteCount)를 싣는다
+  const withNoteCounts = (list) => list.map((a) => { const c = notes.counts(a.id); return { ...a, noteDrafts: c.drafts, noteCount: c.confirmed }; });
+
   route('GET', '/api/bootstrap', () => ({
-    version: VERSION, home, agents: store.all('agents'), teams: store.all('teams'), sessions: store.listSessions(),
+    version: VERSION, home, agents: withNoteCounts(store.all('agents')), teams: store.all('teams'), sessions: store.listSessions(),
     settings: publicSettings(), providers: providers.list(), usage: usage.snapshot(), skills: catalog.skills(),
     connectors: publicConnectors(), plugins: store.all('plugins'), skins: store.all('skins'),
     active: [...orch.ctx.keys()], cooldown: orch.restingList(), schedules: scheduler.list(), tasks: board.list(),
@@ -349,7 +356,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     return a;
   });
   route('DELETE', '/api/agents/([\\w-]+)', async (req, url, [id]) => {
-    store.remove('agents', id);
+    if (store.remove('agents', id)) dropNotes(id);
     for (const t of store.all('teams')) {
       const stages = t.stages.map((s) => ({ ...s, agentIds: s.agentIds.filter((x) => x !== id) })).filter((s) => s.agentIds.length);
       if (stages.length !== t.stages.length || stages.some((s, i) => s.agentIds.length !== t.stages[i].agentIds.length)) store.upsert('teams', { ...t, stages });
@@ -357,6 +364,45 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     bus.emit('agents', store.all('agents'));
     bus.emit('teams', store.all('teams'));
     return { ok: true };
+  });
+
+  // 역할 노트(결정 0013): 에이전트마다 하는 일과 항목. 사용자 항목만 바로 확정이고, 에이전트·바깥 자료 항목은 초안으로 들어와 받아야 다음 일에 들어간다.
+  // 형식 오류는 notes.js 가 400(이유), 없는 항목·기록은 404, 되돌릴 수 없는 변경은 409 로 던진다
+  const noteAgent = (id) => { if (!store.get('agents', id)) throw new HttpError(404, tr('에이전트 없음')); };
+  const notesChanged = (id, n) => { bus.emit('notes', { agentId: id, drafts: n.items.filter((x) => x.status === 'draft').length }); return n; };
+  route('GET', '/api/agents/([\\w-]+)/notes', async (req, url, [id]) => { noteAgent(id); return notes.get(id); });
+  route('PUT', '/api/agents/([\\w-]+)/notes/role', async (req, url, [id]) => {
+    const b = await readJson(req);
+    noteAgent(id);
+    return notesChanged(id, notes.setRole(id, b.tasks));
+  });
+  route('POST', '/api/agents/([\\w-]+)/notes/items', async (req, url, [id]) => {
+    const b = await readJson(req);
+    noteAgent(id);
+    // 출처는 꼭 받는다(빠뜨린 요청이 사용자 항목으로 바로 확정되지 않게)
+    if (b.source === undefined || b.source === null) throw new HttpError(400, tr('항목의 출처(source)가 필요해.'));
+    if (b.localOnly !== undefined && typeof b.localOnly !== 'boolean') throw new HttpError(400, tr('localOnly 는 true 나 false 여야 해.'));
+    let localOnly = b.localOnly;
+    // 채팅에서 고른 글(chat:<세션 id>/<메시지 id>): 그 메시지를 저장된 세션에서 찾아, 내 PC 모델이 쓴 답이면 내 PC 모델 전용으로 둔다(화면이 정하지 않는다)
+    const ref = b.source?.type === 'user' && typeof b.source.ref === 'string' ? b.source.ref : '';
+    if (ref.startsWith('chat:')) {
+      const [, sid, mid] = ref.match(/^chat:([\w-]+)\/([\w-]+)$/) || [];
+      const m = sid ? store.getSession(sid)?.messages?.find((x) => x.id === mid) : null;
+      if (!m) throw new HttpError(400, tr('고른 글이 있던 메시지를 찾지 못했어.'));
+      if (m.provider === 'local' || m.local === true) localOnly = true;
+    }
+    return notesChanged(id, notes.addItem(id, { kind: b.kind, text: b.text, source: b.source, localOnly }));
+  });
+  route('PATCH', '/api/agents/([\\w-]+)/notes/items/([\\w-]+)', async (req, url, [id, itemId]) => {
+    const b = await readJson(req);
+    noteAgent(id);
+    return notesChanged(id, notes.editItem(id, itemId, { text: b.text, kind: b.kind, status: b.status }));
+  });
+  route('POST', '/api/agents/([\\w-]+)/notes/accept-all', async (req, url, [id]) => { noteAgent(id); return notesChanged(id, notes.acceptAll(id)); });
+  route('POST', '/api/agents/([\\w-]+)/notes/undo', async (req, url, [id]) => {
+    const b = await readJson(req);
+    noteAgent(id);
+    return notesChanged(id, notes.undo(id, String(b.logId || '')));
   });
 
   // 팀
@@ -798,7 +844,9 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   route('POST', '/api/plugins/export', async (req) => catalog.exportPlugin(await readJson(req)));
   route('GET', '/api/plugins/native', () => catalog.nativePlugins());
   route('DELETE', '/api/plugins/([\\w-]+)', async (req, url, [id]) => {
+    const gone = (store.get('plugins', id)?.items?.agents || []).filter((a) => store.get('agents', a));
     catalog.removePlugin(id);
+    for (const a of gone) if (!store.get('agents', a)) dropNotes(a);
     for (const ev of ['agents', 'teams', 'connectors', 'plugins', 'skins']) bus.emit(ev, ev === 'connectors' ? publicConnectors() : store.all(ev));
     bus.emit('skills', catalog.skills());
     return { ok: true };
@@ -913,7 +961,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   }
 
   return {
-    server, store, bus, orch, providers, catalog, usage, token, dirs, scheduler, watch, board, phone, memory,
+    server, store, bus, orch, providers, catalog, usage, token, dirs, scheduler, watch, board, phone, memory, notes,
     listen(p = port, host = HOST) {
       return new Promise((resolve, reject) => {
         server.once('error', reject);

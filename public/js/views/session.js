@@ -7,6 +7,7 @@ import { post, patch, upload, uploadUrl } from '../api.js';
 import { renderMarkdown } from '../markdown.js';
 import { t, getLang, locale, tmap } from '../i18n/index.js';
 import { MemoryBadge } from './memory.js';
+import { DraftChip } from './rolenotes.js';
 import { continueList, findInMessages, hideAsks, hideCheck } from '../chat-tools.js';
 import { researcherOf, meetingView, boardCards } from '../office/meeting.js';
 
@@ -436,7 +437,7 @@ class Message extends Component {
       this.props.onToggle?.();
       this.setState({ open: folded }, () => { if (!folded) btn.scrollIntoView?.({ block: 'nearest' }); });
     };
-    return html`<div class=${`msg agent${streaming ? ' streaming' : ''}`} data-agent=${m.agentId}>
+    return html`<div class=${`msg agent${streaming ? ' streaming' : ''}`} data-agent=${m.agentId} data-mid=${m.id}>
       <${Avatar} agent=${a} />
       <div style="min-width:0">
         <div class="msg-head">
@@ -914,7 +915,7 @@ export function RightPanel({ s }) {
           return html`<div class=${`acard${state.ui.inspector === a.id ? ' on' : ''}`} data-agent=${a.id} onClick=${() => { state.ui.inspector = a.id; changed(); }}>
             <${Avatar} agent=${a} size=${38} />
             <div style="min-width:0">
-              <div class="nm">${a.name}<span class=${`sbadge ${l?.state || 'idle'}`}>${STATE_LABEL[l?.state || 'idle']}</span></div>
+              <div class="nm">${a.name}<${DraftChip} agent=${a} /><span class=${`sbadge ${l?.state || 'idle'}`}>${STATE_LABEL[l?.state || 'idle']}</span></div>
               <div class="sub">${a.role} · ${agentModelText(a, s)}</div>
               <div class="detail">${l?.detail || ' '}</div>
               ${going && l?.state === 'paused' && html`<button type="button" class="btn sm" style="margin:4px 0" title=${t('이 에이전트만 멈추고 다음으로')} onClick=${(e) => skipWait(e, a.id)}><${Icon} name="skip" /> ${t('건너뛰기')}</button>`}

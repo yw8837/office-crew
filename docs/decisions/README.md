@@ -18,3 +18,4 @@ Keep a record under about 100 lines. When a decision changes, add a dated "Revis
 | [0010](0010-meetings-take-turns.md) | Meetings take turns, and the chair judges after each round (replaces the flow part of 0005) | Accepted |
 | [0011](0011-meetings-pause-for-research.md) | A meeting turn can ask a question, and the team's researcher looks it up once | Accepted |
 | [0012](0012-claude-usage-counts-the-whole-tree.md) | Claude usage counts sub-agents and is not counted twice in a continued conversation | Accepted |
+| [0013](0013-agents-keep-role-notes.md) | Agents keep short role notes, and only what the user accepts goes into their work | Accepted |

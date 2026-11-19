@@ -1,11 +1,12 @@
 // 관리 화면: 에이전트(라우팅: 모델·노력·권한), 팀 배치(파이프라인), 커넥터(MCP), 스킬, 플러그인
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { html, Icon, Modal, Toggle, Avatar, ProviderChip, PERM_LABEL, EFFORT_LABEL, providerColor, officeMod, agentModelText, imageFileToDataURL } from '../ui.js';
 import { state, changed, toast, agentById, providerById } from '../state.js';
 import { get, post, put, del } from '../api.js';
 import { RoutingFields, routeText, PROFILE_LABEL } from './routing.js';
 import { SkillPicker, SOURCE_LABEL, skillDesc } from './skillpick.js';
 import { t } from '../i18n/index.js';
+import { RoleNotes, DraftChip } from './rolenotes.js';
 
 const SKIN_TONES = ['#f6d5bd', '#f2c9a6', '#e3b38f', '#d9a77f', '#c98f68', '#a8714f', '#7a4e33'];
 const HAIR = ['#1d1d24', '#3a2a1e', '#5a3825', '#8a5a3b', '#b04a2f', '#d8b26a', '#9aa3ad', '#e9e4dc', '#4f46e5', '#db2777'];
@@ -34,7 +35,7 @@ export function AgentsPage() {
     </${PageHead}>
     <div class="cards">
       ${state.agents.map((a) => html`<div class="gcard" onClick=${() => setEdit(a)}>
-        <div class="hd"><${Avatar} agent=${a} size=${44} /><div style="min-width:0"><div class="nm">${a.emoji} ${a.name}</div><div class="small muted">${a.role || t('역할 없음')}</div></div></div>
+        <div class="hd"><${Avatar} agent=${a} size=${44} /><div style="min-width:0"><div class="nm">${a.emoji} ${a.name} <${DraftChip} agent=${a} /></div><div class="small muted">${a.role || t('역할 없음')}</div></div></div>
         <div class="tags">${a.routing === 'auto' ? html`<span class="chip accent">${agentModelText(a)}</span>` : html`<${ProviderChip} id=${a.provider} /><span class="chip mono">${a.model || t('기본 모델')}</span>${a.effort && html`<span class="chip accent">${EFFORT_LABEL[a.effort] || a.effort}</span>`}`}<span class="chip">${PERM_LABEL[a.permission]?.[0] || a.permission}</span></div>
         <div class="desc">${a.systemPrompt || ''}</div>
         ${(a.skills?.length || a.connectors?.length) ? html`<div class="small muted">${t('스킬 {s} · 커넥터 {c}', { s: a.skills?.length || 0, c: a.connectors?.length || 0 })}</div>` : ''}
@@ -45,7 +46,7 @@ export function AgentsPage() {
   </div></div>`;
 }
 
-export function AgentEditor({ agent, onClose }) {
+export function AgentEditor({ agent, onClose, focusNotes = false }) {
   const isNew = !agent.id;
   const [a, setA] = useState(() => ({
     name: '', role: '', emoji: '🤖', provider: 'claude', model: 'opus', effort: 'high', routing: 'auto', routingProfile: 'balanced', permission: 'default', systemPrompt: '', skills: [], connectors: [], light: false, apiProfile: '',
@@ -74,18 +75,42 @@ export function AgentEditor({ agent, onClose }) {
     return () => { live = false; clearTimeout(timer); };
   }, [a.role, a.provider, touched]);
 
+  // 역할 노트에서 저장 안 한 것(RoleNotes 가 알려 준다): 고쳐 둔 하는 일 목록, 더하기 칸·고치던 항목의 글
+  const notesLeft = useRef({ tasks: null, text: false });
+  const DROP_NOTES = () => t('역할 노트에 저장하지 않은 글이 있어. 버리고 닫을까?');
+  // 취소·Esc·바깥 클릭·닫기 단추: 저장 안 한 노트 글이 있으면 버릴지 묻는다
+  const close = () => {
+    const u = notesLeft.current;
+    if ((u.tasks || u.text) && !confirm(DROP_NOTES())) return;
+    onClose();
+  };
+  // 저장하고 닫기 전에: 고쳐 둔 하는 일은 같이 저장하고(실패하면 닫지 않는다), 저장하지 않은 항목 글은 버릴지 묻는다
+  const flushNotes = async () => {
+    const u = notesLeft.current;
+    if (u.text && !confirm(DROP_NOTES())) return false;
+    if (isNew || !u.tasks) return true;
+    try { await put(`/api/agents/${a.id}/notes/role`, { tasks: u.tasks }); return true; } catch (e) { toast(t('역할 노트의 하는 일을 저장하지 못했어: {msg}', { msg: e.message }), 'error'); return false; }
+  };
   const save = async () => {
+    if (!await flushNotes()) return;
     try {
       if (isNew) await post('/api/agents', a); else await put(`/api/agents/${a.id}`, a);
       toast(isNew ? t('에이전트를 만들었어') : t('저장했어'), 'ok');
       onClose();
     } catch (e) { toast(e.message, 'error'); }
   };
+  // 위쪽 "역할 노트로" 단추: 맨 아래의 역할 노트 부분으로 옮기고 그 제목에 초점을 둔다
+  const toNotes = () => {
+    const el = document.getElementById(`rn-h-${agent.id}`);
+    el?.scrollIntoView?.({ block: 'start' });
+    el?.focus({ preventScroll: true });
+  };
   const remove = async () => {
     if (!confirm(t("'{name}' 에이전트를 삭제할까? 팀 배치에서도 빠져.", { name: a.name }))) return;
     try { await del(`/api/agents/${a.id}`); toast(t('삭제했어'), 'ok'); onClose(); } catch (e) { toast(e.message, 'error'); }
   };
   const tryIt = async () => {
+    if (!await flushNotes()) return;
     try {
       let id = a.id;
       if (isNew) id = (await post('/api/agents', a)).id; else await put(`/api/agents/${a.id}`, a);
@@ -108,13 +133,16 @@ export function AgentEditor({ agent, onClose }) {
     } catch (er) { toast(er.message, 'error'); }
   };
 
-  return html`<${Modal} title=${isNew ? t('새 에이전트') : t('에이전트 편집 — {name}', { name: agent.name })} onClose=${onClose} size="wide" foot=${html`
+  return html`<${Modal} title=${isNew ? t('새 에이전트') : t('에이전트 편집 — {name}', { name: agent.name })} onClose=${close} size="wide" foot=${html`
     ${!isNew && html`<button class="btn danger" onClick=${remove}><${Icon} name="trash" /> ${t('삭제')}</button>`}
     <span class="grow" style="flex:1"></span>
     <button class="btn" onClick=${tryIt} title=${t('저장하고 이 에이전트와 새 세션 열기')}><${Icon} name="msg" /> ${t('저장 후 대화해보기')}</button>
-    <button class="btn" onClick=${onClose}>${t('취소')}</button>
+    <button class="btn" onClick=${close}>${t('취소')}</button>
     <button class="btn primary" disabled=${!a.name.trim()} onClick=${save}>${isNew ? t('만들기') : t('저장')}</button>`}>
-    ${!isNew && html`<div class="small muted" style="margin-bottom:10px">${t('에이전트는 모든 세션이 같이 써. 여기서 바꾸면 이 에이전트를 쓰는 다른 세션에도 적용돼.')}</div>`}
+    ${!isNew && html`<div class="row" style="gap:8px;margin-bottom:10px;align-items:flex-start">
+      <div class="small muted grow">${t('에이전트는 모든 세션이 같이 써. 여기서 바꾸면 이 에이전트를 쓰는 다른 세션에도 적용돼.')}</div>
+      <button type="button" class="btn sm" style="flex:none" onClick=${toNotes}>📒 ${t('역할 노트로')}</button>
+    </div>`}
     <div style="display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:22px">
       <div>
         <div class="grid3">
@@ -165,6 +193,7 @@ export function AgentEditor({ agent, onClose }) {
           <div class="hint">${t('투명 배경 PNG를 추천해. 긴 변 256px로 줄여 이 PC에만 저장돼. 작은 도트 그림은 선명하게 확대돼.')}</div></div>`}
       </div>
     </div>
+    ${isNew ? html`<div class="section">📒 ${t('역할 노트')}</div><div class="small muted">${t('저장한 뒤에 쓸 수 있어.')}</div>` : html`<${RoleNotes} agentId=${agent.id} focus=${focusNotes} onUnsaved=${(u) => { notesLeft.current = u; }} />`}
   </${Modal}>`;
 }
 

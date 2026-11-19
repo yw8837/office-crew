@@ -183,7 +183,7 @@ function App() {
     </main>
     ${v === 'session' && s && state.ui.right && html`<${RightPanel} s=${s} />`}
     ${state.ui.importOpen && html`<${ImportModal} onClose=${closeImport} onImported=${(id) => { closeImport(); go('session', id); toast(t('불러왔어. 이어서 말하면 같은 대화로 계속돼.'), 'ok'); }} />`}
-    ${state.ui.editAgent && agentById(state.ui.editAgent) && html`<${AgentEditor} key=${state.ui.editAgent} agent=${agentById(state.ui.editAgent)} onClose=${() => { state.ui.editAgent = null; changed(); }} />`}
+    ${state.ui.editAgent && agentById(state.ui.editAgent) && html`<${AgentEditor} key=${state.ui.editAgent} agent=${agentById(state.ui.editAgent)} focusNotes=${!!state.ui.editAgentNotes} onClose=${() => { state.ui.editAgent = null; state.ui.editAgentNotes = false; changed(); }} />`}
     ${v !== 'usage' && html`<${UsageDock} />`}
     ${!state.connected && html`<div class="conn-lost">${t('서버 연결 끊김 — 다시 연결 중…')}</div>`}
     <div class="toasts">${state.ui.toasts.map((x) => html`<div class=${`toast ${x.kind}`}>${x.text}</div>`)}</div>

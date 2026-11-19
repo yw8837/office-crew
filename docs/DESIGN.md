@@ -12,7 +12,7 @@
 ## 기술 선택
 - 서버: Node.js ≥ 20, **런타임 의존성 0개**(Node.js 기본 모듈만). 실시간은 SSE.
 - 프론트: 빌드 없음. Preact 10 + htm(벤더 포함, ~16KB) + 순수 CSS. import map 사용.
-- 저장: `OFFICE_CREW_HOME`(기본 `~/.office-crew`) 아래 JSON 파일. 세션은 파일 1개씩.
+- 저장: `OFFICE_CREW_HOME`(기본 `~/.office-crew`) 아래 JSON 파일. 세션은 파일 1개씩. 역할 노트는 에이전트마다 `notes/<에이전트 id>.json` 1개씩(결정 0013).
 - 실행: `npm start` → 서버(127.0.0.1:4317) + Edge/Chrome `--app` 창(프로그램처럼). PWA 설치도 가능.
 - 보안: 127.0.0.1 바인딩, Host·Origin 헤더 검사(DNS 리바인딩·교차 사이트 요청 차단), 첫 실행 때 만들어 `.token`에 저장한 설치별 토큰을 `X-Office-Token` 헤더/`?token=`로 요구, 출력은 항상 이스케이프 후 마크다운 렌더.
 
@@ -25,6 +25,7 @@ server/bus.js               SSE 이벤트 허브
 server/orchestrator.js      실행(run) 엔진: 단계 진행, 병렬, 승인 게이트, 개입
 server/ask.js               에이전트가 사용자에게 묻기: 답 끝의 oc-ask 블록 읽기, 답을 돌려주는 글(결정 0009)
 server/meeting.js           회의 차례: 반대편 고르기, 차례 순서, 진행자 답 끝의 oc-verdict 판정 블록 읽기(결정 0010), 차례 답 끝의 oc-check 질문 블록 읽기와 조사 담당 고르기(결정 0011)
+server/notes.js             역할 노트: 에이전트마다 하는 일·항목·변경 기록 파일, 바깥에서 온 항목의 주입 무늬 거르기, 되돌리기, 시스템 지시에 넣을 항목 고르기(결정 0013)
 server/usage.js             토큰·비용 집계, 계정 한도
 server/catalog.js           스킬·커넥터·플러그인 목록
 server/routing.js           자동 라우팅(역할×프로필 → 프로바이더·모델·노력)
@@ -52,6 +53,7 @@ Team     { id, name, description, stages:[ { id, label, agentIds:[...], instruct
 Session  { id, title, titleFrom?(제목을 만든 사용자 말 id), titleLocal?(그 말이 내 PC 모델만 받은 말이면 true: 기억 출처 줄에 제목을 싣지 않는다), teamId|null, agentId|null, cwd, createdAt, updatedAt,
            providerSessions:{ [agentId]: string }, sessionProvider:{ [agentId]: providerId },
            usageBase?:{ [agentId]: { id, input, output, cacheRead, cacheWrite, cost } }(Claude 사용량의 직전 누적. id 는 다음 호출이 이어 갈 CLI 대화 id 이고, 그 대화를 그대로 이어 갈 때만 뺀다. 믿을 수 없게 되면 지운다. 결정 0012),
+           noteHashes?:{ [agentId]: string }(이어 갈 수 있는 AI 의 대화가 마지막으로 끝까지 받은 역할 노트 블록의 해시. 무작위 표식은 뺀다. 없으면 노트를 받은 적 없는 걸로 본다. 이어 가는 실행에서 다르면 지시를 다시 붙인다. 결정 0013),
            importedFrom?:{ source:'claude'|'codex', id, cwd, total, at, agentId?(불러올 때 만든 에이전트), remembered?(불러온 대화를 프로젝트 기억에 다 넣었음), cleared?(대화를 비웠음: 불러온 대화를 더는 건네지 않는다), checked?(원문이 없어 원래 기록을 다시 읽어 봤음) }, messages:[Message], runs:[Run] }
 Message  { id, role:'user'|'agent'|'system'|'proposal'(영입 제안 카드, 결정 0006), agentId?, runId?, stageIndex?, text, handoffAsk?(사용자 말: 인수인계 메모를 써 달라는 정해진 요청. 대화·기억에 싣지 않는다), handoff?(에이전트 답: 인수인계 메모. 이어받는 다른 AI가 먼저 받는다. 결정 0008), local?(사용자 말: 보낼 때 계획의 AI가 모두 내 PC 모델이면 true, 클라우드 AI가 실제로 받으면 지운다. true 면 클라우드 AI로 넘기는 대화·기억에서 뺀다. 결정 0007), remembered?(사용자 말: 프로젝트 기억에 넣기 시작했음. 두 번 넣지 않는다), cut?(대기열에 있다가 앱이 꺼진 말. 다시 켤 때 기억에 넣고 지운다),
            meeting?:{ phase:'opinion'|'turn'|'research'|'judge'|'conclude'(옛 메시지는 'review'), round, rounds, opposer?:true }(회의 차례), verdict?:{ verdict:'agree'|'continue', reason }(진행자 판정에서 읽은 블록. 결정 0010),
@@ -59,6 +61,16 @@ Message  { id, role:'user'|'agent'|'system'|'proposal'(영입 제안 카드, 결
            attachments:[{id,name,mime,size,path}], blocks:[Block], status:'streaming'|'done'|'error'|'stopped',
            usage?:{input,output,cacheRead,cacheWrite,cost,durationMs, partial?(true: 하위 에이전트 몫이 빠졌을 수 있다), sub?(주 에이전트 밖에서 쓴 토큰: 하위 에이전트 등. 결정 0012)}, createdAt }
 Block    { id, kind:'tool'|'thinking'|'notice', name?, input?, output?, status:'running'|'done'|'error' }
+Notes    (notes/<agentId>.json, 지운 에이전트는 <agentId>.removed.json. 결정 0013)
+         { version:1, role:{ tasks:[{ id, title(1~80자), done(끝났다고 볼 기준, 0~200자), check(확인 방법, 0~200자)}](최대 8) },
+           items:[{ id, kind:'method'|'pitfall'|'criterion'|'tool', text(1~400자, 글자 단위), source:{ type:'user'|'agent'|'web', ref(agent·web: 주소나 파일, user: 채팅에서 고른 글이면 chat:<세션 id>/<메시지 id>, 아니면 '') },
+                    status:'draft'|'confirmed'|'archived'(user 는 만들 때 confirmed, agent·web 은 늘 draft. 삭제 없음.
+                      바꿀 수 있는 길: agent·web 은 draft→confirmed·archived, confirmed→archived, archived→draft. user 는 confirmed↔archived. 되돌리기는 전 값으로),
+                    helped, harmed, localOnly(채팅에서 고른 글은 서버가 그 메시지를 보고 정한다), createdAt, updatedAt }],
+           log:[{ id, at, op:'add'|'edit'|'status'|'acceptAll'|'role'|'undo', itemId, before, after, undoOf? }](최근 200개) }
+         시스템 지시에는 확정 항목만(내 PC 전용은 내 PC 모델에게만). 크기는 항목 글 + 찍는 출처 주소(바깥 자료만, 120자까지)로 센다.
+         합이 2,000자 안이면 전부 최근 순, 넘을 때만 요청과 낱말이 겹치는 순 → helped − harmed → 최근 순으로 채운다.
+         user 항목은 "사용자가 정한 것" 아래, agent·web 항목은 무작위 표식 안에 참고로. 항목 글·주소·하는 일의 < > 는 전각(＜ ＞)으로 바꿔 넣는다
 Run      { id, cut?(실행 중에 앱이 꺼졌다는 표시. 다시 켤 때 그 사용자 말을 기억에 넣고 지운다), teamId|null, status:'running'|'paused'|'waiting'|'done'|'error'|'stopped',
            stageIndex, stages:[{ label, agentIds, status, meetingNow?:null|{ phase, round, rounds, speakerId?(차례·조사 중인 사람), opposerId?(반대편이 있으면 늘), askedBy?(조사 중일 때 질문한 사람) }(회의 진행 표시. 결정 0010·0011) }], startedAt, endedAt }
 ```
@@ -136,16 +148,25 @@ usage {byProvider, byAgent, today, limits}
 providers {list}
 cooldown {provider: {until, reason}}
 messageMeta {sessionId, messageId, model, provider?, effort?}
+notes {agentId, drafts}            역할 노트가 바뀜(drafts: 받지 않은 초안 수)
 ```
 agentState.state ∈ idle | thinking | typing | tool | searching | reading | running | waiting | error | done | paused | offline
 
 ## REST API(모두 토큰 필요)
 ```
-GET  /api/bootstrap                  agents, teams, sessions(메타), settings, providers, usage, skills, connectors, plugins
+GET  /api/bootstrap                  agents(에이전트마다 noteDrafts·noteCount: 역할 노트 초안 수·확정 수), teams, sessions(메타), settings, providers, usage, skills, connectors, plugins
 GET  /api/providers?refresh=1        탐지 결과
 POST /api/providers/:id/login        로그인용 터미널 창 열기
 GET  /api/providers/:id/models
 POST·PUT·DELETE /api/agents, /api/teams, /api/connectors, /api/skills (목록은 bootstrap), DELETE /api/plugins/:id
+                                     에이전트를 지우면(플러그인을 지워 빠질 때도) 역할 노트 파일은 이름만 <id>.removed.json 으로
+GET  /api/agents/:id/notes           역할 노트 전체(결정 0013). 없는 에이전트 404, 형식 오류 400(이유), 되돌릴 수 없는 변경 409
+PUT  /api/agents/:id/notes/role      {tasks}
+POST /api/agents/:id/notes/items     {kind, text, source(꼭 필요: {type, ref?}. 없으면 400), localOnly?(불리언만)}
+                                     source 가 {type:'user', ref:'chat:<세션 id>/<메시지 id>'} 면 그 메시지를 찾아(못 찾으면 400) 내 PC 모델 답이면 localOnly,
+                                     글은 주입 무늬 검사(걸리면 400 과 편집 창에서 직접 쓰라는 안내)
+PATCH /api/agents/:id/notes/items/:itemId  {text?, kind?, status?(위 상태 길만. 그 밖은 400)}
+POST /api/agents/:id/notes/accept-all, POST /api/agents/:id/notes/undo {logId}
 GET  /api/sessions/:id               전체 세션
 POST /api/sessions                   {title?, teamId?, agentId?, cwd?}
 PATCH/DELETE /api/sessions/:id

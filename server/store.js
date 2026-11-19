@@ -12,7 +12,7 @@ export function newId(prefix = 'id') {
 const COLLECTIONS = ['agents', 'teams', 'connectors', 'skills', 'skins', 'plugins', 'schedules', 'tasks'];
 const MAX_CACHE = Number(process.env.OFFICE_CREW_SESSION_CACHE || 12); // 메모리에 올려둘 세션 본문 수
 
-function writeAtomic(file, text) {
+export function writeAtomic(file, text) {
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, text);
   for (let i = 0; ; i++) {

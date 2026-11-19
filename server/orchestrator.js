@@ -242,56 +242,66 @@ export class Orchestrator {
 
   // 목표 차례를 돈다: 진행자에게 목표 카드 초안(oc-goal)을 받는다. 블록을 못 읽으면 같은 실행에서 한 번 다시 요청하고,
   // 그래도 안 되면 요청 글 앞 200자를 목표로 한(기준은 빈) 카드를 낸다. 진행자는 질문 블록으로 사용자에게 물을 수 있다.
-  // 오류·중지로 끝나면 카드를 내지 않는다(#missionEnd 가 목표를 닫는다)
+  // 오류·중지로 끝나면 카드를 내지 않는다(#missionEnd 가 목표를 닫는다).
+  // 진행자의 CLI 대화 기록(이어 갈 대화 id·그 대화를 만든 AI·사용량 직전 누적·받은 역할 노트)은 시작 때 적어 두고 끝날 때(성공·실패·중지 모두) 되돌린다:
+  // 일 단계의 진행자가 목표 차례의 대화(확인 안 한 초안과 그때 읽은 글)를 이어 가지 않게
   async #goalTurn(ctx) {
     const { s, run } = ctx;
     const m = ctx.mission;
-    await this.#ensureImported(s);
-    this.rememberImported(s);
     const st = run.stages[0];
     const lead = st.agentIds[0];
-    st.status = 'running';
-    this.#emitRun(ctx);
-    let got = null;
-    let last = null;
-    for (let n = 0; n < 2 && !ctx.stopped; n++) {
-      ctx.goalRetry = n > 0;
-      const mark = s.messages.length;
-      [last] = await this.#together(ctx, 0, [lead], null);
-      if (ctx.stopped || last.error || last.stopped) break;
-      const msg = s.messages.slice(mark).find((x) => x.role === 'agent' && x.runId === run.id && x.agentId === lead);
-      const p = msg ? parseGoal(msg.text) : null;
-      if (p && !p.error) { got = { p, msg }; break; }
-      if (msg) {
-        this.#notice(s, msg, n === 0 ? tr('답 끝에서 목표 카드 블록을 읽지 못해서 한 번 다시 요청했어.') : tr('다시 요청했는데도 목표 카드 블록을 읽지 못했어. 요청 글로 카드를 만들게.'));
-        this.store.saveSession(s, 100);
+    const saved = ['providerSessions', 'sessionProvider', 'usageBase', 'noteHashes'].map((k) => [k, !!s[k] && Object.hasOwn(s[k], lead), s[k]?.[lead]]);
+    try {
+      await this.#ensureImported(s);
+      this.rememberImported(s);
+      st.status = 'running';
+      this.#emitRun(ctx);
+      let got = null;
+      let last = null;
+      for (let n = 0; n < 2 && !ctx.stopped; n++) {
+        ctx.goalRetry = n > 0;
+        const mark = s.messages.length;
+        [last] = await this.#together(ctx, 0, [lead], null);
+        if (ctx.stopped || last.error || last.stopped) break;
+        const msg = s.messages.slice(mark).find((x) => x.role === 'agent' && x.runId === run.id && x.agentId === lead);
+        const p = msg ? parseGoal(msg.text) : null;
+        if (p && !p.error) { got = { p, msg }; break; }
+        if (msg) {
+          this.#notice(s, msg, n === 0 ? tr('답 끝에서 목표 카드 블록을 읽지 못해서 한 번 다시 요청했어.') : tr('다시 요청했는데도 목표 카드 블록을 읽지 못했어. 요청 글로 카드를 만들게.'));
+          this.store.saveSession(s, 100);
+        }
+      }
+      ctx.goalRetry = false;
+      if (ctx.stopped || !last || last.error || last.stopped) {
+        st.status = ctx.stopped || last?.stopped ? 'stopped' : 'error';
+        run.status = st.status;
+        return;
+      }
+      const draft = got ? got.p.card : { ...cleanGoal({ goal: m.request }), criteria: [] };
+      const warn = got ? goalWarn(got.p.raw) : '';
+      if (got) {
+        got.msg.goalBlock = { from: got.p.from, to: got.p.to }; // 화면이 그 자리를 감추고 카드로 보여 준다
+        this.bus.emit('message', { sessionId: s.id, message: got.msg });
+      }
+      const card = {
+        id: newId('m'), role: 'proposal', kind: 'goal', status: 'open', text: '', missionId: m.id, leadId: lead, draftMsgId: got?.msg.id || null,
+        goal: draft.goal, criteria: draft.criteria, outOfScope: draft.outOfScope, userDecides: draft.userDecides,
+        ...(warn ? { warn } : {}), ...(got ? {} : { fallback: true }), createdAt: Date.now(),
+      };
+      s.messages.push(card);
+      Object.assign(m, { status: 'draft', goal: draft.goal, criteria: toCriteria(draft.criteria), outOfScope: draft.outOfScope, userDecides: draft.userDecides, cardMsgId: card.id });
+      logLine(m, 'goal', got ? tr('목표 카드 초안이 나왔어. 확인해 줘.') : tr('진행자 답에서 목표 카드를 읽지 못해서 요청 글로 카드를 만들었어. 기준을 직접 적어 줘.'), card.id);
+      this.bus.emit('message', { sessionId: s.id, message: card });
+      this.emitMission(s);
+      st.status = 'done';
+      run.status = 'done';
+      this.#state(s.id, lead, 'done', tr('목표 초안 씀'));
+    } finally {
+      for (const [k, had, v] of saved) {
+        if (had) (s[k] ||= {})[lead] = v;
+        else if (s[k]) delete s[k][lead];
       }
     }
-    ctx.goalRetry = false;
-    if (ctx.stopped || !last || last.error || last.stopped) {
-      st.status = ctx.stopped || last?.stopped ? 'stopped' : 'error';
-      run.status = st.status;
-      return;
-    }
-    const draft = got ? got.p.card : { ...cleanGoal({ goal: m.request }), criteria: [] };
-    const warn = got ? goalWarn(got.p.raw) : '';
-    if (got) {
-      got.msg.goalBlock = { from: got.p.from, to: got.p.to }; // 화면이 그 자리를 감추고 카드로 보여 준다
-      this.bus.emit('message', { sessionId: s.id, message: got.msg });
-    }
-    const card = {
-      id: newId('m'), role: 'proposal', kind: 'goal', status: 'open', text: '', missionId: m.id, leadId: lead, draftMsgId: got?.msg.id || null,
-      goal: draft.goal, criteria: draft.criteria, outOfScope: draft.outOfScope, userDecides: draft.userDecides,
-      ...(warn ? { warn } : {}), ...(got ? {} : { fallback: true }), createdAt: Date.now(),
-    };
-    s.messages.push(card);
-    Object.assign(m, { status: 'draft', goal: draft.goal, criteria: toCriteria(draft.criteria), outOfScope: draft.outOfScope, userDecides: draft.userDecides, cardMsgId: card.id });
-    logLine(m, 'goal', got ? tr('목표 카드 초안이 나왔어. 확인해 줘.') : tr('진행자 답에서 목표 카드를 읽지 못해서 요청 글로 카드를 만들었어. 기준을 직접 적어 줘.'), card.id);
-    this.bus.emit('message', { sessionId: s.id, message: card });
-    this.emitMission(s);
-    st.status = 'done';
-    run.status = 'done';
-    this.#state(s.id, lead, 'done', tr('목표 초안 씀'));
   }
 
   // 목표 카드 확인(본 것과 저장된 것이 같아야 확정한다). 확정하면 팀 단계표로 실행 하나를 시작한다.
@@ -1449,12 +1459,13 @@ export class Orchestrator {
 
   // 인수인계 메모를 쓸 에이전트: 이 세션에서 답한 적 있는 에이전트 가운데, 자기 CLI 대화를 이어 갈 수 있는 쪽을 먼저,
   // 그중 이 세션에서 가장 많이 답한 쪽(가장 많이 아는 쪽), 같으면 가장 최근에 답한 쪽. want 를 주면 그 에이전트가 자격이 있는지만 본다
+  // 목표 카드 초안(goalDraft)은 답한 것으로 세지 않는다: 목표 차례가 끝나면 진행자의 CLI 대화를 그 전으로 되돌려서 그 대화가 남지 않는다(결정 0014)
   handoffWriter(s, want = null, skip = []) {
-    const mine = (id) => s.messages.filter((m) => m.role === 'agent' && m.agentId === id && m.text && !m.handoff);
-    const talked = [...new Set(s.messages.filter((m) => m.role === 'agent' && m.text && !m.handoff).map((m) => m.agentId))]
+    const mine = (id) => s.messages.filter((m) => m.role === 'agent' && m.agentId === id && m.text && !m.handoff && !m.goalDraft);
+    const talked = [...new Set(s.messages.filter((m) => m.role === 'agent' && m.text && !m.handoff && !m.goalDraft).map((m) => m.agentId))]
       .filter((id) => this.store.get('agents', id) && !skip.includes(id));
     if (want) return talked.includes(want) ? want : null;
-    const last = (id) => s.messages.findLastIndex((m) => m.role === 'agent' && m.agentId === id && m.text && !m.handoff);
+    const last = (id) => s.messages.findLastIndex((m) => m.role === 'agent' && m.agentId === id && m.text && !m.handoff && !m.goalDraft);
     const keeps = (id) => (s.providerSessions?.[id] ? 1 : 0);
     return talked.sort((x, y) => keeps(y) - keeps(x) || mine(y).length - mine(x).length || last(y) - last(x))[0] || null;
   }
@@ -1478,11 +1489,11 @@ export class Orchestrator {
   #autoWriter(s, mention) {
     let ids;
     try { ids = this.#plan(s, mention).stages.flatMap((st) => st.agentIds); } catch { return null; }
-    const spoke = (id) => s.messages.some((m) => m.role === 'agent' && m.agentId === id && m.text);
+    const spoke = (id) => s.messages.some((m) => m.role === 'agent' && m.agentId === id && m.text && !m.goalDraft); // 목표 카드 초안은 답한 것으로 세지 않는다
     const newcomers = ids.filter((id) => !spoke(id));
     if (!newcomers.length) return null;
     if (s.messages.filter((m) => m.text && (m.role === 'user' || m.role === 'agent') && !m.handoffAsk).length < 6) return null; // 짧은 대화는 최근 대화로 충분하다
-    const last = (id) => s.messages.findLastIndex((m) => m.role === 'agent' && m.agentId === id && m.text && !m.handoff);
+    const last = (id) => s.messages.findLastIndex((m) => m.role === 'agent' && m.agentId === id && m.text && !m.handoff && !m.goalDraft);
     const w = this.handoffWriter(s, null, ids);
     if (!w || !s.providerSessions?.[w]) return null; // 자기 대화를 이어 갈 수 있는 AI만(그래야 앞부분까지 안다)
     // 그 뒤에 쓴(또는 쓰려다 실패한, 쓰려고 줄 선) 메모가 이미 있으면 다시 시키지 않는다

@@ -1645,4 +1645,5 @@ export default {
   "켜면 보낸 요청을 진행자가 먼저 목표 카드(목표·합격 기준)로 만들고, 네가 확인한 뒤에 팀이 그 목표를 들고 일해. @이름으로 보낸 말은 지금처럼 실행돼.": "When on, the lead first turns your request into a goal card (goal and acceptance criteria), and the team works on it after you confirm. A message sent with @name runs as usual.",
   "목표까지": "To the goal",
   "진행 기록": "Progress",
+  "반영하지 못한 추가 지시가 {n}개 있어.": "{n} extra instructions weren't used.",
 };

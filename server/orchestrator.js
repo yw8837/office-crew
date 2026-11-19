@@ -16,7 +16,7 @@ import { pickOpposer, turnOrder, parseVerdict, verdictBlock, CHECK_MAX, parseChe
 import { writeConversation, readImported, saveImported, pickEarlier, toolNames, handoffRequest, NOTE_MAX } from './handoff.js';
 import { readTranscript } from './importer.js';
 import { pickForPrompt, promptRef } from './notes.js';
-import { alive, parseGoal, goalBlock, goalWarn, newMission, toCriteria, cardOf, sameCard, cleanGoal, pickLead, mixedLocal, logLine } from './mission.js';
+import { parseGoal, goalBlock, goalWarn, newMission, toCriteria, cardOf, sameCard, cleanGoal, pickLead, mixedLocal, logLine } from './mission.js';
 
 const ACTIVE = new Set(['running', 'paused', 'waiting']);
 const FORCE_END_MS = 5000; // 멈춘 CLI를 끄라고 한 뒤 이만큼 기다려도 안 끝나면 강제로 끝낸다
@@ -402,7 +402,7 @@ export class Orchestrator {
         logLine(m, 'stop', run.status === 'error' ? tr('실행 오류로 목표를 멈췄어.') : tr('중지해서 목표를 멈췄어.'));
       }
       const left = (m.notes || []).filter((n) => !n.used).length;
-      if (left) logLine(m, 'note', tr('반영하지 못한 추가 지시가 {n}개 있어(마지막 단계가 시작된 뒤에 왔어).', { n: left }));
+      if (left) logLine(m, 'note', run.status === 'done' ? tr('반영하지 못한 추가 지시가 {n}개 있어(마지막 단계가 시작된 뒤에 왔어).', { n: left }) : tr('반영하지 못한 추가 지시가 {n}개 있어.', { n: left }));
     }
     this.emitMission(s);
   }

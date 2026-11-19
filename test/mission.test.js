@@ -490,9 +490,11 @@ test('8. 일하기: 모든 에이전트가 검수 역할인 단계는 목표 실
   await waitDraft(st);
   await confirm(st, { missionId: S(st).mission.id, expected: shown(cardOf(st)) });
   await t.waitFor(() => S(st).runs.length === 2 && S(st).messages.some((x) => x.role === 'agent' && x.runId === S(st).runs[1].id && x.status === 'streaming'), 10000, '일하는 중');
+  assert.equal((await say(st, '이것도 해 줘')).json.noted, true); // 하나뿐인 단계가 도는 중이라 쓰이지 못한다
   await t.api('POST', `/api/sessions/${st}/control`, { action: 'stop' });
   await waitRuns(st, 2);
-  assert.deepEqual([S(st).mission.status, S(st).mission.log.at(-1).text], ['stopped', '중지해서 목표를 멈췄어.']);
+  assert.equal(S(st).mission.status, 'stopped');
+  assert.deepEqual(S(st).mission.log.slice(-2).map((x) => x.text), ['중지해서 목표를 멈췄어.', '반영하지 못한 추가 지시가 1개 있어.'], '중지했으면 "마지막 단계 뒤에 왔다"고 쓰지 않는다');
   // 끝난 목표 뒤에는 새 요청이 다시 목표가 된다
   await say(st, '새 목표');
   await waitDraft(st);

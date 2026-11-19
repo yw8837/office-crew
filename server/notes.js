@@ -103,13 +103,14 @@ function checkText(body) {
   return body;
 }
 
-// 출처: 없으면 사용자. 에이전트·바깥 자료면 ref(주소나 파일)를 한 줄로 남긴다
+// 출처: 없으면 사용자(코드에서 바로 부를 때만. HTTP 주소는 출처를 꼭 받는다). 에이전트·바깥 자료면 ref(주소나 파일)를 한 줄로 남긴다.
+// 사용자 항목은 채팅에서 고른 글의 자리(chat:<세션 id>/<메시지 id>)만 남기고 그 밖의 ref 는 비운다
 function cleanSource(src) {
   if (src === undefined || src === null) return { type: 'user', ref: '' };
   const type = typeof src === 'object' ? src.type : undefined;
   if (!SOURCES.includes(type)) throw fail(400, tr('모르는 출처야: {type}', { type: String(type ?? src).slice(0, 20) }));
-  if (type === 'user') return { type, ref: '' };
   const ref = oneLine(strip(typeof src.ref === 'string' ? src.ref : ''));
+  if (type === 'user' && !ref.startsWith('chat:')) return { type, ref: '' };
   if (over(ref, REF_MAX)) throw fail(400, tr('출처 주소는 {max}자까지야.', { max: REF_MAX }));
   return { type, ref };
 }
@@ -196,9 +197,12 @@ export class NoteStore {
 
   addItem(agentId, { kind, text, source, localOnly } = {}) {
     const src = cleanSource(source);
-    if (src.type !== 'user') {
-      const why = suspicious(text) || suspicious(source?.ref);
-      if (why) throw fail(400, why);
+    if (localOnly !== undefined && typeof localOnly !== 'boolean') throw fail(400, tr('localOnly 는 true 나 false 여야 해.'));
+    // 채팅에서 고른 글(사용자 항목이지만 에이전트가 쓴 글)도 에이전트 항목처럼 거른다. 걸리면 직접 써 넣는 길을 알려 준다
+    const chat = src.type === 'user' && src.ref.startsWith('chat:');
+    if (src.type !== 'user' || chat) {
+      const why = suspicious(text) || (chat ? '' : suspicious(source?.ref));
+      if (why) throw fail(400, chat ? `${why} ${tr('네가 맞다고 보면 에이전트 편집 창의 역할 노트에 직접 써 넣어.')}` : why);
     }
     const body = checkText(cleanText(typeof text === 'string' ? text : ''));
     const now = Date.now();

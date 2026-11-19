@@ -379,7 +379,19 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   route('POST', '/api/agents/([\\w-]+)/notes/items', async (req, url, [id]) => {
     const b = await readJson(req);
     noteAgent(id);
-    return notesChanged(id, notes.addItem(id, { kind: b.kind, text: b.text, source: b.source, localOnly: b.localOnly }));
+    // 출처는 꼭 받는다(빠뜨린 요청이 사용자 항목으로 바로 확정되지 않게)
+    if (b.source === undefined || b.source === null) throw new HttpError(400, tr('항목의 출처(source)가 필요해.'));
+    if (b.localOnly !== undefined && typeof b.localOnly !== 'boolean') throw new HttpError(400, tr('localOnly 는 true 나 false 여야 해.'));
+    let localOnly = b.localOnly;
+    // 채팅에서 고른 글(chat:<세션 id>/<메시지 id>): 그 메시지를 저장된 세션에서 찾아, 내 PC 모델이 쓴 답이면 내 PC 모델 전용으로 둔다(화면이 정하지 않는다)
+    const ref = b.source?.type === 'user' && typeof b.source.ref === 'string' ? b.source.ref : '';
+    if (ref.startsWith('chat:')) {
+      const [, sid, mid] = ref.match(/^chat:([\w-]+)\/([\w-]+)$/) || [];
+      const m = sid ? store.getSession(sid)?.messages?.find((x) => x.id === mid) : null;
+      if (!m) throw new HttpError(400, tr('고른 글이 있던 메시지를 찾지 못했어.'));
+      if (m.provider === 'local' || m.local === true) localOnly = true;
+    }
+    return notesChanged(id, notes.addItem(id, { kind: b.kind, text: b.text, source: b.source, localOnly }));
   });
   route('PATCH', '/api/agents/([\\w-]+)/notes/items/([\\w-]+)', async (req, url, [id, itemId]) => {
     const b = await readJson(req);

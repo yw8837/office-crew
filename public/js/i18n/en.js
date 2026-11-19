@@ -1485,4 +1485,10 @@ export default {
   "앞 {max}자만 {name}의 역할 노트에 적었어.": "Added the first {max} characters to {name}'s role notes.",
   "{name}의 역할 노트에 적었어.": "Added to {name}'s role notes.",
   "역할 노트에 적지 못했어: {msg}": "Couldn't add it to the role notes: {msg}",
+  // ── 역할 노트: 출처 (notes.js·index.js·rolenotes.js) ──
+  "localOnly 는 true 나 false 여야 해.": "localOnly must be true or false.",
+  "네가 맞다고 보면 에이전트 편집 창의 역할 노트에 직접 써 넣어.": "If you think it's right, write it into the role notes in the agent editor yourself.",
+  "항목의 출처(source)가 필요해.": "The item needs a source.",
+  "고른 글이 있던 메시지를 찾지 못했어.": "Couldn't find the message the selected text came from.",
+  "채팅에서 고름": "Picked from the chat",
 };

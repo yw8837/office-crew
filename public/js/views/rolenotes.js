@@ -107,7 +107,7 @@ export function RoleNotes({ agentId, focus = false }) {
   const source = (x) => {
     if (x.source?.type === 'agent') return t('에이전트 경험');
     if (x.source?.type === 'web') return x.source.ref ? t('바깥 자료: {ref}', { ref: short(x.source.ref, 40) }) : t('바깥 자료');
-    return t('내가 씀');
+    return String(x.source?.ref || '').startsWith('chat:') ? t('채팅에서 고름') : t('내가 씀');
   };
   const setStatus = (x, status) => act('items', () => patch(`${base}/items/${x.id}`, { status }), toList);
   const acceptAll = () => act('items', () => post(`${base}/accept-all`), toList);
@@ -166,7 +166,7 @@ export function RoleNotes({ agentId, focus = false }) {
   // ── 항목 더하기 ──
   const addN = chars(add.text.trim());
   const addOk = addN > 0 && addN <= TEXT_MAX;
-  const addItem = () => act('add', () => post(`${base}/items`, { kind: add.kind, text: add.text }), () => { setAdd((x) => ({ ...x, text: '' })); setTab('confirmed'); });
+  const addItem = () => act('add', () => post(`${base}/items`, { kind: add.kind, text: add.text, source: { type: 'user' } }), () => { setAdd((x) => ({ ...x, text: '' })); setTab('confirmed'); });
   const addView = html`<div class="field"><label for=${`rn-new-${agentId}`}>${t('항목 더하기')}</label>
     <div class="row" style="gap:6px;align-items:flex-start">
       <select class="select" style="width:auto" aria-label=${t('종류')} value=${add.kind} onChange=${(e) => { const kind = e.target.value; setAdd((cur) => ({ ...cur, kind })); }}>${KINDS.map((k) => html`<option value=${k}>${KIND_LABEL()[k]}</option>`)}</select>

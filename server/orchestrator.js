@@ -240,15 +240,6 @@ export class Orchestrator {
     return { teamId: team.id, stages: [{ label: tr('목표 잡기'), agentIds: [lead], approve: false, instruction: '', meeting: null, mission: 'goal' }] };
   }
 
-  // 일하기: 팀 단계표 그대로. 다만 모든 에이전트의 역할 종류가 검수인 단계는 뺀다(기준 판정으로 대신한다. 다 빼면 0개가 되면 그대로 둔다)
-  #workPlan(s) {
-    const plan = this.#plan(s, null);
-    const review = (st) => st.agentIds.every((id) => roleKind(this.store.get('agents', id)?.role) === 'review');
-    const kept = plan.stages.filter((st) => !review(st));
-    const cut = kept.length ? plan.stages.filter(review) : [];
-    return { plan: { ...plan, stages: kept.length ? kept : plan.stages }, cut };
-  }
-
   // 목표 차례를 돈다: 진행자에게 목표 카드 초안(oc-goal)을 받는다. 블록을 못 읽으면 같은 실행에서 한 번 다시 요청하고,
   // 그래도 안 되면 요청 글 앞 200자를 목표로 한(기준은 빈) 카드를 낸다. 진행자는 질문 블록으로 사용자에게 물을 수 있다.
   // 오류·중지로 끝나면 카드를 내지 않는다(#missionEnd 가 목표를 닫는다)
@@ -326,7 +317,9 @@ export class Orchestrator {
     if (why) throw fail(400, why);
     const userMsg = s.messages.find((x) => x.id === m.requestMsgId && x.role === 'user');
     if (!userMsg) throw fail(409, tr('요청 메시지를 찾지 못했어. 요청을 다시 보내 줘.'));
-    const work = this.#workPlan(s); // 에이전트가 없으면 여기서 던진다(목표를 바꾸기 전에)
+    // 일하기: 팀 단계표를 하나도 빼지 않고 그대로(검수 역할 단계·승인 관문 포함). 기준 판정이 아직 없어서 빼면 검수가 아예 없어진다.
+    // 에이전트가 없으면 여기서 던진다(목표를 바꾸기 전에)
+    const plan = this.#plan(s, null);
     const edited = !sameCard(final, draft);
     Object.assign(m, {
       goal: final.goal, criteria: toCriteria(final.criteria), outOfScope: final.outOfScope, userDecides: final.userDecides,
@@ -334,11 +327,10 @@ export class Orchestrator {
     });
     Object.assign(card, { status: 'confirmed', confirmed: { ...final }, edited, resolvedAt: Date.now() });
     logLine(m, 'confirm', edited ? tr('사용자가 고쳐서 확인했어(기준 {n}개).', { n: final.criteria.length }) : tr('사용자가 목표를 확인했어(기준 {n}개).', { n: final.criteria.length }), card.id);
-    if (work.cut.length) logLine(m, 'review', tr('검수 단계({labels})는 기준 판정으로 대신해(판정은 아직 없어).', { labels: work.cut.map((x) => x.label).join(', ') }));
     this.bus.emit('message', { sessionId: s.id, message: card });
     this.emitMission(s, true);
     // 확정된 값은 이 실행이 끝날 때까지 메모리에 든 값을 쓴다(실행 중에 세션 파일을 다시 읽지 않는다)
-    this.#start(s, userMsg, { plan: work.plan, card: { goal: final.goal, criteria: [...final.criteria], outOfScope: [...final.outOfScope] } });
+    this.#start(s, userMsg, { plan, card: { goal: final.goal, criteria: [...final.criteria], outOfScope: [...final.outOfScope] } });
     return { ok: true, missionId: m.id };
   }
 

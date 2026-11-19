@@ -1564,7 +1564,6 @@ export default {
   "요청 메시지를 찾지 못했어. 요청을 다시 보내 줘.": "Couldn't find the request message. Send the request again.",
   "사용자가 고쳐서 확인했어(기준 {n}개).": "You edited and confirmed it ({n} criteria).",
   "사용자가 목표를 확인했어(기준 {n}개).": "You confirmed the goal ({n} criteria).",
-  "검수 단계({labels})는 기준 판정으로 대신해(판정은 아직 없어).": "The review stages ({labels}) are replaced by judging the criteria (no judging yet).",
   "사용자가 목표 카드를 닫았어.": "You closed the goal card.",
   "버릴 끊긴 목표가 없어.": "There's no cut-off goal to discard.",
   "끊긴 목표를 버렸어.": "Discarded the cut-off goal.",

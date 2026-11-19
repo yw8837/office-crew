@@ -854,7 +854,7 @@ function Composer({ s, run }) {
         <button class="icon-btn" title=${t('에이전트 지정(@)')} aria-label=${t('에이전트 지정')} onClick=${() => { setText((x) => `${x}${x && !x.endsWith(' ') ? ' ' : ''}@`); setPop({ kind: '@', q: '', idx: 0 }); ta.current.focus(); }}><${Icon} name="at" /></button>
         <button class="icon-btn" title=${t('스킬(/)')} aria-label=${t('스킬')} onClick=${() => { setText((x) => (x.startsWith('/') ? x : `/${x}`)); setPop({ kind: '/', q: '', idx: 0 }); ta.current.focus(); }}><${Icon} name="spark" /></button>
         <div class="row goal-toggle" title=${t('켜면 보낸 요청을 진행자가 먼저 목표 카드(목표·합격 기준)로 만들고, 네가 확인한 뒤에 팀이 그 목표를 들고 일해. @이름으로 보낸 말은 지금처럼 실행돼.')}>
-          <${Toggle} key=${goalKey} checked=${goalOn} disabled=${goalBusy} title=${t('목표까지')} onChange=${setGoal} /><span class="small">${t('목표까지')}</span>
+          <${Toggle} key=${goalKey} checked=${goalOn} disabled=${goalBusy} title=${t('목표까지')} onChange=${setGoal} /><span class="small goal-word" aria-hidden="true" onClick=${() => { if (!goalBusy) setGoal(!goalOn); }}>${t('목표까지')}</span>
         </div>
         ${goalWhy && html`<span class="small muted goal-why" role="status">${goalWhy}</span>`}
         ${mAgent && html`<span class="chip accent">@${mAgent.name}<span class="x" onClick=${() => setMention(null)}>✕</span></span>`}

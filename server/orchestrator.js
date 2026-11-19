@@ -268,6 +268,9 @@ export class Orchestrator {
     const st = run.stages[0];
     const lead = st.agentIds[0];
     const saved = ['providerSessions', 'sessionProvider', 'usageBase', 'noteHashes'].map((k) => [k, !!s[k] && Object.hasOwn(s[k], lead), s[k]?.[lead]]);
+    // 목표 차례는 진행자가 이어 가던 대화가 있어도 새 대화로 시작한다: 이어 가면 초안이 그 대화에 남고(같은 대화 id 를 쓰는 CLI),
+    // 끝나고 되돌린 사용량 직전 누적이 그 대화의 실제 누적보다 작아져 다음 호출이 목표 차례 몫을 다시 센다
+    for (const [k, had] of saved) if (had) delete s[k][lead];
     try {
       await this.#ensureImported(s);
       this.rememberImported(s);

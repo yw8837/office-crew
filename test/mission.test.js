@@ -798,6 +798,27 @@ test('13. 목표 차례의 진행자 CLI 대화는 끝나면 되돌린다: 일 �
   assert.ok(S(sid).providerSessions[lead.id] && S(sid).providerSessions[lead.id] !== goalConv, '일 단계의 대화는 따로 남는다');
 });
 
+test('13-2. 진행자가 이어 가던 대화가 있어도 목표 차례는 새 대화로 시작하고, 끝나면 그 전 대화로 되돌린다(초안이 그 대화에 남지 않게)', async () => {
+  const t = await app();
+  const a = await mk('앞대화정리', '정리');
+  const lead = await mk('앞대화분석', '분석');
+  const tm = await mkTeam('앞대화팀', [{ label: '정리', agentIds: [a.id] }, { label: '분석', agentIds: [lead.id] }]);
+  const sid = await mkSession(tm.id);
+  const argsOf = (logs) => logs.filter((l) => l.cli === 'claude' && Array.isArray(l.args)).map((l) => l.args);
+  // 목표 모드 세션이어도 @이름 요청은 보통 실행이다: 진행자에게 이어 갈 대화가 생긴다
+  await say(sid, `@${lead.name} 먼저 인사해 줘`);
+  await waitRuns(sid, 1);
+  const before = S(sid).providerSessions[lead.id];
+  assert.ok(before, '진행자에게 이어 갈 대화가 있다');
+  const from = t.fakeLog().length;
+  await say(sid, '계획 세워 줘');
+  await waitDraft(sid);
+  const goalCalls = argsOf(t.fakeLog().slice(from));
+  assert.ok(goalCalls.length >= 1, '목표 차례가 돌았다');
+  assert.ok(goalCalls.every((x) => !x.includes(before)), '목표 차례는 앞 대화를 이어 가지 않는다');
+  assert.equal(S(sid).providerSessions[lead.id], before, '끝나면 앞 대화로 되돌린다');
+});
+
 test('14. 확정 블록과 목표 실행의 [사용자 추가 지시]에서는 < > 를 전각으로 바꾼다(지시를 감싼 태그를 닫거나 흉내 내지 못하게)', async () => {
   const t = await app();
   const a = await mk('태그정리', '정리');

@@ -504,6 +504,7 @@ pre.raw { background: var(--code-bg); padding: 10px 12px; border-radius: 10px; f
 .goal-edit { display: flex; flex-direction: column; gap: 8px; }
 .goal-edit label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
 .goal-toggle { gap: 6px; flex: none; }
+.goal-toggle .goal-word { cursor: pointer; user-select: none; }
 .goal-why { max-width: 280px; }
 .right-tabs { flex-wrap: wrap; }
 .log button.li { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }

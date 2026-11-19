@@ -16,8 +16,9 @@ export const LOG_MAX = 200; // 남겨 두는 변경 기록 수
 export const TASK_MAX = 8; // 이 역할이 하는 일 최대 개수
 export const TITLE_MAX = 80; // 일 제목 최대 글자 수
 export const TASK_TEXT_MAX = 200; // 끝났다고 볼 기준·확인 방법 각각의 최대 글자 수
-export const PROMPT_LIMIT = 2000; // 한 번 실행에 넣는 항목 글자 수 합의 상한
+export const PROMPT_LIMIT = 2000; // 한 번 실행에 넣는 항목 글자 수 합의 상한(항목 글 + 프롬프트에 찍는 출처 주소)
 const REF_MAX = 300; // 바깥 자료 주소·파일 이름 최대 글자 수
+export const PROMPT_REF_MAX = 120; // 프롬프트에 찍는 출처 주소 최대 글자 수(넘으면 잘라 … 을 붙인다)
 export const KINDS = ['method', 'pitfall', 'criterion', 'tool'];
 const SOURCES = ['user', 'agent', 'web'];
 const STATUSES = ['draft', 'confirmed', 'archived'];
@@ -29,6 +30,13 @@ const graphemes = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segme
 export function chars(s) {
   const str = String(s ?? '');
   return graphemes ? [...graphemes.segment(str)].length : [...str].length;
+}
+// 프롬프트에 찍는 출처 주소: 바깥 자료 항목만(에이전트 항목은 주소를 찍지 않는다), 한 줄로, PROMPT_REF_MAX 자까지. 화면(views/rolenotes.js)도 같은 방법으로 센다
+export function promptRef(x) {
+  if (x?.source?.type !== 'web') return '';
+  const str = String(x.source.ref ?? '').replace(/\s+/g, ' ').trim();
+  const p = graphemes ? [...graphemes.segment(str)].map((g) => g.segment) : [...str];
+  return p.length > PROMPT_REF_MAX ? `${p.slice(0, PROMPT_REF_MAX).join('')}…` : str;
 }
 // 아주 긴 글은 글자를 세기 전에 거른다(글자 하나가 UTF-16 으로 16칸을 넘는 일은 없다고 본다)
 const over = (s, max) => s.length > max * 16 || chars(s) > max;
@@ -56,6 +64,7 @@ const INJECTION = [
   ['system', [
     /\b(?:system|developer)\s*(?:prompt|message|instructions?)\b/i,
     /<\/?\s*(?:system|instructions?|im_start|im_end)\b[^>]*>/i,
+    /<\|\s*im_(?:start|end)\s*\|>/i,
     /\[\/?(?:system|INST)\]/i,
     /시스템\s*(?:지시|지침|프롬프트|메시지|명령)/,
     /(?:系统|系統)\s*(?:提示|指令|消息|訊息)/,
@@ -299,12 +308,13 @@ export class NoteStore {
 }
 
 // 이번 실행의 시스템 지시에 넣을 항목 고르기(AI 호출 없음). 확정 항목만, 내 PC 모델 전용 항목은 받는 쪽이 내 PC 모델일 때만.
+// 크기는 항목 글 + 프롬프트에 찍는 출처 주소(promptRef)의 글자 수로 센다.
 // 글자 합이 limit 안이면 전부(최근에 고친 것 먼저). 넘으면 요청 글과 낱말이 겹치는 순 → helped − harmed 가 큰 순 → 최근 순으로 채운다.
 // rules: 사용자 항목, refs: 에이전트·바깥 자료 항목(출처를 모르는 것도 여기), more: 넣지 못한 확정 항목 수(받을 수 없는 내 PC 전용 항목은 세지 않는다)
 export function pickForPrompt(notes, requestText, { limit = PROMPT_LIMIT, receiverLocal = false } = {}) {
   const pool = (notes?.items || []).filter((x) => x && x.status === 'confirmed' && typeof x.text === 'string' && x.text && (!x.localOnly || receiverLocal));
   const recent = (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0);
-  const sized = pool.map((x) => ({ x, n: chars(x.text) }));
+  const sized = pool.map((x) => ({ x, n: chars(x.text) + chars(promptRef(x)) }));
   let picked;
   if (sized.reduce((s, r) => s + r.n, 0) <= limit) picked = pool.slice().sort(recent);
   else {

@@ -300,7 +300,7 @@ test('7. 실행 통합(가짜 CLI): 확정 항목이 시스템 지시에 들어�
   // 상한(2,000자)을 넘으면 못 넣은 수를 한 줄로 알린다
   for (let i = 0; i < 6; i++) notes.addItem(ag.id, { text: `채움 ${i} ${'-'.repeat(380)}` });
   const [more] = await systems(s.id, '보고서 정리해 줘', ag.name);
-  assert.match(more, /\n역할 노트에 지금 일과 덜 관련된 항목이 [1-9]\d*개 더 있어\.$/);
+  assert.match(more, /\n역할 노트에 지금 일과 덜 관련된 항목이 [1-9]\d*개 더 있어\. 일부러 뺀 거니 찾아 읽지 마\.$/);
   // 회의 차례(의견·결론)에도 같은 노트가 들어가고, 다른 참석자에게는 들어가지 않는다
   const b = await mk('회의상대');
   const tm = (await t.api('POST', '/api/teams', { name: '노트 회의', stages: [{ label: '회의', agentIds: [ag.id, b.id], meeting: { rounds: 1, chairId: ag.id } }] })).json;
@@ -313,7 +313,7 @@ test('7. 실행 통합(가짜 CLI): 확정 항목이 시스템 지시에 들어�
   const other = logs.filter((l) => l.system.includes(`"${b.name}"`));
   assert.equal(mine.length, 2, '의견 + 결론');
   // (이때는 항목이 2,000자를 넘어서 고른 항목만 들어간다. 하는 일과 "더 있어" 줄은 늘 들어간다)
-  assert.ok(mine.every((l) => l.system.includes('- 코드 리뷰 — 끝: 지적 0개 / 확인: npm test') && /항목이 [1-9]\d*개 더 있어\.$/.test(l.system)));
+  assert.ok(mine.every((l) => l.system.includes('- 코드 리뷰 — 끝: 지적 0개 / 확인: npm test') && /항목이 [1-9]\d*개 더 있어\. 일부러 뺀 거니 찾아 읽지 마\.$/.test(l.system)));
   assert.ok(other.length >= 1 && other.every((l) => !l.system.includes('코드 리뷰') && !l.system.includes('역할 노트')));
   assert.deepEqual(t.app.store.getSession(ms.id).messages.filter((x) => x.meeting).map((x) => x.meeting.phase).sort(), ['conclude', 'opinion', 'opinion']);
 });

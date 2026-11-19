@@ -18,6 +18,9 @@ const pieces = (s) => (seg ? [...seg.segment(String(s ?? ''))].map((x) => x.segm
 export const chars = (s) => pieces(s).length;
 export const cutChars = (s, max) => pieces(s).slice(0, max).join('');
 const short = (s, n = 50) => { const p = pieces(String(s ?? '').replace(/\s+/g, ' ').trim()); return p.length > n ? `${p.slice(0, n).join('')}…` : p.join(''); };
+// 프롬프트에 넣는 크기: 서버(notes.js pickForPrompt·promptRef)와 같게 항목 글 + 프롬프트에 찍는 출처 주소(바깥 자료만, 120자까지)
+const PROMPT_REF_MAX = 120;
+const promptSize = (x) => chars(x.text) + (x.source?.type === 'web' ? chars(short(x.source.ref, PROMPT_REF_MAX)) : 0);
 
 // 한 기록이 건드린 것(서버 notes.js 와 같은 규칙): 그 뒤에 같은 것이 또 바뀌었으면 되돌릴 수 없다
 const touched = (e) => (e.after && typeof e.after === 'object' && 'tasks' in e.after ? ['#role'] : Array.isArray(e.after?.ids) ? e.after.ids : [e.itemId]);
@@ -72,7 +75,7 @@ export function RoleNotes({ agentId, focus = false }) {
   const items = notes?.items || [];
   const by = (st) => items.filter((x) => x.status === st);
   const counts = { confirmed: by('confirmed').length, draft: by('draft').length, archived: by('archived').length };
-  const used = by('confirmed').reduce((s, x) => s + chars(x.text), 0);
+  const used = by('confirmed').reduce((s, x) => s + promptSize(x), 0);
 
   // ── 이 역할이 하는 일 ──
   const rows = tasks ?? notes?.role?.tasks ?? [];

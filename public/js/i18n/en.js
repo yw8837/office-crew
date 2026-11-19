@@ -1422,7 +1422,7 @@ export default {
   "바깥 자료: {ref}": "outside source: {ref}",
   "바깥 자료": "Outside source",
   "에이전트 경험": "Agent's experience",
-  "역할 노트에 지금 일과 덜 관련된 항목이 {n}개 더 있어.": "The role notes have {n} more items that are less related to this task.",
+  "역할 노트에 지금 일과 덜 관련된 항목이 {n}개 더 있어. 일부러 뺀 거니 찾아 읽지 마.": "The role notes have {n} more items that are less related to this task. They were left out on purpose, so don't go looking for them.",
   // ── 역할 노트: 화면 (rolenotes.js·manage.js) ──
   "역할 노트": "Role notes",
   "저장한 뒤에 쓸 수 있어.": "You can use this after saving.",

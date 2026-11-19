@@ -188,7 +188,7 @@ export function RoleNotes({ agentId, focus = false, onUnsaved }) {
   // ── 항목 더하기 ──
   const addN = chars(add.text.trim());
   const addOk = addN > 0 && addN <= TEXT_MAX;
-  const addItem = () => act('add', () => post(`${base}/items`, { kind: add.kind, text: add.text, source: { type: 'user' }, localOnly: add.localOnly }), () => { setAdd((x) => ({ ...x, text: '' })); setTab('confirmed'); });
+  const addItem = () => act('add', () => post(`${base}/items`, { kind: add.kind, text: add.text, source: { type: 'user' }, localOnly: add.localOnly }), () => { setAdd((x) => ({ ...x, text: '', localOnly: false })); setTab('confirmed'); }); // 내 PC 전용 표시는 항목마다 다시 고른다(켜진 채 남으면 다음 항목이 모르는 사이 내 PC 전용이 된다)
   const addView = html`<div class="field"><label for=${`rn-new-${agentId}`}>${t('항목 더하기')}</label>
     <div class="row" style="gap:6px;align-items:flex-start">
       <select class="select" style="width:auto" aria-label=${t('종류')} value=${add.kind} onChange=${(e) => { const kind = e.target.value; setAdd((cur) => ({ ...cur, kind })); }}>${KINDS.map((k) => html`<option value=${k}>${KIND_LABEL()[k]}</option>`)}</select>

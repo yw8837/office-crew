@@ -167,12 +167,15 @@ export class Store {
   hasSession(id) { return this.meta.has(id); }
 
   #metaOf(s) {
-    const last = s.messages.findLast((m) => m.text); // 글이 없는 것(영입 제안 카드)은 건너뛴다
+    const last = s.messages.findLast((m) => m.text); // 글이 없는 것(영입 제안·목표 카드)은 건너뛴다
+    // 진행자 답 끝의 목표 카드 블록(```oc-goal 부터)은 미리보기에 넣지 않는다(화면에서는 카드로 보인다. 결정 0014)
+    const text = String(last?.text || '');
+    const cut = text.indexOf('```oc-goal');
     return {
       id: s.id, title: s.title, teamId: s.teamId, agentId: s.agentId, cwd: s.cwd,
       pinned: !!s.pinned, createdAt: s.createdAt, updatedAt: s.updatedAt,
       messageCount: s.messages.length,
-      preview: last ? String(last.text || '').slice(0, 80) : '',
+      preview: (cut >= 0 ? text.slice(0, cut).trimEnd() : text).slice(0, 80),
       running: s.runs.some((r) => ['running', 'paused', 'waiting'].includes(r.status)),
       attention: attentionOf(s.runs[s.runs.length - 1]),
     };

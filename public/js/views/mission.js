@@ -79,8 +79,8 @@ export function GoalCard({ m }) {
     if (busy) return false;
     setBusy(true);
     try { await post(`/api/sessions/${sid}/mission/${path}`, body); setBusy(false); return true; } catch (e) {
-      // 본 것과 저장된 초안이 달랐으면 서버가 준 지금 초안으로 다시 그린다
-      if (e.data?.draft) { setShown(viewOf(e.data.draft)); setEdit(null); }
+      // 본 것과 저장된 초안이 달랐으면 서버가 준 지금 초안으로 다시 그린다. 고치는 중이면 고치던 글은 그대로 두고, 지금 초안을 고치는 칸 위에 보여 준다
+      if (e.data?.draft) setShown(viewOf(e.data.draft));
       toast(e.message, 'error');
       setBusy(false);
       return false;
@@ -93,11 +93,11 @@ export function GoalCard({ m }) {
   const openEdit = () => setEdit({ goal: v.goal, criteria: v.criteria.join('\n'), outOfScope: v.outOfScope.join('\n'), userDecides: v.userDecides.join('\n') });
   const closeEdit = () => { setEdit(null); setTimeout(() => editBtn.current?.focus(), 0); };
   const cancel = () => send('cancel', { missionId: m.missionId });
-  // 고치는 칸: Esc 는 고치기 취소, Ctrl+Enter 는 이 내용으로 시작. 목표 칸은 한 줄이라 Enter 로도 시작
-  const onKey = (e, single = false) => {
+  // 고치는 칸: Esc 는 고치기 취소, Ctrl+Enter 만 이 내용으로 시작(목표 한 줄 칸도 Enter 만으로는 시작하지 않는다)
+  const onKey = (e) => {
     if (e.isComposing) return;
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeEdit(); return; }
-    if (e.key === 'Enter' && (single || e.ctrlKey || e.metaKey)) { e.preventDefault(); startEdited(); }
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); startEdited(); }
   };
   const field = (key, label, rows) => html`<label>${label}<textarea class="textarea" rows=${rows} value=${edit[key]} disabled=${busy}
     onInput=${(e) => setEdit({ ...edit, [key]: e.target.value })} onKeyDown=${(e) => onKey(e)}></textarea></label>`;
@@ -106,11 +106,12 @@ export function GoalCard({ m }) {
       <span class="small muted">${t('{name}이(가) 쓴 초안이야. 확인해야 팀이 일을 시작해. 아직 아무것도 시작하지 않았어.', { name: lead?.name || t('진행자') })}</span></div>
     ${m.fallback && html`<div class="warnbox" role="note">${t('진행자 답에서 목표 카드를 읽지 못해서 요청 글로 만들었어. 기준을 직접 적어 줘.')}</div>`}
     ${m.warn && html`<div class="warnbox" role="note">⚠ ${t('진행자가 쓴 초안에 걱정되는 부분이 있어. 확인하기 전에 잘 읽어 봐.')} ${m.warn}</div>`}
-    ${shown && html`<div class="notice" role="status">${t('저장된 초안으로 다시 그렸어. 다시 확인해 줘.')}</div>`}
+    ${shown && !editing && html`<div class="notice" role="status">${t('저장된 초안으로 다시 그렸어. 다시 확인해 줘.')}</div>`}
     ${stale && html`<div class="warnbox" role="note">${t('카드 뒤에 새 말이 있어서 이 카드로는 시작할 수 없어. 요청을 다시 보내 줘.')}</div>`}
     ${editing ? html`<div class="goal-edit">
+        ${shown && html`<div class="notice" role="status">${t('초안이 바뀌었어. 아래 내용을 확인해 줘. 고치던 글은 그대로 뒀어.')}</div><${CardBody} v=${shown} />`}
         <label>${t('목표 (한 줄)')}<input class="input" ref=${goalIn} value=${edit.goal} maxlength="200" disabled=${busy}
-          onInput=${(e) => setEdit({ ...edit, goal: e.target.value })} onKeyDown=${(e) => onKey(e, true)} /></label>
+          onInput=${(e) => setEdit({ ...edit, goal: e.target.value })} onKeyDown=${onKey} /></label>
         ${field('criteria', t('합격 기준 (한 줄에 하나, {n}개까지)', { n: CRIT_COUNT }), 4)}
         ${field('outOfScope', t('범위 밖 (한 줄에 하나)'), 2)}
         ${field('userDecides', t('사용자가 정할 것 (한 줄에 하나)'), 2)}
@@ -122,7 +123,7 @@ export function GoalCard({ m }) {
       </div>` : html`<${CardBody} v=${v} />`}
     ${!editing && html`<div class="hire-acts">
       <button class="btn primary sm" disabled=${busy || stale || !v.goal || !v.criteria.length} onClick=${start}>${t('이대로 시작')}</button>
-      <button class="btn sm" ref=${editBtn} disabled=${busy || stale} aria-expanded="false" onClick=${openEdit}>${t('고쳐서 시작')}</button>
+      <button class="btn sm" ref=${editBtn} disabled=${busy || stale} aria-expanded=${editing ? 'true' : 'false'} onClick=${openEdit}>${t('고쳐서 시작')}</button>
       <span class="grow"></span>
       <button class="btn sm" disabled=${busy} onClick=${cancel}>${t('그만')}</button>
     </div>`}

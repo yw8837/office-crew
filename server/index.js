@@ -541,12 +541,13 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     const wasGoal = !!s.goalMode;
     for (const k of ['title', 'teamId', 'agentId', 'cwd', 'pinned']) if (k in b) s[k] = b[k];
     if ('goalMode' in b) s.goalMode = b.goalMode;
-    // 목표 모드를 켠 채 쓸 수 없는 팀(팀 없음·섞인 팀)으로 바꾸면 목표 모드를 끈다
-    if (teamChanged && s.goalMode && !('goalMode' in b) && orch.missionProblem(s)) s.goalMode = false;
+    // 목표 모드를 켠 채 쓸 수 없는 팀(팀 없음·섞인 팀)으로 바꾸면 목표 모드를 끈다. 화면이 알릴 수 있게 그 이유를 응답에 싣는다(goalModeOff)
+    const offWhy = teamChanged && s.goalMode && !('goalMode' in b) ? orch.missionProblem(s) : '';
+    if (offWhy) s.goalMode = false;
     store.saveSessionNow(s);
     bus.emit('session', store.sessionMeta(s));
     if (wasGoal !== !!s.goalMode) orch.emitMission(s, true);
-    return { ...store.sessionMeta(s), goalMode: !!s.goalMode };
+    return { ...store.sessionMeta(s), goalMode: !!s.goalMode, ...(offWhy ? { goalModeOff: offWhy } : {}) };
   });
   route('DELETE', '/api/sessions/([\\w-]+)', async (req, url, [id]) => {
     if (orch.ctx.has(id)) {
@@ -954,7 +955,8 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     } catch (e) {
       const status = e.status || 500;
       if (status === 500) console.error('[오류]', e);
-      if (!res.headersSent) send(res, status, { error: e.message || String(e), ...(e.extra && typeof e.extra === 'object' ? e.extra : {}) }); // extra: 오류와 같이 돌려줄 값(목표 카드 대조가 어긋났을 때의 지금 초안)
+      // extra 에서는 정해 둔 값만 싣는다(목표 카드 대조가 어긋났을 때의 지금 초안 draft). error 는 덮이지 않게 맨 뒤에
+      if (!res.headersSent) send(res, status, { ...(e.extra?.draft && typeof e.extra.draft === 'object' ? { draft: e.extra.draft } : {}), error: e.message || String(e) });
       else try { res.end(); } catch { /* 이미 닫힘 */ }
     }
   });

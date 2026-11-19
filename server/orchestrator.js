@@ -16,7 +16,7 @@ import { pickOpposer, turnOrder, parseVerdict, verdictBlock, CHECK_MAX, parseChe
 import { writeConversation, readImported, saveImported, pickEarlier, toolNames, handoffRequest, NOTE_MAX } from './handoff.js';
 import { readTranscript } from './importer.js';
 import { pickForPrompt, promptRef } from './notes.js';
-import { parseGoal, goalBlock, goalWarn, newMission, toCriteria, cardOf, sameCard, cleanGoal, pickLead, mixedLocal, logLine, NOTE_COUNT } from './mission.js';
+import { parseGoal, goalBlock, goalWarn, newMission, toCriteria, cardOf, sameCard, cleanGoal, pickLead, mixedLocal, logLine, alive, NOTE_COUNT } from './mission.js';
 
 const ACTIVE = new Set(['running', 'paused', 'waiting']);
 const FORCE_END_MS = 5000; // 멈춘 CLI를 끄라고 한 뒤 이만큼 기다려도 안 끝나면 강제로 끝낸다
@@ -292,6 +292,7 @@ export class Orchestrator {
       if (ctx.stopped || !last || last.error || last.stopped) {
         st.status = ctx.stopped || last?.stopped ? 'stopped' : 'error';
         run.status = st.status;
+        ctx.goalSkipped = !ctx.stopped && !!last?.skipped; // 진행자를 건너뛰었다(중지와 달리 대화에 알림을 남긴다)
         return;
       }
       const draft = got ? got.p.card : { ...cleanGoal({ goal: m.request }), criteria: [] };
@@ -354,10 +355,11 @@ export class Orchestrator {
     });
     Object.assign(card, { status: 'confirmed', confirmed: { ...final }, edited, resolvedAt: Date.now() });
     logLine(m, 'confirm', edited ? tr('사용자가 고쳐서 확인했어(기준 {n}개).', { n: final.criteria.length }) : tr('사용자가 목표를 확인했어(기준 {n}개).', { n: final.criteria.length }), card.id);
-    this.bus.emit('message', { sessionId: s.id, message: card });
-    this.emitMission(s, true);
+    // 실행을 먼저 넣고 저장한다: 도는 목표(active)와 도는 실행이 같이 저장돼야, 그 틈에 앱이 꺼져도 다시 켤 때 끊김으로 보고 대화에 알림을 남긴다.
     // 확정된 값은 이 실행이 끝날 때까지 메모리에 든 값을 쓴다(실행 중에 세션 파일을 다시 읽지 않는다)
     this.#start(s, userMsg, { plan, card: { goal: final.goal, criteria: [...final.criteria], outOfScope: [...final.outOfScope] } });
+    this.bus.emit('message', { sessionId: s.id, message: card });
+    this.emitMission(s, true);
     return { ok: true, missionId: m.id };
   }
 
@@ -379,6 +381,7 @@ export class Orchestrator {
     const m = s.mission;
     if (!m || m.id !== String(body.missionId || '') || m.status !== 'cut') throw Object.assign(new Error(tr('버릴 끊긴 목표가 없어.')), { status: 409 });
     m.status = 'cancelled';
+    delete m.cutNotice; // 다시 켤 때 남길 끊김 알림이 아직 남아 있었으면 지운다(버린 목표라 알릴 필요가 없다)
     logLine(m, 'cancel', tr('끊긴 목표를 버렸어.'), m.cardMsgId);
     this.emitMission(s, true);
     return { ok: true };
@@ -411,9 +414,11 @@ export class Orchestrator {
     if (ctx.missionTurn === 'goal') {
       if (m.status !== 'drafting') return;
       m.status = 'cancelled';
-      const stopped = ctx.stopped || run.status === 'stopped';
-      logLine(m, 'cancel', stopped ? tr('목표 초안을 쓰다가 멈춰서 이 목표는 닫았어.') : tr('목표 초안을 받지 못해서 이 목표는 닫았어. 요청을 다시 보내 줘.'));
-      if (!stopped) this.#systemNote(s, tr('목표 초안을 받지 못해서 이 목표는 닫았어. 요청을 다시 보내 줘.'));
+      // 중지는 사용자가 누른 것이라 진행 기록에만 남긴다. 진행자를 건너뛰었거나 오류로 끝났으면 대화에도 한 줄
+      const stopped = !ctx.goalSkipped && (ctx.stopped || run.status === 'stopped');
+      const why = ctx.goalSkipped ? tr('진행자를 건너뛰어서 목표 초안 없이 이 목표는 닫았어. 요청을 다시 보내 줘.') : tr('목표 초안을 받지 못해서 이 목표는 닫았어. 요청을 다시 보내 줘.');
+      logLine(m, 'cancel', stopped ? tr('목표 초안을 쓰다가 멈춰서 이 목표는 닫았어.') : why);
+      if (!stopped) this.#systemNote(s, why);
     } else {
       if (m.status !== 'active' && m.status !== 'waiting') return;
       if (run.status === 'done') {
@@ -449,16 +454,24 @@ export class Orchestrator {
     if (!s) throw Object.assign(new Error(tr('세션을 찾을 수 없어.')), { status: 404 });
     const userMsg = s.messages.find((m) => m.id === userMessageId && m.role === 'user');
     if (!userMsg) throw Object.assign(new Error(tr('보낼 내용이 없어.')), { status: 400 });
+    // 목표 모드(결정 0014): send 와 같이 목표 차례로 보낸다(보통 팀 실행으로 우회하지 않게). 살아 있는 목표가 있으면 409(카드는 열린 채)
+    const goal = !!s.goalMode && !userMsg.mention && !s.scheduleId && !s.taskId;
+    if (goal) {
+      if (alive(s.mission)) throw Object.assign(new Error(tr('살아 있는 목표가 있어서 지금은 보낼 수 없어. 목표 카드를 닫거나 끊긴 목표를 버린 뒤에 다시 해 줘.')), { status: 409 });
+      const why = this.missionProblem(s);
+      if (why) throw Object.assign(new Error(why), { status: 400 });
+    }
     delete userMsg.hire;
-    this.#autoNote(s, userMsg.mention);
+    if (goal) userMsg.mission = true; // 목표 차례로 돌 요청(#start 가 본다)
+    else this.#autoNote(s, userMsg.mention);
     const ctx = this.ctx.get(sessionId);
     userMsg.status = ctx ? 'queued' : 'done';
     this.#premark(s, userMsg);
     this.store.saveSession(s, 50);
     this.bus.emit('message', { sessionId, message: userMsg });
-    if (ctx) { ctx.queue.push(userMsg); return { queued: true, messageId: userMsg.id }; }
+    if (ctx) { ctx.queue.push(userMsg); return { queued: true, messageId: userMsg.id, ...(goal ? { mission: true } : {}) }; }
     this.#start(s, userMsg);
-    return { started: true, messageId: userMsg.id };
+    return { started: true, messageId: userMsg.id, ...(goal ? { mission: true } : {}) };
   }
 
   #plan(s, mention) {

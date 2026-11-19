@@ -560,7 +560,7 @@ function Chat({ s, run }) {
     || (lastRun && m.runId === lastRun.id && (m.meeting ? m.meeting.phase === 'conclude' : m.stageIndex === lastRun.stages.length - 1));
   const unstick = () => { stick.current = false; };
   // 내 요청 띠: 가장 최근에 보낸 내 말(답이 길어지면 금방 위로 밀려 안 보이니 대화 위에 붙여 둔다)
-  const mine = s.messages.findLast((m) => m.role === 'user' && m.text && !m.handoffAsk && !m.hire);
+  const mine = s.messages.findLast((m) => m.role === 'user' && m.text && !m.handoffAsk && !m.hire && !m.missionNote); // 목표가 도는 동안 보낸 추가 지시는 원래 요청이 아니다
   const after = mine ? s.messages.length - 1 - s.messages.indexOf(mine) : 0;
   const step = (d) => {
     if (!hits.length) return;
@@ -696,10 +696,13 @@ function Composer({ s, run }) {
   // 목표 모드(결정 0014): 세션마다 켜고 끈다. 켤 수 없으면 서버가 준 이유를 토글 옆에 보여 준다
   const [goalWhy, setGoalWhy] = useState('');
   const [goalKey, setGoalKey] = useState(0); // 바꾸지 못했을 때 스위치를 서버 값으로 다시 그린다
+  const [goalBusy, setGoalBusy] = useState(false); // 켜기·끄기 요청 중에는 스위치를 잠근다
   const goalOn = !!s.goalMode;
   const working = s.mission && ['active', 'waiting'].includes(s.mission.status); // 이때 보낸 말(@이름 없이)은 그 뒤에 시작하는 단계들의 추가 지시가 된다
   const drafting = s.mission?.status === 'drafting' && active; // 이때 보낸 말(@이름 없이)은 모드와 상관없이 진행자에게 바로 들어간다
   const setGoal = async (on) => {
+    if (goalBusy) return;
+    setGoalBusy(true);
     try {
       await patch(`/api/sessions/${s.id}`, { goalMode: on });
       if (state.sessionData[s.id]) state.sessionData[s.id].goalMode = on;
@@ -709,6 +712,7 @@ function Composer({ s, run }) {
       setGoalWhy(e.message);
       setGoalKey((k) => k + 1);
     }
+    setGoalBusy(false);
   };
 
   useEffect(() => { if (state.ui.draft) { setText(state.ui.draft); state.ui.draft = null; setTimeout(() => ta.current?.focus(), 0); } });
@@ -850,7 +854,7 @@ function Composer({ s, run }) {
         <button class="icon-btn" title=${t('에이전트 지정(@)')} aria-label=${t('에이전트 지정')} onClick=${() => { setText((x) => `${x}${x && !x.endsWith(' ') ? ' ' : ''}@`); setPop({ kind: '@', q: '', idx: 0 }); ta.current.focus(); }}><${Icon} name="at" /></button>
         <button class="icon-btn" title=${t('스킬(/)')} aria-label=${t('스킬')} onClick=${() => { setText((x) => (x.startsWith('/') ? x : `/${x}`)); setPop({ kind: '/', q: '', idx: 0 }); ta.current.focus(); }}><${Icon} name="spark" /></button>
         <div class="row goal-toggle" title=${t('켜면 보낸 요청을 진행자가 먼저 목표 카드(목표·합격 기준)로 만들고, 네가 확인한 뒤에 팀이 그 목표를 들고 일해. @이름으로 보낸 말은 지금처럼 실행돼.')}>
-          <${Toggle} key=${goalKey} checked=${goalOn} title=${t('목표까지')} onChange=${setGoal} /><span class="small">${t('목표까지')}</span>
+          <${Toggle} key=${goalKey} checked=${goalOn} disabled=${goalBusy} title=${t('목표까지')} onChange=${setGoal} /><span class="small">${t('목표까지')}</span>
         </div>
         ${goalWhy && html`<span class="small muted goal-why" role="status">${goalWhy}</span>`}
         ${mAgent && html`<span class="chip accent">@${mAgent.name}<span class="x" onClick=${() => setMention(null)}>✕</span></span>`}
@@ -1019,7 +1023,12 @@ function TopBar({ s }) {
   const save = () => { if (title.trim() && title !== s.title) patch(`/api/sessions/${s.id}`, { title: title.trim() }).catch((e) => toast(e.message, 'error')); };
   const setTarget = async (x) => {
     setPick(false);
-    try { await patch(`/api/sessions/${s.id}`, x.team ? { teamId: x.id, agentId: null } : { teamId: null, agentId: x.id }); await loadSession(s.id, true); } catch (e) { toast(e.message, 'error'); }
+    try {
+      const r = await patch(`/api/sessions/${s.id}`, x.team ? { teamId: x.id, agentId: null } : { teamId: null, agentId: x.id });
+      // 쓸 수 없는 팀으로 바꿔서 목표 모드가 저절로 꺼졌으면 이유를 알려 준다(결정 0014)
+      if (r?.goalModeOff) toast(t('목표 모드를 껐어: {why}', { why: r.goalModeOff }), 'warn', 5000);
+      await loadSession(s.id, true);
+    } catch (e) { toast(e.message, 'error'); }
   };
   return html`<div class="top">
     <button class="icon-btn" title=${t('사이드바')} aria-label=${t('사이드바')} onClick=${() => { state.ui.side = !state.ui.side; changed(); }}><${Icon} name="sidebar" /></button>

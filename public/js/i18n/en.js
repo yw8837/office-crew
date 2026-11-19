@@ -1647,6 +1647,10 @@ export default {
   "반영하지 못한 추가 지시가 {n}개 있어.": "{n} extra instructions weren't used.",
   "추가 지시는 목표 하나에 {n}개까지야. 더 보내려면 목표를 멈추고 새 요청으로 보내 줘.": "A goal takes up to {n} extra instructions. To send more, stop the goal and send a new request.",
   "\"{label}\" 단계 다시 · 추가 지시 {n}개 넣음": "Stage \"{label}\" again · {n} extra instructions added",
+  "진행자를 건너뛰어서 목표 초안 없이 이 목표는 닫았어. 요청을 다시 보내 줘.": "The lead was skipped, so this goal was closed without a draft. Send the request again.",
+  "살아 있는 목표가 있어서 지금은 보낼 수 없어. 목표 카드를 닫거나 끊긴 목표를 버린 뒤에 다시 해 줘.": "A goal is still open, so this can't be sent now. Close the goal card or discard the cut-off goal, then try again.",
+  "초안이 바뀌었어. 아래 내용을 확인해 줘. 고치던 글은 그대로 뒀어.": "The draft changed. Check what is below. Your edits were kept.",
   "추가 지시로 받았어. 다만 뒤에 시작할 단계가 없어서 이번 목표에는 반영되지 않을 수 있어": "Taken as an extra instruction, but no stage is left to start, so it may not be used for this goal",
   "목표 카드를 쓰는 진행자에게 바로 지시하기… (Enter)": "Instruct the lead drafting the goal card… (Enter)",
+  "목표 모드를 껐어: {why}": "Goal mode was turned off: {why}",
 };

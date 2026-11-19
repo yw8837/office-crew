@@ -80,8 +80,8 @@ export function Modal({ title, onClose, children, foot, size = '' }) {
   </div>`;
 }
 
-export function Toggle({ checked, onChange, title }) {
-  return html`<label class="switch" title=${title}><input type="checkbox" aria-label=${title} checked=${!!checked} onChange=${(e) => onChange(e.target.checked)} /><span></span></label>`;
+export function Toggle({ checked, onChange, title, disabled = false }) {
+  return html`<label class="switch" title=${title}><input type="checkbox" aria-label=${title} checked=${!!checked} disabled=${disabled} onChange=${(e) => onChange(e.target.checked)} /><span></span></label>`;
 }
 
 // 그림 아바타는 data URL 을 한 번만 blob URL 로 바꿔 둔다 → 메시지마다 큰 문자열을 다시 만들거나 DOM 에 복사하지 않음

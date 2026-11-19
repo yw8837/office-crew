@@ -5,6 +5,7 @@ import { makeHandle } from './util.js';
 import { tr } from '../i18n.js';
 import { roleKind } from '../routing.js';
 import { checkBlock } from '../meeting.js';
+import { goalBlock } from '../mission.js';
 
 // 역할 키(조사·정리·분석·빌드)는 그대로, 보이는 문구만 설정 언어로.
 // 에이전트의 역할 이름은 첫 실행 때 OS 언어로 저장되므로(Research, 調査 …) 역할 종류로 바꿔서 키를 찾는다
@@ -92,8 +93,9 @@ function meetingAnswer(phase, role, opposer, ask) {
 }
 
 // ── 목표 잡기 차례(결정 0014) ──
-// 목표 모드의 진행자 프롬프트에는 정해진 머리 문구가 들어 있다. 그 문구로 알아보고 그럴듯한 목표 카드 블록을 낸다(데모 팀으로 사용량 0으로 눌러 볼 수 있게)
-const isGoalTurn = (prompt) => prompt.includes(tr('[목표 잡기]'));
+// 목표 차례 프롬프트는 코드가 만든 끝 모양(블록 예시 goalBlock())으로 끝난다. 그 끝 모양일 때만 목표 차례로 보고 그럴듯한 목표 카드 블록을 낸다
+// (요청 글에 "[목표 잡기]"가 들어 있다고 착각하지 않게. 데모 팀으로 사용량 0으로 눌러 볼 수 있게)
+const isGoalTurn = (prompt) => String(prompt).trimEnd().endsWith(goalBlock());
 function goalAnswer(prompt) {
   const t = topic(prompt);
   const card = {

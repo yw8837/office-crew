@@ -28,6 +28,7 @@ import { MemoryStore, projectKey } from './memory.js';
 import { NoteStore } from './notes.js';
 import { tr, bindLang, serverLang } from './i18n.js';
 import { Scheduler, cleanSchedule } from './scheduler.js';
+import { alive } from './mission.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -528,10 +529,24 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     if ('agentId' in b && b.agentId && !store.get('agents', b.agentId)) throw new HttpError(400, tr('없는 에이전트야.'));
     if ('title' in b) b.title = String(b.title || '').slice(0, 120) || s.title;
     if ('title' in b && b.title !== s.title) { delete s.titleFrom; delete s.titleLocal; } // 직접 지은 제목은 사용자 말에서 온 게 아니다
+    // 목표 모드(결정 0014): 켤 때는 쓸 수 있는 세션인지 보고(400 과 이유), 살아 있는 목표가 있으면 끄거나 팀을 바꾸지 못한다(409)
+    const nextTeam = 'teamId' in b ? (b.teamId || null) : s.teamId;
+    const teamChanged = 'teamId' in b && nextTeam !== (s.teamId || null);
+    if (teamChanged && alive(s.mission)) throw new HttpError(409, tr('목표가 살아 있는 동안에는 팀을 바꿀 수 없어. 목표 카드를 닫거나 끊긴 목표를 버린 뒤에 바꿔 줘.'));
+    if ('goalMode' in b) {
+      if (typeof b.goalMode !== 'boolean') throw new HttpError(400, tr('goalMode 는 true 나 false 여야 해.'));
+      if (b.goalMode) { const why = orch.missionProblem(s, nextTeam); if (why) throw new HttpError(400, why); }
+      else if (alive(s.mission)) throw new HttpError(409, tr('목표가 살아 있는 동안에는 목표 모드를 끌 수 없어. 목표 카드를 닫거나 끊긴 목표를 버린 뒤에 꺼 줘.'));
+    }
+    const wasGoal = !!s.goalMode;
     for (const k of ['title', 'teamId', 'agentId', 'cwd', 'pinned']) if (k in b) s[k] = b[k];
+    if ('goalMode' in b) s.goalMode = b.goalMode;
+    // 목표 모드를 켠 채 쓸 수 없는 팀(팀 없음·섞인 팀)으로 바꾸면 목표 모드를 끈다
+    if (teamChanged && s.goalMode && !('goalMode' in b) && orch.missionProblem(s)) s.goalMode = false;
     store.saveSessionNow(s);
     bus.emit('session', store.sessionMeta(s));
-    return store.sessionMeta(s);
+    if (wasGoal !== !!s.goalMode) orch.emitMission(s, true);
+    return { ...store.sessionMeta(s), goalMode: !!s.goalMode };
   });
   route('DELETE', '/api/sessions/([\\w-]+)', async (req, url, [id]) => {
     if (orch.ctx.has(id)) {
@@ -559,6 +574,8 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     if (!s) throw new HttpError(404, tr('세션 없음'));
     const p = s.messages.find((m) => m.id === mid && m.role === 'proposal');
     if (!p) throw new HttpError(404, tr('그 제안이 없어.'));
+    // 목표 카드는 이 길로 처리하지 않는다(확인은 mission/confirm 에서 본 것과 저장된 것을 대조한 뒤에만)
+    if ((p.kind || 'hire') !== 'hire') throw new HttpError(409, tr('이 카드는 영입 제안이 아니야.'));
     if (p.status !== 'open') throw new HttpError(409, tr('이미 처리한 제안이야.'));
     const done = (status, extra = {}) => {
       Object.assign(p, { status, ...extra, resolvedAt: Date.now() });
@@ -599,6 +616,11 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     return { ok: true, agent, placed, notPlaced };
   });
   route('POST', '/api/sessions/([\\w-]+)/control', async (req, url, [id]) => orch.control(id, await readJson(req)));
+  // 목표 카드(결정 0014): 확인(본 것과 저장된 초안이 같을 때만. 다르면 409 와 지금 초안) · 그만(카드 대기만) · 끊긴 목표 버리기.
+  // 본문을 먼저 다 읽은 뒤에는 기다리는 곳이 없어서, 같은 카드를 두 번 눌러도 한 번만 처리된다
+  route('POST', '/api/sessions/([\\w-]+)/mission/confirm', async (req, url, [id]) => { const b = await readJson(req); return orch.confirmMission(id, b); });
+  route('POST', '/api/sessions/([\\w-]+)/mission/cancel', async (req, url, [id]) => { const b = await readJson(req); return orch.cancelMission(id, b); });
+  route('POST', '/api/sessions/([\\w-]+)/mission/discard', async (req, url, [id]) => { const b = await readJson(req); return orch.discardMission(id, b); });
   route('POST', '/api/sessions/([\\w-]+)/open-folder', async (req, url, [id]) => {
     const s = store.getSession(id);
     if (!s) throw new HttpError(404, tr('세션 없음'));
@@ -613,8 +635,12 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     // 비운 대화는 다른 AI에게 건네지도 않는다: 불러온 대화 원문과 만들어 둔 대화 파일을 지우고 표시해 둔다(이미 프로젝트 기억에 들어간 것은 기억 화면의 설명대로 남는다)
     if (s.importedFrom) s.importedFrom.cleared = true;
     removeHandoff(dirs.handoff, id);
+    // 목표 카드와 요청도 같이 지워졌으니 목표도 버린다(카드 없이 남은 목표가 새 요청을 막지 않게)
+    const hadMission = !!s.mission;
+    delete s.mission;
     store.saveSessionNow(s);
     bus.emit('session', store.sessionMeta(s));
+    if (hadMission) orch.emitMission(s, true);
     return { ok: true };
   });
 
@@ -928,7 +954,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     } catch (e) {
       const status = e.status || 500;
       if (status === 500) console.error('[오류]', e);
-      if (!res.headersSent) send(res, status, { error: e.message || String(e) });
+      if (!res.headersSent) send(res, status, { error: e.message || String(e), ...(e.extra && typeof e.extra === 'object' ? e.extra : {}) }); // extra: 오류와 같이 돌려줄 값(목표 카드 대조가 어긋났을 때의 지금 초안)
       else try { res.end(); } catch { /* 이미 닫힘 */ }
     }
   });

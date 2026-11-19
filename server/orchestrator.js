@@ -31,6 +31,8 @@ const MEET_CAP = 1000000; // 회의 사용량 상한 기본값(meetingSpend 기�
 // 시스템 지시에 넣은 역할 노트 블록의 해시(무작위 표식은 뺀 글로). 이어 가는 대화에 마지막으로 준 노트와 지금 노트가 같은지 본다(결정 0013)
 const notesHash = (block) => createHash('sha256').update(block).digest('hex').slice(0, 16);
 const NO_NOTES = notesHash(''); // 기록이 없는 대화(이 기능 전에 시작한 대화 등)는 노트를 받은 적이 없다고 본다
+// < > 를 전각(＜ ＞)으로: 목표 실행의 확정 블록과 추가 지시가 지시를 감싼 태그(<역할 지침> 등)를 닫거나 흉내 내지 못하게(#roleNotes 와 같은 방식. 결정 0014)
+const wide = (s) => String(s ?? '').replace(/</g, '＜').replace(/>/g, '＞');
 
 // 회의 단계 설정 정리: 참석자가 둘 이상일 때만 회의다. 바퀴 1~3(기본 2), 진행자는 참석자 중 한 명(기본 첫 번째),
 // 사용량 상한은 토큰(기본 1,000,000, 0 = 없음). 값이 없거나 숫자가 아니면 기본값을 쓴다.
@@ -1749,7 +1751,8 @@ export class Orchestrator {
     // 회의 2바퀴부터와 결론은, 이 참석자가 앞 차례를 자기 대화로 기억할 때(lean)만 앞 단계 결과를 다시 넣지 않는다
     const later = lean && !!meet && (meet.phase !== 'opinion' || meet.round > 1);
     const parts = [];
-    // 목표 실행: 사용자가 확인한 목표와 합격 기준을 맨 앞에 지시로 준다(사용자가 고른 값이라 표식으로 감싸지 않는다. 결정 0014)
+    // 목표 실행: 사용자가 확인한 목표와 합격 기준을 이 단계 지시의 맨 앞에 준다(사용자가 고른 값이라 표식으로 감싸지 않는다. 결정 0014).
+    // 이어 갈 대화가 없는 에이전트에게 붙이는 [이전 대화]·인수인계 메모·프로젝트 기억은 이 글 앞에 붙는다(#withHistory·#withMissed·#recall)
     if (ctx.goalCard) parts.push(this.#goalCardPrompt(ctx.goalCard));
     if (multi) {
       parts.push(tr('[팀 작업] {team} — 전체 {total}단계 중 {n}단계 "{label}"를 네가 맡았어.', { team: team?.name || tr('팀'), total: run.stages.length, n: i + 1, label: st.label }));
@@ -1784,7 +1787,8 @@ export class Orchestrator {
     // 목표가 도는 동안 사용자가 보낸 말(이 단계가 시작될 때까지 온 것)도 같은 자리에. 첨부한 파일은 경로를 붙인다
     const said = (ctx.liveNotes || []).map((n) => `${n.text}${n.files?.length ? ` (${tr('첨부 파일')}: ${n.files.map((f) => `${f.name}: ${f.path}`).join(', ')})` : ''}`);
     const notes = [...ctx.nextNotes, ...said, ...(ctx.waitNotes?.get(agent.id) || [])]; // 한도가 풀리길 기다리는 동안 이 에이전트를 골라 보낸 지시도
-    if (notes.length) parts.push(`${tr('[사용자 추가 지시]')}\n${notes.map((t) => `- ${t}`).join('\n')}`);
+    // 목표 실행에서는 확정 블록처럼 < > 를 전각으로(목표 모드가 아닌 실행은 예전 그대로)
+    if (notes.length) parts.push(`${tr('[사용자 추가 지시]')}\n${notes.map((t) => `- ${ctx.goalCard ? wide(t) : t}`).join('\n')}`);
     if (feedback) parts.push(`${tr('[사용자 피드백 — 이걸 반영해서 다시 해줘]')}\n${feedback}`);
     if (meet) parts.push(this.#meetingPrompt(ctx, i, agent, meet));
     if (multi && i < run.stages.length - 1 && !meet) parts.push(tr('결과는 다음 단계 담당이 바로 쓸 수 있게 핵심 위주의 마크다운으로 정리해.'));
@@ -1792,13 +1796,14 @@ export class Orchestrator {
     return parts.join('\n\n');
   }
 
-  // 확정된 목표 블록(목표 실행의 모든 단계 프롬프트 맨 앞). 값은 한 줄로 다듬은 것이라 줄을 바꿔 제목을 흉내 낼 수 없다
+  // 확정된 목표 블록(목표 실행의 모든 단계 프롬프트에서 이 단계 지시의 맨 앞. 앞 대화·인수인계 메모·프로젝트 기억은 그 앞에 붙는다).
+  // 값은 한 줄로 다듬은 것이라 줄을 바꿔 제목을 흉내 낼 수 없고, < > 는 전각으로 바꿔 태그를 흉내 내지 못한다
   #goalCardPrompt(card) {
     const out = [
       tr('[확정된 목표와 합격 기준 (사용자가 확인함. 바꾸지 마)]'),
-      `${tr('목표')}: ${card.goal}`,
-      `${tr('합격 기준')}:\n${card.criteria.map((c, k) => `${k + 1}. ${c}`).join('\n')}`,
-      card.outOfScope.length ? `${tr('범위 밖')}:\n${card.outOfScope.map((x) => `- ${x}`).join('\n')}` : `${tr('범위 밖')}: ${tr('없음')}`,
+      `${tr('목표')}: ${wide(card.goal)}`,
+      `${tr('합격 기준')}:\n${card.criteria.map((c, k) => `${k + 1}. ${wide(c)}`).join('\n')}`,
+      card.outOfScope.length ? `${tr('범위 밖')}:\n${card.outOfScope.map((x) => `- ${wide(x)}`).join('\n')}` : `${tr('범위 밖')}: ${tr('없음')}`,
       tr('이 목표와 기준을 채우는 쪽으로 네 단계를 해. 기준을 바꾸거나 범위 밖의 일을 하지 마.'),
     ];
     return out.join('\n');

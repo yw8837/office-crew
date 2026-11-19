@@ -70,6 +70,8 @@ const INJECTION = [
   ['system', [
     /\b(?:system|developer)\s*(?:prompt|message|instructions?)\b/i,
     /<\/?\s*(?:system|instructions?|im_start|im_end)\b[^>]*>/i,
+    // 앱이 시스템 지시를 감싸는 태그(<역할 지침>, 번역된 이름 포함)를 흉내 낸 것. 전각 ＜ ＞ 도 NFKC 로 같은 글자가 된다
+    /<\/?\s*(?:역할\s*지침|role\s+instructions?|角色指令|役割の指示)\s*>/i,
     /<\|\s*im_(?:start|end)\s*\|>/i,
     /\[\/?(?:system|INST)\]/i,
     /시스템\s*(?:지시|지침|프롬프트|메시지|명령)/,

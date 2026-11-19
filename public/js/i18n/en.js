@@ -1491,4 +1491,7 @@ export default {
   "항목의 출처(source)가 필요해.": "The item needs a source.",
   "고른 글이 있던 메시지를 찾지 못했어.": "Couldn't find the message the selected text came from.",
   "채팅에서 고름": "Picked from the chat",
+  // ── 역할 노트: 이어 가는 대화 (codex.js) ──
+  "역할 지침이 바뀌었어. 앞에서 받은 것 대신 아래를 따라.": "Your role instructions have changed. Follow the ones below instead of the ones you got earlier.",
+  "앞에서 받은 역할 노트는 이제 쓰지 마.": "Don't use the role notes you got earlier anymore.",
 };

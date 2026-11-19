@@ -1494,4 +1494,8 @@ export default {
   // ── 역할 노트: 이어 가는 대화 (codex.js) ──
   "역할 지침이 바뀌었어. 앞에서 받은 것 대신 아래를 따라.": "Your role instructions have changed. Follow the ones below instead of the ones you got earlier.",
   "앞에서 받은 역할 노트는 이제 쓰지 마.": "Don't use the role notes you got earlier anymore.",
+  // ── 역할 노트: 서버 견고함 (notes.js·orchestrator.js) ──
+  "지금 상태({from})에서 {to}(으)로는 바꿀 수 없어.": "This item can't go from {from} to {to}.",
+  "역할 노트를 저장하지 못했어 ({code}).": "Couldn't save the role notes ({code}).",
+  "역할 노트 파일을 읽지 못해서 이번 실행은 역할 노트 없이 했어.": "Couldn't read the role notes file, so this run went without role notes.",
 };

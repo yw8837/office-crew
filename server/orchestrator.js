@@ -818,6 +818,7 @@ export class Orchestrator {
     const cfgFiles = [];
     // 이어갈 대화 id 는 그 대화를 만든 AI 와 짝으로 기억한다(다른 AI 에 엉뚱한 id 를 넘기지 않게)
     let fresh = false; // 헛돌아서 끈 대화는 이어 가지 않는다(다시 시도하면 새 대화로)
+    let notesWarned = false; // 역할 노트를 못 읽었다는 알림은 이어받는 AI 가 있어도 한 번만
     const remember = (id) => {
       if (fresh) { delete s.providerSessions[agentId]; delete s.usageBase?.[agentId]; return; }
       if (!id || !cur.prov.caps.resume) return;
@@ -842,6 +843,8 @@ export class Orchestrator {
         const mcpConfigPath = ag.provider === 'claude' ? this.catalog.writeClaudeMcpConfig(connectors) : null;
         if (mcpConfigPath) cfgFiles.push(mcpConfigPath);
         const sys = this.#system(ag, cwd, askOk, ctx.userMsg?.text || '');
+        // 역할 노트 파일이 깨져서 못 읽었으면 노트 없이 하고, 이 답에 한 번 알린다(파일은 그대로 둔다)
+        if (sys.notesError && !notesWarned) { notesWarned = true; this.#notice(s, msg, `📒 ${tr('역할 노트 파일을 읽지 못해서 이번 실행은 역할 노트 없이 했어.')}`); }
         const base = {
           agent: ag, cwd, settings, connectors, tmpDir: this.dirs.tmp, addDirs, extraDirs,
           system: sys.text, images: pv.caps.images ? atts.filter((a) => a.mime?.startsWith('image/')).map((a) => a.path) : [],
@@ -1016,7 +1019,7 @@ export class Orchestrator {
     return { agent: worker, text: msg.text };
   }
 
-  // → { text: 시스템 지시, notesHash: 그 안의 역할 노트 블록 해시(이어 가는 대화에 다시 줄지 정할 때) }
+  // → { text: 시스템 지시, notesHash: 그 안의 역할 노트 블록 해시(이어 가는 대화에 다시 줄지 정할 때), notesError: 역할 노트 파일을 못 읽어서 노트 없이 만듦 }
   #system(agent, cwd, canAsk = false, request = '') {
     // 비대화형 실행에선 권한 요청이 자동 거부되므로, 할 수 있는 일을 미리 알려 헛시도·빈 답을 막는다(실측)
     const PERM_NOTE = {
@@ -1042,19 +1045,19 @@ export class Orchestrator {
       const sk = this.catalog.skillContent(sid);
       if (sk?.content) parts.push(`\n## ${tr('스킬: {name}', { name: sk.name })}\n${sk.content.slice(0, 20000)}`);
     }
-    return { text: parts.filter(Boolean).join('\n'), notesHash: notesHash(notes.key) };
+    return { text: parts.filter(Boolean).join('\n'), notesHash: notesHash(notes.key), notesError: !!notes.error };
   }
 
   // 역할 노트(결정 0013): 이 역할이 하는 일, 사용자가 정한 항목, 에이전트·바깥 자료에서 와서 사용자가 받은 항목(무작위 표식 안에 참고로).
   // 받지 않은 초안·보관 항목은 넣지 않는다. 내 PC 모델 전용 항목은 받는 쪽이 내 PC 모델일 때만. 노트가 비면 ''(지시가 예전과 같다).
   // 항목 글의 줄바꿈은 한 줄로 펴서, 항목 하나가 줄을 바꿔 표식이나 제목을 흉내 내지 못하게 한다.
   // < > 는 전각(＜ ＞)으로 바꿔서, 항목 글이 지시를 감싼 태그(<역할 지침> 등)를 닫거나 새 태그를 흉내 내지 못하게 한다.
-  // → { text: 넣을 글, key: 무작위 표식을 뺀 같은 글(실행마다 바뀌는 표식 때문에 노트가 바뀐 걸로 보지 않게) }
+  // → { text: 넣을 글, key: 무작위 표식을 뺀 같은 글(실행마다 바뀌는 표식 때문에 노트가 바뀐 걸로 보지 않게), error?: 노트 파일을 못 읽음 }
   #roleNotes(agent, request) {
     const none = { text: '', key: '' };
     if (!this.notes || !agent?.id) return none;
     let n;
-    try { n = this.notes.get(agent.id); } catch { return none; } // 노트 파일을 못 읽어도 실행은 한다
+    try { n = this.notes.get(agent.id); } catch { return { ...none, error: true }; } // 노트 파일을 못 읽어도(깨짐 등) 노트 없이 실행은 한다
     const line = (s) => String(s ?? '').replace(/\s+/g, ' ').trim().replace(/</g, '＜').replace(/>/g, '＞');
     const out = [];
     const tasks = n.role.tasks.filter((x) => x && line(x.title));

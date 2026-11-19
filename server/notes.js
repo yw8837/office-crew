@@ -22,6 +22,12 @@ export const PROMPT_REF_MAX = 120; // 프롬프트에 찍는 출처 주소 최�
 export const KINDS = ['method', 'pitfall', 'criterion', 'tool'];
 const SOURCES = ['user', 'agent', 'web'];
 const STATUSES = ['draft', 'confirmed', 'archived'];
+// 상태를 바꿀 수 있는 길(PATCH). 에이전트·바깥 자료 항목: 초안 → 확정·보관, 확정 → 보관, 보관 → 초안(다시 받아야 들어간다). 사용자 항목: 확정 ↔ 보관.
+// 되돌리기(undo)는 이 표를 따르지 않고 전 값으로 돌린다
+const MOVES = {
+  user: { confirmed: ['archived'], archived: ['confirmed'] },
+  other: { draft: ['confirmed', 'archived'], confirmed: ['archived'], archived: ['draft'] },
+};
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
@@ -175,8 +181,11 @@ export class NoteStore {
   #write(agentId, n) {
     const f = this.#file(agentId);
     if (!f) throw fail(400, tr('에이전트 id 형식이 맞지 않아.'));
-    fs.mkdirSync(this.dir, { recursive: true });
-    writeAtomic(f, JSON.stringify(n, null, 2));
+    // 쓰기 오류 글에는 파일의 절대 경로가 들어 있어서, 응답에는 오류 코드만 싣는다
+    try {
+      fs.mkdirSync(this.dir, { recursive: true });
+      writeAtomic(f, JSON.stringify(n, null, 2));
+    } catch (e) { throw fail(500, tr('역할 노트를 저장하지 못했어 ({code}).', { code: String(e.code || 'EIO').slice(0, 20) })); }
   }
 
   #log(n, { op, itemId = null, before = null, after = null, undoOf = null }) {
@@ -240,7 +249,11 @@ export class NoteStore {
     if (kind !== undefined) { const k = KINDS.includes(kind) ? kind : 'method'; if (k !== it.kind) patch.kind = k; }
     if (status !== undefined) {
       if (!STATUSES.includes(status)) throw fail(400, tr('모르는 상태야: {status}', { status: String(status).slice(0, 20) }));
-      if (status !== it.status) patch.status = status;
+      if (status !== it.status) {
+        const ways = MOVES[it.source?.type === 'user' ? 'user' : 'other'][it.status] || [];
+        if (!ways.includes(status)) throw fail(400, tr('지금 상태({from})에서 {to}(으)로는 바꿀 수 없어.', { from: String(it.status).slice(0, 20), to: status }));
+        patch.status = status;
+      }
     }
     const keys = Object.keys(patch);
     if (!keys.length) return n;
@@ -302,8 +315,13 @@ export class NoteStore {
     if (!f || !fs.existsSync(f)) return null;
     let to = this.#file(agentId, '.removed');
     if (fs.existsSync(to)) to = this.#file(agentId, `.removed-${Date.now()}`);
-    fs.renameSync(f, to);
-    return to;
+    for (let i = 0; ; i++) {
+      try { fs.renameSync(f, to); return to; } catch (e) {
+        // 윈도우에서 백신·인덱서가 파일을 잡고 있으면 잠깐 실패할 수 있다(store.js writeAtomic 처럼 짧게 다시 해 본다)
+        if (i >= 5) throw e;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30);
+      }
+    }
   }
 }
 

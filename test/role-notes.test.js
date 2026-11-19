@@ -435,3 +435,102 @@ test('10. 이어 가는 Codex 대화: 노트가 바뀌면 지시를 "바뀌었�
   const [quiet] = await codex('여섯 번째 요청');
   assert.ok(!quiet.prompt.includes('<역할 지침>'), '비운 뒤로 그대로면 다시 안 붙는다');
 });
+
+test('11. 상태 전이표: 에이전트·바깥 항목은 초안→확정·보관, 확정→보관, 보관→초안만. 사용자 항목은 확정↔보관만', async () => {
+  const ns = fresh();
+  ns.addItem('a', { text: '사용자 것' });
+  ns.addItem('a', { text: '에이전트 것', source: { type: 'agent' } });
+  ns.addItem('a', { text: '바깥 것', source: { type: 'web', ref: 'https://e.example' } });
+  const [u, g, w] = ns.get('a').items.map((x) => x.id);
+  const st = (id) => ns.get('a').items.find((x) => x.id === id).status;
+  const no = (id, status) => {
+    const from = st(id);
+    const e = reason(() => ns.editItem('a', id, { status }));
+    assert.equal(e.status, 400, `${from} → ${status}`);
+    assert.match(e.message, /바꿀 수 없어/);
+    assert.equal(st(id), from, '거부되면 그대로');
+  };
+  no(u, 'draft');
+  ns.editItem('a', u, { status: 'archived' });
+  no(u, 'draft');
+  ns.editItem('a', u, { status: 'confirmed' });
+  assert.equal(st(u), 'confirmed');
+  for (const id of [g, w]) {
+    ns.editItem('a', id, { status: 'confirmed' });
+    no(id, 'draft');
+    ns.editItem('a', id, { status: 'archived' });
+    no(id, 'confirmed');
+    ns.editItem('a', id, { status: 'draft' }); // 보관 → 초안: 다시 받아야 들어간다
+    ns.editItem('a', id, { status: 'archived' }); // 초안 → 보관
+    assert.equal(st(id), 'archived');
+  }
+  // 같은 상태로는 아무 일도 없다(기록도 남지 않는다)
+  const len = ns.get('a').log.length;
+  ns.editItem('a', u, { status: 'confirmed' });
+  assert.equal(ns.get('a').log.length, len);
+  // HTTP 도 같다
+  const t = await app();
+  const ag = (await t.api('POST', '/api/agents', { name: '전이담당', role: '정리', provider: 'claude', model: 'sonnet', permission: 'plan', routing: 'manual' })).json;
+  const r = await t.api('POST', `/api/agents/${ag.id}/notes/items`, { text: '내 항목', source: { type: 'user' } });
+  const bad = await t.api('PATCH', `/api/agents/${ag.id}/notes/items/${r.json.items[0].id}`, { status: 'draft' });
+  assert.equal(bad.status, 400);
+  assert.match(bad.json.error, /바꿀 수 없어/);
+});
+
+test('12. 깨진 노트 파일은 덮어쓰지 않는다. 그 실행은 노트 없이 하고 알림을 남긴다. 쓰기 실패 오류에 경로가 없다', async () => {
+  const ns = fresh();
+  const file = path.join(ns.dir, 'a.json');
+  fs.writeFileSync(file, '{ 깨진');
+  for (const fn of [() => ns.addItem('a', { text: '글' }), () => ns.setRole('a', []), () => ns.acceptAll('a'), () => ns.undo('a', 'log-x')]) {
+    const e = reason(fn);
+    assert.equal(e.status, 500);
+    assert.match(e.message, /깨져서/);
+  }
+  assert.equal(fs.readFileSync(file, 'utf8'), '{ 깨진', '덮어쓰지 않는다');
+  assert.deepEqual(ns.counts('a'), { drafts: 0, confirmed: 0 });
+  // 쓰기가 실패하면 오류 코드만 알린다(파일 경로는 싣지 않는다)
+  const ws = fresh();
+  fs.mkdirSync(path.join(ws.dir, `b.json.${process.pid}.tmp`)); // 임시 파일 자리를 폴더로 막는다
+  const w = reason(() => ws.addItem('b', { text: '글' }));
+  assert.equal(w.status, 500);
+  assert.match(w.message, /^역할 노트를 저장하지 못했어 \([A-Z]+\)\.$/);
+  assert.ok(!w.message.includes(ws.dir));
+  // 실행: 노트 없이 하고 알림 한 줄, 파일은 그대로
+  const t = await app();
+  const ag = (await t.api('POST', '/api/agents', { name: '깨진노트', role: '정리', provider: 'claude', model: 'claude-sonnet-5-5', permission: 'plan', routing: 'manual' })).json;
+  const nf = path.join(t.app.dirs.home, 'notes', `${ag.id}.json`);
+  fs.mkdirSync(path.dirname(nf), { recursive: true });
+  fs.writeFileSync(nf, '{ 깨진');
+  const s = (await t.api('POST', '/api/sessions', { teamId: null, agentId: ag.id })).json;
+  const sys = (await say(t, s.id, '정리해 줘')).find((l) => l.system?.includes(`"${ag.name}"`))?.system;
+  assert.ok(sys && !/역할 노트|이 역할이 하는 일/.test(sys), '노트 없이');
+  const m = t.app.store.getSession(s.id).messages.filter((x) => x.role === 'agent').at(-1);
+  assert.equal(m.status, 'done');
+  assert.equal(m.blocks.filter((b) => b.kind === 'notice' && b.text.includes('역할 노트 파일을 읽지 못해서 이번 실행은 역할 노트 없이 했어.')).length, 1);
+  assert.equal((await t.api('POST', `/api/agents/${ag.id}/notes/items`, { text: '글', source: { type: 'user' } })).status, 500);
+  assert.equal(fs.readFileSync(nf, 'utf8'), '{ 깨진');
+});
+
+test('13. 지운 에이전트의 노트는 .removed 로 옮겨지고, 같은 id 로 다시 만든 에이전트에 붙지 않는다', async () => {
+  const ns = fresh();
+  ns.addItem('same', { text: '첫 노트' });
+  const to = ns.removeAgent('same');
+  assert.equal(path.basename(to), 'same.removed.json');
+  assert.deepEqual(ns.get('same').items, []);
+  ns.addItem('same', { text: '둘째 노트' });
+  assert.match(path.basename(ns.removeAgent('same')), /^same\.removed-\d+\.json$/, '이미 있으면 시각을 붙인다');
+  assert.equal(JSON.parse(fs.readFileSync(to, 'utf8')).items[0].text, '첫 노트');
+  assert.equal(ns.removeAgent('none'), null);
+  // 앱: 고정 id 에이전트(불러오기 담당처럼)를 지웠다가 같은 id 로 다시 만들어도 옛 노트가 붙지 않는다
+  const t = await app();
+  const fixed = { id: 'fixed-notes-agent', name: '고정담당', role: '정리', provider: 'claude', model: 'sonnet', permission: 'plan', routing: 'manual' };
+  t.app.store.upsert('agents', { ...fixed });
+  await t.api('POST', `/api/agents/${fixed.id}/notes/items`, { text: '옛 노트', source: { type: 'user' } });
+  assert.equal((await t.api('DELETE', `/api/agents/${fixed.id}`)).status, 200);
+  const dir = path.join(t.app.dirs.home, 'notes');
+  assert.ok(fs.existsSync(path.join(dir, `${fixed.id}.removed.json`)) && !fs.existsSync(path.join(dir, `${fixed.id}.json`)));
+  t.app.store.upsert('agents', { ...fixed });
+  assert.deepEqual((await t.api('GET', `/api/agents/${fixed.id}/notes`)).json.items, []);
+  const me = (await t.api('GET', '/api/bootstrap')).json.agents.find((a) => a.id === fixed.id);
+  assert.deepEqual([me.noteDrafts, me.noteCount], [0, 0]);
+});

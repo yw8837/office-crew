@@ -54,7 +54,7 @@ const STRAY_ZWJ = /(?<!\p{Extended_Pictographic}\uFE0F?[\u{1F3FB}-\u{1F3FF}]?)\u
 // 제어 문자: 줄바꿈·탭을 뺀 C0·C1 제어 문자와 줄·문단 나눔 문자
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u2028\u2029]/gu;
-const strip = (s) => String(s ?? '').replace(INVISIBLE, '').replace(STRAY_ZWJ, '').replace(CONTROL, '');
+export const strip = (s) => String(s ?? '').replace(INVISIBLE, '').replace(STRAY_ZWJ, '').replace(CONTROL, '');
 const oneLine = (s) => s.replace(/\s+/g, ' ').trim();
 const cleanText = (s) => strip(s).replace(/\r\n?/g, '\n').trim();
 
@@ -102,14 +102,20 @@ const WHY = {
   secret: () => tr('비밀·키·토큰을 보내라는 문장이 있어서 저장하지 않았어.'),
 };
 
+// 걸린 무늬의 종류: 'invisible'|'control'|'ignore'|'system'|'permission'|'secret', 없으면 ''(목표 카드의 경고처럼 이유 문장이 달라야 하는 곳이 쓴다)
+export function suspiciousKind(text) {
+  const s = String(text ?? '');
+  if (s.search(INVISIBLE) !== -1 || s.search(STRAY_ZWJ) !== -1) return 'invisible';
+  if (s.search(CONTROL) !== -1) return 'control';
+  const n = s.normalize('NFKC'); // 전각 글자(ｉｇｎｏｒｅ)도 같은 글자로 본다
+  for (const [k, list] of INJECTION) if (list.some((re) => re.test(n))) return k;
+  return '';
+}
+
 // 에이전트·바깥 자료에서 온 글을 저장해도 되는지: 안 되면 이유(글), 되면 ''
 export function suspicious(text) {
-  const s = String(text ?? '');
-  if (s.search(INVISIBLE) !== -1 || s.search(STRAY_ZWJ) !== -1) return WHY.invisible();
-  if (s.search(CONTROL) !== -1) return WHY.control();
-  const n = s.normalize('NFKC'); // 전각 글자(ｉｇｎｏｒｅ)도 같은 글자로 본다
-  for (const [k, list] of INJECTION) if (list.some((re) => re.test(n))) return WHY[k]();
-  return '';
+  const k = suspiciousKind(text);
+  return k ? WHY[k]() : '';
 }
 
 function checkText(body) {

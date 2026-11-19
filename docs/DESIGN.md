@@ -60,11 +60,11 @@ Session  { id, title, titleFrom?(제목을 만든 사용자 말 id), titleLocal?
 Mission  (세션에 하나. 새 목표가 끝난 목표를 덮어쓴다. 결정 0014)
          { version:1, id, status:'drafting'|'draft'|'active'|'unreviewed'|'stopped'|'cancelled'|'cut'('waiting'·'done'·'accepted' 는 검수 단계용으로 남겨 둠),
            phase:'goal'|'work', request(앞 2,000자), requestMsgId, leadId, goal(200자), criteria:[{ id:'c1', text(300자), status:'open', evidence:'' }](7개까지),
-           outOfScope:[…](5개·200자), userDecides:[…](5개·200자), notes:[{ id, text, at, used, msgId, files?:[{name,path}] }](도는 중에 온 추가 지시),
-           cardMsgId, confirmedAt, editedByUser, cutNotice?('drafting'|'cut': 다시 켤 때 대화에 한 줄 남기고 지운다), log:[{ at, kind, text, msgId? }](200줄, 넘으면 "앞 n줄 생략"), createdAt }
+           outOfScope:[…](5개·200자), userDecides:[…](5개·200자), notes:[{ id, text, at, used, msgId, files?:[{name,path}] }](도는 중에 온 추가 지시. 50개까지),
+           cardMsgId, confirmedAt, editedByUser, cutNotice?('drafting'|'cut': 다시 켤 때 대화에 한 줄 남기고 지운다), log:[{ at, kind, text, msgId?, n? }](200줄, 넘으면 맨 앞에 "앞 n줄 생략" 한 줄 kind 'skip'·n), createdAt }
          살아 있는 목표 = drafting·draft·active·waiting·cut: 새 목표를 못 만들고, 목표 모드 끄기·팀 바꾸기는 409
-Message  { id, role:'user'|'agent'|'system'|'proposal'(kind 'hire': 영입 제안 카드, 결정 0006 / kind 'goal': 목표 카드 { missionId, leadId, goal, criteria, outOfScope, userDecides, warn?, fallback?, status:'open'|'confirmed'|'cancelled', confirmed?, edited? }, 결정 0014), agentId?, runId?, stageIndex?, text,
-           mission?(사용자 말: 목표 차례로 돌 요청), missionNote?(사용자 말: 목표가 도는 동안 온 추가 지시. 넘기는 대화에서 빼고 [사용자 추가 지시]로만 간다), goalDraft?(에이전트 답: 목표 카드 초안. 넘기는 대화·기억에 싣지 않는다), goalBlock?:{ from, to }(그 답에서 읽은 oc-goal 블록 자리. 화면이 감춘다), handoffAsk?(사용자 말: 인수인계 메모를 써 달라는 정해진 요청. 대화·기억에 싣지 않는다), handoff?(에이전트 답: 인수인계 메모. 이어받는 다른 AI가 먼저 받는다. 결정 0008), local?(사용자 말: 보낼 때 계획의 AI가 모두 내 PC 모델이면 true, 클라우드 AI가 실제로 받으면 지운다. true 면 클라우드 AI로 넘기는 대화·기억에서 뺀다. 결정 0007), remembered?(사용자 말: 프로젝트 기억에 넣기 시작했음. 두 번 넣지 않는다), cut?(대기열에 있다가 앱이 꺼진 말. 다시 켤 때 기억에 넣고 지운다),
+Message  { id, role:'user'|'agent'|'system'|'proposal'(kind 'hire': 영입 제안 카드, 결정 0006 / kind 'goal': 목표 카드 { missionId, leadId, draftMsgId(카드를 읽은 진행자 답. 요청 글로 만든 카드면 null), goal, criteria, outOfScope, userDecides, warn?, fallback?, status:'open'|'confirmed'|'cancelled', createdAt, confirmed?, edited?, resolvedAt? }, 결정 0014), agentId?, runId?, stageIndex?, text,
+           mission?(사용자 말: 목표 차례로 돌 요청), missionNote?(사용자 말: 목표가 도는 동안 온 추가 지시. 넘기는 대화에서 빼고 [사용자 추가 지시]로만 간다. 기억에는 목표 실행이 끝날 때 넣고, local 은 받은 AI 로 정한다), goalDraft?(에이전트 답: 목표 카드 초안. 넘기는 대화·기억에 싣지 않고, 인수인계 메모 쓸 에이전트를 고를 때 답한 것으로 세지 않는다), goalBlock?:{ from, to }(그 답에서 읽은 oc-goal 블록 자리. 화면이 감춘다), handoffAsk?(사용자 말: 인수인계 메모를 써 달라는 정해진 요청. 대화·기억에 싣지 않는다), handoff?(에이전트 답: 인수인계 메모. 이어받는 다른 AI가 먼저 받는다. 결정 0008), local?(사용자 말: 보낼 때 계획의 AI가 모두 내 PC 모델이면 true, 클라우드 AI가 실제로 받으면 지운다. true 면 클라우드 AI로 넘기는 대화·기억에서 뺀다. 결정 0007), remembered?(사용자 말: 프로젝트 기억에 넣기 시작했음. 두 번 넣지 않는다), cut?(대기열에 있다가 앱이 꺼진 말. 다시 켤 때 기억에 넣고 지운다),
            meeting?:{ phase:'opinion'|'turn'|'research'|'judge'|'conclude'(옛 메시지는 'review'), round, rounds, opposer?:true }(회의 차례), verdict?:{ verdict:'agree'|'continue', reason }(진행자 판정에서 읽은 블록. 결정 0010),
            check?:{ question, from, to, status:'asked'|'answered'|'no-researcher'|'over'|'failed' }(차례 답 끝에서 읽은 조사 질문 블록. 블록은 글에 남고 from·to 자리를 화면이 감춘다), checkOf?(조사 결과: 질문한 차례 메시지 id. 결정 0011),
            attachments:[{id,name,mime,size,path}], blocks:[Block], status:'streaming'|'done'|'error'|'stopped',
@@ -114,10 +114,11 @@ emit(ev):
 
 ### 목표 모드(`server/mission.js`, 결정 0014)
 - 켜기: 세션 PATCH `goalMode`. 팀 없는 세션, 내 PC 모델과 클라우드 AI(자동 라우팅은 어느 쪽으로도 셈)가 섞인 팀, 예약 실행·칸반 카드 세션은 400 과 이유(`missionProblem`). 요청이 목표가 될 때·확인할 때 다시 본다.
-- `send`: @이름·인수인계·예약이 아닌 말은 지금 끼어들기·영입 감지보다 먼저 본다. 살아 있는 목표 없음 → 목표 차례 / 카드 대기 → 그 카드를 닫고 목표 차례 / 도는 중 → 추가 지시(`notes`) / 끊김 → 400. 초안을 쓰는 중의 "지금 끼어들기"는 진행자에게. 다른 실행이 돌면 대기열(`mission: true`).
-- 목표 차례(`#goalTurn`): 진행자(첫 회의 단계 진행자 → analysis 역할 첫 팀원 → 첫 단계 첫 에이전트) 혼자인 단계 하나. 답 맨 끝의 ```oc-goal 블록을 읽고(`parseGoal`·`cleanGoal`), 못 읽으면 같은 실행에서 한 번 다시 요청, 그래도 안 되면 요청 앞 200자를 목표로 한 기준 없는 카드. 오류·중지면 목표를 닫는다.
-- 확인(`confirmMission`): 화면이 보던 카드 전체(`expected`)를 저장된 초안과 글자까지 대조(`sameCard`). 확정하면 팀 단계표로 실행 하나(검수 역할만 있는 단계는 뺌, 다 빠지면 그대로). 모든 단계 프롬프트 맨 앞에 "확정된 목표와 합격 기준" 블록. 다 끝나면 `unreviewed`(검수가 아직 없다), 중지는 `stopped`.
-- 진행 기록(`logLine`): 목표 초안·확인·단계 시작/끝·추가 지시·검수 단계 뺌·끊김·버림·끝. 다시 켜면 `#fixStale` → `cutMission`(초안 쓰던 목표는 닫고, 도는 중·대기는 `cut`). 저절로 다시 돌지 않는다.
+- `send`: @이름·인수인계·예약이 아닌 말은 지금 끼어들기·영입 감지보다 먼저 본다. 살아 있는 목표 없음 → 목표 차례 / 카드 대기 → 그 카드를 닫고 목표 차례 / 도는 중 → 추가 지시(`notes`) / 끊김 → 400. 초안을 쓰는 중에 온 말은 모드(지금 끼어들기·다음 차례로)와 상관없이 진행자에게(steer). 다른 실행이 돌면 대기열(`mission: true`). 영입 카드의 "그대로 보내기"(`sendProposed`)도 같다(살아 있는 목표가 있으면 409).
+- 추가 지시(`#missionNote`): 그 뒤에 시작하는 단계들과, 승인·오류 대기 중에 왔으면 거절·다시 하기로 다시 도는 그 단계에 들어간다. 50개까지(넘으면 400). 뒤에 시작할 단계가 없으면(마지막 단계가 도는 중이고 대기도 아님) 응답에 `late: true`. 기억에는 목표 실행이 끝날 때(앱을 끌 때·끊긴 목표를 다시 켤 때도) 넣는다: 받은 AI 가 모두 내 PC 모델이면 local, 클라우드 AI 가 하나라도 받으면 표시 없이, 아무도 안 받았으면 보낼 때의 팀 구성대로(`#received`·`#rememberNotes`).
+- 목표 차례(`#goalTurn`): 진행자(첫 회의 단계 진행자 → analysis 역할 첫 팀원 → 첫 단계 첫 에이전트) 혼자인 단계 하나. 답 맨 끝의 ```oc-goal 블록을 읽고(`parseGoal`·`cleanGoal`), 못 읽으면 같은 실행에서 한 번 다시 요청, 그래도 안 되면 요청 앞 200자를 목표로 한 기준 없는 카드. 오류·중지·진행자 건너뛰기면 목표를 닫는다(오류·건너뛰기는 대화에 한 줄). 진행자의 `providerSessions`·`sessionProvider`·`usageBase`·`noteHashes` 는 시작 때 적어 두고 끝날 때 되돌린다(일 단계가 목표 차례의 CLI 대화를 이어 가지 않게).
+- 확인(`confirmMission`): 화면이 보던 카드 전체(`expected`)를 저장된 초안과 글자까지 대조(`sameCard`). 확정하면 팀 단계표를 하나도 빼지 않고 실행 하나(검수 역할 단계·승인 관문 포함. 기준 판정이 아직 없다). 실행을 먼저 넣고 저장한다(도는 목표가 도는 실행 없이 저장되지 않게). 각 단계 지시의 맨 앞에 "확정된 목표와 합격 기준" 블록(`#goalCardPrompt`, < > 는 전각). 그 앞에는 지금처럼 프로젝트 기억·인수인계 메모·놓친 대화, 이어 갈 대화가 없는 에이전트면 `[이전 대화]`가 붙는다. 다 끝나면 `unreviewed`(검수가 아직 없다), 중지는 `stopped`.
+- 진행 기록(`logLine`): 목표 초안·확인·단계 시작/다시/끝·추가 지시·끊김·버림·끝. 다시 켜면 `#fixStale` → `cutMission`(초안 쓰던 목표는 닫고, 도는 중·대기는 `cut`). 저절로 다시 돌지 않는다.
 
 ### 이어갈 대화(resume)
 - `providerSessions[agentId]`에 CLI 대화 id, `sessionProvider[agentId]`에 그 대화를 만든 프로바이더를 같이 저장한다. 지금 실행할 프로바이더가 다르면(자동 라우팅·이어받기로 바뀜) 이어하기를 하지 않는다.
@@ -187,9 +188,9 @@ POST /api/agents/:id/notes/accept-all, POST /api/agents/:id/notes/undo {logId}
 GET  /api/sessions/:id               전체 세션
 POST /api/sessions                   {title?, teamId?, agentId?, cwd?}
 PATCH/DELETE /api/sessions/:id
-POST /api/sessions/:id/messages      {text, attachments:[id], mention?}
+POST /api/sessions/:id/messages      {text, attachments:[id], mention?}  목표가 도는 중이면 → {noted, messageId, late?}(결정 0014)
 POST /api/sessions/:id/control      {action, runId?, agentId?, text?}
-PATCH /api/sessions/:id {goalMode}   목표 모드 켜기·끄기(쓸 수 없으면 400 과 이유, 살아 있는 목표가 있으면 끄기·teamId 변경 409. 결정 0014)
+PATCH /api/sessions/:id {goalMode}   목표 모드 켜기·끄기(쓸 수 없으면 400 과 이유, 살아 있는 목표가 있으면 끄기·teamId 변경 409. 쓸 수 없는 팀으로 바꿔 저절로 꺼지면 응답에 goalModeOff: 이유. 결정 0014)
 POST /api/sessions/:id/mission/confirm {missionId, expected:{goal, criteria, outOfScope, userDecides}, edited?}
                                      본 것과 저장된 초안이 다르면 409 + {draft}. 옛 목표·처리한 카드·실행 중·마지막 카드 아님·카드 뒤 사용자 말은 409, 기준 0개·섞인 팀은 400
 POST /api/sessions/:id/mission/cancel {missionId}   카드 대기 목표 닫기,  POST …/mission/discard {missionId}  끊긴 목표 버리기

@@ -54,3 +54,13 @@ export function hideCheck(text, check = null, streaming = false) {
   const out = ok ? src.slice(0, check.from) + src.slice(check.to) : src;
   return streaming ? out.replace(/```oc-check[\s\S]*$/, '') : out;
 }
+
+// 진행자 답 끝의 목표 카드 블록(oc-goal)은 목표 카드로 보여 주니 본문에서는 뺀다(hideCheck 와 같은 방식, 결정 0014).
+// goal: 서버가 카드로 받은 블록의 자리({ from, to }). 블록은 답의 맨 끝이라 질문 블록 자리보다 뒤에 있다: 질문 블록을 빼기 전에 먼저 부른다
+export function hideGoal(text, goal = null, streaming = false) {
+  const src = String(text || '');
+  const ok = goal && Number.isInteger(goal.from) && Number.isInteger(goal.to) && goal.from >= 0 && goal.to > goal.from && goal.to <= src.length
+    && src.startsWith('```oc-goal', goal.from);
+  const out = ok ? src.slice(0, goal.from) + src.slice(goal.to) : src;
+  return streaming ? out.replace(/```oc-goal[\s\S]*$/, '') : out;
+}

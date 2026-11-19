@@ -1,14 +1,15 @@
 // 세션 화면: 사무실(실시간) + 채팅 + 입력창 + 진행 바 + 승인/오류 카드 + 에이전트 상세
 import { Component } from 'preact';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { html, Icon, Avatar, ProviderChip, STATE_LABEL, EFFORT_LABEL, fmtTok, fmtCost, fmtDur, usageTotal, officeMod, agentModelText, PERM_LABEL } from '../ui.js';
+import { html, Icon, Avatar, ProviderChip, STATE_LABEL, EFFORT_LABEL, fmtTok, fmtCost, fmtDur, usageTotal, officeMod, agentModelText, PERM_LABEL, Toggle } from '../ui.js';
 import { state, changed, toast, agentById, teamById, latestRun, onServerEvent, loadSession, uiLang } from '../state.js';
 import { post, patch, upload, uploadUrl } from '../api.js';
 import { renderMarkdown } from '../markdown.js';
 import { t, getLang, locale, tmap } from '../i18n/index.js';
 import { MemoryBadge } from './memory.js';
 import { DraftChip } from './rolenotes.js';
-import { continueList, findInMessages, hideAsks, hideCheck } from '../chat-tools.js';
+import { continueList, findInMessages, hideAsks, hideCheck, hideGoal } from '../chat-tools.js';
+import { GoalCard, MissionLog, discardMission } from './mission.js';
 import { researcherOf, meetingView, boardCards } from '../office/meeting.js';
 
 export const sessionAgents = (s) => {
@@ -405,14 +406,14 @@ class Message extends Component {
           ${m.attachments?.length ? html`<div class="att">${m.attachments.map((a) => html`<${AttThumb} a=${a} />`)}</div>` : ''}
           ${ag && html`<span class="mention">@${ag.name} </span>`}${m.text}
         </div>
-        <div class="msg-foot meta" style="justify-content:flex-end">${m.status === 'queued' ? html`<span class="chip warn">${t('대기열 — 지금 작업 끝나면 실행')}</span>` : ''}
+        <div class="msg-foot meta" style="justify-content:flex-end">${m.status === 'queued' ? html`<span class="chip warn">${t('대기열 — 지금 작업 끝나면 실행')}</span>` : ''}${m.missionNote ? html`<span class="chip" title=${t('목표가 도는 동안 보낸 말이라 다음에 시작하는 단계에 추가 지시로 들어가')}>${t('추가 지시')}</span>` : ''}
           <span class="act">
             <button class="btn ghost sm" title=${t('입력창으로 가져와 고쳐 보내기')} onClick=${() => { state.ui.draft = m.text; changed(); }}><${Icon} name="edit" /> ${t('고쳐 쓰기')}</button>
             <button class="btn ghost sm" title=${t('같은 내용으로 다시 실행')} onClick=${() => resend(m)}><${Icon} name="refresh" /> ${t('다시 보내기')}</button>
           </span></div>
       </div></div>`;
     }
-    if (m.role === 'proposal') return html`<${HireCard} m=${m} />`;
+    if (m.role === 'proposal') return m.kind === 'goal' ? html`<${GoalCard} m=${m} />` : html`<${HireCard} m=${m} />`;
     if (m.role === 'system') return html`<div class="msg system"><span>${m.text}</span></div>`;
     const a = agentById(m.agentId) || { name: t('삭제된 에이전트'), emoji: '❔' };
     const streaming = m.status === 'streaming';
@@ -424,8 +425,8 @@ class Message extends Component {
     // 긴 답은 접어 둔다(앞부분만 보이고 '전체 보기'로 편다). 쓰는 중인 답과, 펼쳐 두기로 한 답(가장 최근 실행의 마지막 결과)은 펼친다
     this.seen ||= streaming; // 쓰는 걸 지켜본 답은 끝나도 접지 않는다(읽던 답이 갑자기 줄지 않게)
     const asks = (m.asks || []).filter((x) => x.status === 'open'); // 답은 입력창 위의 질문 창에서 한다
-    // 질문 블록은 입력창 위의 질문 창으로, 회의 차례의 조사 질문 블록은 글 아래 "확인 필요" 줄로 보여 준다
-    const body = hideCheck(hideAsks(m.text, m.asks, streaming), m.check, streaming);
+    // 질문 블록은 입력창 위의 질문 창으로, 회의 차례의 조사 질문 블록은 글 아래 "확인 필요" 줄로, 목표 카드 블록은 목표 카드로 보여 준다
+    const body = hideCheck(hideAsks(hideGoal(m.text, m.goalBlock, streaming), m.asks, streaming), m.check, streaming);
     // 조사 결과: 누구의 어떤 질문에 답했는지(질문이 든 차례 글에서 찾는다)
     const asker = m.checkOf ? state.sessionData[state.currentId]?.messages.find((x) => x.id === m.checkOf) : null;
     const chip = m.check ? checkChip(m.check.status) : null;
@@ -441,7 +442,7 @@ class Message extends Component {
       <${Avatar} agent=${a} />
       <div style="min-width:0">
         <div class="msg-head">
-          <b>${a.name}</b>${m.stageLabel ? html`<span class="chip">${m.stageLabel}</span>` : ''}${m.meeting ? html`<span class=${`chip${m.meeting.phase === 'conclude' ? ' accent' : ''}`}>${meetLabel(m.meeting)}</span>` : ''}${m.meeting?.opposer ? html`<span class="chip">${t('반대편')}</span>` : ''}${m.verdict ? html`<span class=${`chip${m.verdict.verdict === 'agree' ? ' accent' : ''}`}>${m.verdict.verdict === 'agree' ? t('합의') : t('계속')}</span>` : ''}${m.handoff ? html`<span class="chip accent">${t('인수인계 메모')}</span>` : ''}
+          <b>${a.name}</b>${m.stageLabel ? html`<span class="chip">${m.stageLabel}</span>` : ''}${m.meeting ? html`<span class=${`chip${m.meeting.phase === 'conclude' ? ' accent' : ''}`}>${meetLabel(m.meeting)}</span>` : ''}${m.meeting?.opposer ? html`<span class="chip">${t('반대편')}</span>` : ''}${m.verdict ? html`<span class=${`chip${m.verdict.verdict === 'agree' ? ' accent' : ''}`}>${m.verdict.verdict === 'agree' ? t('합의') : t('계속')}</span>` : ''}${m.handoff ? html`<span class="chip accent">${t('인수인계 메모')}</span>` : ''}${m.goalDraft ? html`<span class="chip accent">${t('목표 초안')}</span>` : ''}
           <${ProviderChip} id=${m.provider} />
           ${m.model && html`<span class="chip mono">${m.model}${m.effort ? ` · ${EFFORT_LABEL[m.effort] || m.effort}` : ''}</span>`}
           ${streaming && html`<span class="spin"></span>`}
@@ -692,11 +693,27 @@ function Composer({ s, run }) {
   const ta = useRef(null);
   const fileIn = useRef(null);
   const active = run && ['running', 'paused', 'waiting'].includes(run.status) && !run.endedAt;
+  // 목표 모드(결정 0014): 세션마다 켜고 끈다. 켤 수 없으면 서버가 준 이유를 토글 옆에 보여 준다
+  const [goalWhy, setGoalWhy] = useState('');
+  const [goalKey, setGoalKey] = useState(0); // 바꾸지 못했을 때 스위치를 서버 값으로 다시 그린다
+  const goalOn = !!s.goalMode;
+  const working = s.mission && ['active', 'waiting'].includes(s.mission.status); // 이때 보낸 말(@이름 없이)은 다음 단계의 추가 지시가 된다
+  const setGoal = async (on) => {
+    try {
+      await patch(`/api/sessions/${s.id}`, { goalMode: on });
+      if (state.sessionData[s.id]) state.sessionData[s.id].goalMode = on;
+      setGoalWhy('');
+      changed();
+    } catch (e) {
+      setGoalWhy(e.message);
+      setGoalKey((k) => k + 1);
+    }
+  };
 
   useEffect(() => { if (state.ui.draft) { setText(state.ui.draft); state.ui.draft = null; setTimeout(() => ta.current?.focus(), 0); } });
   // 우클릭 메뉴의 '지시하기': 받는 에이전트를 정하고 입력칸으로 간다
   useEffect(() => { if (state.ui.mentionTo) { setMention(state.ui.mentionTo); state.ui.mentionTo = null; setTimeout(() => ta.current?.focus(), 0); } });
-  useEffect(() => { setAtts([]); setMention(null); }, [s.id]);
+  useEffect(() => { setAtts([]); setMention(null); setGoalWhy(''); }, [s.id]);
   useEffect(() => {
     const el = ta.current;
     if (!el) return;
@@ -755,6 +772,7 @@ function Composer({ s, run }) {
     try {
       const r = await post(`/api/sessions/${s.id}/messages`, body);
       if (r.steered) toast(t('작업 중인 에이전트에게 지시를 전달했어'), 'ok', 1800);
+      else if (r.noted) toast(t('다음에 시작하는 단계에 넣을 추가 지시로 받았어'), 'ok', 2200);
       else if (r.queued) toast(t('대기열에 넣었어 — 지금 작업이 끝나면 실행돼'), 'info', 2200);
     } catch (e) {
       toast(e.message, 'error');
@@ -804,6 +822,10 @@ function Composer({ s, run }) {
 
   return html`<div class="composer-wrap">
     <${AskPanel} s=${s} />
+    ${s.mission?.status === 'cut' && html`<div class="warnbox row" role="note" style="max-width:860px;margin:0 auto 8px">
+      <span>⚠ ${t('앱이 꺼져서 목표가 끊겼어. 저절로 다시 시작하지 않아.')} ${t('버리면 새 요청을 보낼 수 있어.')}</span>
+      <span class="grow"></span><button class="btn sm danger" onClick=${() => discardMission(s.id, s.mission.id)}>${t('버리기')}</button>
+    </div>`}
     ${notReady.length > 0 && !active && html`<div class="warnbox" style="max-width:860px;margin:0 auto 8px">
       ⚠ ${notReady.map((a) => `${a.name}(${state.providers.find((p) => p.id === a.provider)?.label})`).join(', ')} — ${t('로그인(또는 API 키)이 필요해 보여.')}
       <a href="#" onClick=${(e) => { e.preventDefault(); state.ui.settingsTab = 'accounts'; import('../state.js').then((m) => m.go('settings')); }}>${t('AI 계정 확인')}</a>
@@ -820,14 +842,18 @@ function Composer({ s, run }) {
       </div>`}
       ${atts.length > 0 && html`<div class="atts">${atts.map((a) => html`<${AttThumb} a=${a} uploading=${!!a.tmp} onRemove=${() => setAtts((x) => x.filter((y) => y !== a))} />`)}</div>`}
       <textarea ref=${ta} rows="1" value=${text} onInput=${onInput} onKeyDown=${onKey} onPaste=${onPaste}
-        placeholder=${active ? (mode === 'steer' ? t('작업 중인 에이전트에게 바로 지시하기… (Enter)') : t('대기열에 넣을 다음 요청… (Enter)')) : (target ? t('{name}에게 맡길 일을 적어줘 — 이미지 붙여넣기·@·/ 가능', { name: target.name }) : t('에이전트에게 맡길 일을 적어줘 — 이미지 붙여넣기·@·/ 가능'))}></textarea>
+        placeholder=${working && !mAgent ? t('다음에 시작하는 단계에 넣을 추가 지시… (Enter)') : active ? (mode === 'steer' ? t('작업 중인 에이전트에게 바로 지시하기… (Enter)') : t('대기열에 넣을 다음 요청… (Enter)')) : goalOn && !mAgent ? t('목표로 만들 요청을 적어줘 — 진행자가 먼저 목표 카드를 써') : (target ? t('{name}에게 맡길 일을 적어줘 — 이미지 붙여넣기·@·/ 가능', { name: target.name }) : t('에이전트에게 맡길 일을 적어줘 — 이미지 붙여넣기·@·/ 가능'))}></textarea>
       <div class="composer-bar">
         <input type="file" multiple hidden ref=${fileIn} onChange=${(e) => { addFiles([...e.target.files]); e.target.value = ''; }} />
         <button class="icon-btn" title=${t('파일·이미지 첨부')} aria-label=${t('첨부')} onClick=${() => fileIn.current.click()}><${Icon} name="clip" /></button>
         <button class="icon-btn" title=${t('에이전트 지정(@)')} aria-label=${t('에이전트 지정')} onClick=${() => { setText((x) => `${x}${x && !x.endsWith(' ') ? ' ' : ''}@`); setPop({ kind: '@', q: '', idx: 0 }); ta.current.focus(); }}><${Icon} name="at" /></button>
         <button class="icon-btn" title=${t('스킬(/)')} aria-label=${t('스킬')} onClick=${() => { setText((x) => (x.startsWith('/') ? x : `/${x}`)); setPop({ kind: '/', q: '', idx: 0 }); ta.current.focus(); }}><${Icon} name="spark" /></button>
+        <div class="row goal-toggle" title=${t('켜면 보낸 요청을 진행자가 먼저 목표 카드(목표·합격 기준)로 만들고, 네가 확인한 뒤에 팀이 그 목표를 들고 일해. @이름으로 보낸 말은 지금처럼 실행돼.')}>
+          <${Toggle} key=${goalKey} checked=${goalOn} title=${t('목표까지')} onChange=${setGoal} /><span class="small">${t('목표까지')}</span>
+        </div>
+        ${goalWhy && html`<span class="small muted goal-why" role="status">${goalWhy}</span>`}
         ${mAgent && html`<span class="chip accent">@${mAgent.name}<span class="x" onClick=${() => setMention(null)}>✕</span></span>`}
-        ${active && html`<div class="seg mode-chip" title=${t('작업 중에 보내는 메시지 처리 방법')}>
+        ${active && !(working && !mAgent) && html`<div class="seg mode-chip" title=${t('작업 중에 보내는 메시지 처리 방법')}>
           <button class=${mode === 'steer' ? 'on' : ''} onClick=${() => setMode('steer')}>${t('지금 끼어들기')}</button>
           <button class=${mode === 'queue' ? 'on' : ''} onClick=${() => setMode('queue')}>${t('다음 차례로')}</button>
         </div>`}
@@ -906,6 +932,7 @@ export function RightPanel({ s }) {
       <button class=${tab === 'team' ? 'on' : ''} onClick=${() => setTab('team')}>${t('팀 현황')}</button>
       <button class=${tab === 'usage' ? 'on' : ''} onClick=${() => setTab('usage')}>${t('사용량·한도')}</button>
       <button class=${tab === 'log' ? 'on' : ''} onClick=${() => setTab('log')}>${t('활동 로그')}</button>
+      <button class=${tab === 'mission' ? 'on' : ''} onClick=${() => setTab('mission')}>${t('진행 기록')}</button>
     </div>
     <div class="right-body">
       ${tab === 'team' && html`
@@ -942,6 +969,7 @@ export function RightPanel({ s }) {
         ${L.map((x) => html`<div class="li"><span class="tm">${new Date(x.at).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).slice(-8)}</span><span><b>${agentById(x.agentId)?.name || x.agentId}</b> ${x.text}</span></div>`)}
         ${!L.length && html`<div class="muted small">${t('이 세션에서 아직 활동이 없어. (새로고침하면 초기화)')}</div>`}
       </div>`}
+      ${tab === 'mission' && html`<${MissionLog} s=${s} />`}
     </div>
   </aside>`;
 }

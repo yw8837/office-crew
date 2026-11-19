@@ -498,6 +498,17 @@ pre.raw { background: var(--code-bg); padding: 10px 12px; border-radius: 10px; f
 .hire-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 @media (max-width: 560px) { .hire-fields { grid-template-columns: 1fr; } }
 
+/* 목표 카드(영입 제안 카드와 같은 틀)와 진행 기록 탭, 입력창 옆의 "목표까지" 스위치 */
+.goal-sec { display: flex; flex-direction: column; gap: 2px; }
+.goal-sec ol, .goal-sec ul { margin: 2px 0 0; padding-left: 20px; }
+.goal-edit { display: flex; flex-direction: column; gap: 8px; }
+.goal-edit label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.goal-toggle { gap: 6px; flex: none; }
+.goal-why { max-width: 280px; }
+.right-tabs { flex-wrap: wrap; }
+.log button.li { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.log button.li:hover span:last-child, .log button.li:focus-visible span:last-child { text-decoration: underline; }
+
 /* 마을 띠가 낮을 때도 그림이 띠 높이에 맞게 재어지도록(그림 자체의 최소 높이 260px가 띠보다 크면 구도가 어긋난다) */
 .office-wrap:not(.full) .office-host .office-root { min-height: 0; }
 /* 마을 띠 아래의 상태 칩: 누가 지금 무엇을 하는지 한 줄로. 사람이 봐야 하는 것(승인 대기·오류)이 맨 앞에 온다 */

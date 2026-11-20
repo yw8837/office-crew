@@ -531,6 +531,17 @@ function Chat({ s, run }) {
         return;
       }
     }
+    const h = run && !run.endedAt && run.status === 'waiting' && (run.hold?.reason === 'mission' || run.hold?.reason === 'cap') ? run.hold : null;
+    if (el && h && gateAt.current !== h.at) {
+      gateAt.current = h.at;
+      const g = stick.current ? el.querySelector('.chat-inner .mission-gate') : null;
+      if (g) {
+        const bar = el.querySelector('.chat-top')?.offsetHeight || 0;
+        el.scrollTop += g.getBoundingClientRect().top - el.getBoundingClientRect().top - bar - 8;
+        stick.current = false; // 창을 읽는 동안 맨 아래로 다시 끌어내리지 않는다
+        return;
+      }
+    }
     if (el && grow.current) { el.scrollTop += el.scrollHeight - grow.current; grow.current = 0; }
     else if (el && stick.current) el.scrollTop = el.scrollHeight;
   });
@@ -560,6 +571,7 @@ function Chat({ s, run }) {
   const keepOpen = (m) => m === lastAgent || !!m.error
     || (lastRun && m.runId === lastRun.id && (m.meeting ? m.meeting.phase === 'conclude' : m.stageIndex === lastRun.stages.length - 1));
   const unstick = () => { stick.current = false; };
+  const gateAt = useRef(null); // 마지막으로 머리를 보여 준 목표 대기(hold.at)
   // 내 요청 띠: 가장 최근에 보낸 내 말(답이 길어지면 금방 위로 밀려 안 보이니 대화 위에 붙여 둔다)
   const mine = s.messages.findLast((m) => m.role === 'user' && m.text && !m.handoffAsk && !m.hire && !m.missionNote); // 목표가 도는 동안 보낸 추가 지시는 원래 요청이 아니다
   const after = mine ? s.messages.length - 1 - s.messages.indexOf(mine) : 0;
@@ -619,6 +631,9 @@ function Welcome({ s }) {
   </div>`;
 }
 
+// 목표의 판정 뒤 묻기·호출 상한으로 기다리는 단계면 단계 띠에 보일 표시(아니면 ''). 끝난 판정 단계가 ✓ 로 보여 다 끝난 것처럼 읽히지 않게(결정 0015)
+const goalWait = (run, i) => (run.status === 'waiting' && run.hold?.stageIndex === i ? { mission: '🎯', cap: '🔢' }[run.hold.reason] || '' : '');
+
 // ── 진행 바 + 승인/오류 카드 ──
 function RunBar({ s, run }) {
   const active = run && ['running', 'paused', 'waiting'].includes(run.status) && !run.endedAt;
@@ -628,10 +643,10 @@ function RunBar({ s, run }) {
   const ctl = (action) => post(`/api/sessions/${s.id}/control`, { action }).catch((e) => toast(e.message, 'error'));
   return html`<div class="runbar">
     <div class="stages">
-      ${run.stages.map((st, i) => html`${i > 0 && html`<span class="stage-arrow">→</span>`}<span class=${`stage ${st.status}`} title=${`${st.agentIds.map((id) => agentById(id)?.name).join(', ')}${st.note ? ` · ${st.note}` : ''}`}>
-        ${st.status === 'running' ? html`<span class="spin" style="width:10px;height:10px"></span>` : st.status === 'done' ? '✓' : st.status === 'error' ? '⚠' : st.status === 'review' ? '✋' : st.status === 'skipped' ? '⤼' : `${i + 1}`}
+      ${run.stages.map((st, i) => { const wait = goalWait(run, i); return html`${i > 0 && html`<span class="stage-arrow">→</span>`}<span class=${`stage ${wait ? 'review' : st.status}`} title=${`${st.agentIds.map((id) => agentById(id)?.name).join(', ')}${st.note ? ` · ${st.note}` : ''}`}>
+        ${wait ? wait : st.status === 'running' ? html`<span class="spin" style="width:10px;height:10px"></span>` : st.status === 'done' ? '✓' : st.status === 'error' ? '⚠' : st.status === 'review' ? '✋' : st.status === 'skipped' ? '⤼' : `${i + 1}`}
         ${st.label}${st.agentIds.length > 1 ? ` ×${st.agentIds.length}` : ''}${st.meetingNow ? ` · ${meetLabel(st.meetingNow)}` : st.meeting ? ` · ${t('회의')}` : ''}${st.status === 'skipped' ? ` (${t('건너뜀')})` : st.note ? ` (${st.note})` : ''}
-      </span>`)}
+      </span>`; })}
       ${!active && html`<span class=${`chip ${run.status === 'done' ? 'ok' : run.status === 'error' ? 'err' : 'warn'}`} style="margin-left:6px">${{ done: t('완료'), error: t('오류'), stopped: t('중지됨') }[run.status] || run.status}</span>`}
     </div>
     <${MemoryBadge} s=${s} />

@@ -120,7 +120,8 @@ export function GoalCard({ m }) {
       return false;
     }
   };
-  const review = rv ? { reviewerId: rv.reviewerId || null, drop: (rv.droppable || []).map((d) => d.index).filter((i) => !kept.includes(i)) } : undefined;
+  // 보여 주던 뺄 단계 목록도 같이 보낸다(서버가 지금 팀과 글자까지 대조한다)
+  const review = rv ? { reviewerId: rv.reviewerId || null, droppable: rv.droppable || [], drop: (rv.droppable || []).map((d) => d.index).filter((i) => !kept.includes(i)) } : undefined;
   const start = () => send('confirm', { missionId: m.missionId, expected: v, review });
   const edited = edit && { goal: edit.goal.trim(), criteria: lines(edit.criteria), outOfScope: lines(edit.outOfScope), userDecides: lines(edit.userDecides) };
   const canEdited = !!edited && !!edited.goal && edited.criteria.length > 0;
@@ -132,7 +133,8 @@ export function GoalCard({ m }) {
     <div>${rv.reviewerId ? t('검수: {name}이(가) 기준마다 판정해.', { name: rv.reviewerName || agentById(rv.reviewerId)?.name || rv.reviewerId }) : t('검수할 다른 팀원이 없어서 판정 없이 끝나고 네게 물어.')}</div>
     ${(rv.droppable || []).map((d) => html`<label class="goal-keep small">
       <input type="checkbox" checked=${kept.includes(d.index)} disabled=${busy} onChange=${(e) => keep(d.index, e.target.checked)} />
-      <span><b>${t('남기기')}</b> · "${d.label}"${d.names?.length ? ` (${d.names.join(', ')})` : ''} — ${kept.includes(d.index) ? t('남겨서 그대로 돌려.') : t('이 단계는 기준 판정으로 대신해서 건너뛰어.')}</span>
+      <span><b>${t('남기기')}</b> · "${d.label}"${d.names?.length ? ` (${d.names.join(', ')})` : ''} — ${kept.includes(d.index) ? t('남겨서 그대로 돌려.') : t('이 단계는 기준 판정으로 대신해서 건너뛰어.')}
+        ${d.instruction && html`<span class="muted goal-keep-ins">${t('이 단계의 지시(건너뛰면 안 쓰여): {text}', { text: d.instruction })}</span>`}</span>
     </label>`)}
   </div>`;
   const openEdit = () => setEdit({ goal: v.goal, criteria: v.criteria.join('\n'), outOfScope: v.outOfScope.join('\n'), userDecides: v.userDecides.join('\n') });
@@ -196,8 +198,8 @@ export function MissionGate({ s, run }) {
     return html`<div class="ask-panel mission-gate" role="group" aria-label=${t('호출 상한')}>
       <div class="ask-head"><span class="ask-who">🔢 ${t('목표의 호출 상한')}</span></div>
       <div class="ask-question">${t('호출 {used}번에 닿았어(상한 {cap}번). 더 할까?', { used: hold.used, cap: hold.cap })}</div>
-      <div class="small muted">${t('다음 단계를 시작하기 전에 멈췄어. 단계 안의 다시 시도·이어받기는 상한을 넘을 수 있어.')}</div>
-      <div class="ask-rows">${row(1, t('{n}번 더', { n: 20 }), t('상한을 늘리고 이어서 해.'), 'more')}</div>
+      <div class="small muted">${t('다음 단계를 시작하기 전에 멈췄어. 단계 안의 다시 시도·이어받기는 상한을 넘을 수 있고, 회의 단계는 인원만 보고 시작해서 바퀴 수만큼 더 넘을 수 있어.')}</div>
+      <div class="ask-rows">${row(1, t('{n}번 더', { n: hold.step }), t('상한을 늘리고 이어서 해.'), 'more')}</div>
       <div class="ask-foot"><span class="grow"></span><button type="button" class="btn sm danger" disabled=${busy} onClick=${() => ctl('stop')}>${t('그만')}</button></div>
     </div>`;
   }
@@ -212,7 +214,7 @@ export function MissionGate({ s, run }) {
     ${left.length > 0 && html`<div class="crit-table" role="list" aria-label=${t('남은 기준')}>${left.map((c) => html`<${CritRow} c=${{ ...c, text: `${c.id}. ${c.text}` }} />`)}</div>`}
     <div class="ask-rows">
       ${row(1, notes ? t('그대로 끝') : t('받아들이기'), notes ? t('추가 지시는 반영하지 않고 지금 판정으로 끝내.') : t('남은 기준은 판정 그대로 두고 끝내.'), 'accept')}
-      ${hold.more !== false && row(2, notes ? t('반영해서 한 번 더') : t('한 번 더'), notes ? t('마지막 일 단계가 추가 지시를 넣어 다시 하고, 다시 검수해.') : t('마지막 일 단계가 걸린 기준을 고친 뒤 다시 검수해.'), 'more')}
+      ${hold.more !== false && row(2, notes ? t('반영해서 한 번 더') : t('한 번 더'), notes ? (hold.reviewer === false ? t('마지막 일 단계가 추가 지시를 넣어 다시 해. 검수할 사람이 없어서 그 뒤에 판정 없이 다시 물어.') : t('마지막 일 단계가 추가 지시를 넣어 다시 하고, 다시 검수해.')) : t('마지막 일 단계가 걸린 기준을 고친 뒤 다시 검수해.'), 'more')}
     </div>
     ${hold.more === false && html`<div class="small muted">${t('검수할 다른 팀원이 없어서 다시 고쳐도 판정할 사람이 없어.')}</div>`}
     <div class="ask-foot"><span class="grow"></span><button type="button" class="btn sm danger" disabled=${busy} onClick=${() => ctl('stop')}>${t('그만')}</button></div>

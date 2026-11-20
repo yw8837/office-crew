@@ -513,6 +513,7 @@ pre.raw { background: var(--code-bg); padding: 10px 12px; border-radius: 10px; f
 .goal-review { gap: 4px; }
 .goal-keep, .goal-edit label.goal-keep { display: flex; flex-direction: row; align-items: flex-start; gap: 6px; color: var(--text-2); cursor: pointer; }
 .goal-keep input { margin-top: 2px; }
+.goal-keep-ins { display: block; overflow-wrap: anywhere; }
 .crit-table { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .crit { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
 .crit-head { display: flex; align-items: flex-start; gap: 6px; }

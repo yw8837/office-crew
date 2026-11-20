@@ -46,29 +46,39 @@ export async function discardMission(sid, missionId) {
   try { await post(`/api/sessions/${sid}/mission/discard`, { missionId }); } catch (e) { toast(e.message, 'error'); }
 }
 
-// 끊긴 목표를 이어서 하면 어디서부터 다시 도는지 한 줄(결정 0016). 끊긴 자리(m.at)와 끊긴 실행의 단계 이름으로. 자리가 적혀 있지 않은 옛 목표면 null
+// 끊긴 목표를 이어서 하면 어디서부터 다시 도는지 한 줄(결정 0016). 끊긴 자리(m.at)와 끊긴 실행의 단계로, 서버가 하는 대로 적는다. 자리가 적혀 있지 않은 옛 목표면 null
 export function resumeFrom(s, m) {
   const at = m?.at;
   if (!at || !Array.isArray(m.keep)) return null;
-  if (at.wait) return t('끊기기 전에 묻던 질문을 AI 호출 없이 다시 띄워.');
+  if (at.wait) return t('끊기기 전에 묻던 질문을 다시 띄워(AI 호출 없음).'); // 승인·오류·판정 뒤 묻기·호출 상한
   const run = (s?.runs || []).findLast((r) => r.mission === 'work' && r.missionId === m.id);
-  const label = run?.stages?.[at.stageIndex]?.label || '?';
+  const st = run?.stages?.[at.stageIndex];
+  const label = st?.label || '?';
+  if (at.phase === 'review') return st?.mission === 'review' ? t('"{label}" 단계부터 다시 해.', { label }) : t('검수할 다른 팀원이 없어서 판정 없이 바로 물어.'); // 기준 판정은 늘 새 대화(바꿀 것 없음)
   const head = at.back ? t('"{label}" 단계의 되돌림(걸린 기준 고치기)부터 다시 해.', { label }) : t('"{label}" 단계부터 다시 해.', { label });
-  return at.working?.length ? `${head} ${t('그 단계 담당은 새 대화로 시작해.')}` : head;
+  if (st?.meeting && !at.back) return `${head} ${t('회의는 1바퀴부터 다시 하고, 참석자 전원이 새 대화로 시작해.')}`;
+  const names = (at.working || []).map((id) => agentById(id)?.name || id);
+  const parts = [head];
+  if (at.finished?.length) parts.push(t('이미 끝낸 담당의 답은 그대로 써.'));
+  if (names.length) parts.push(t('끊긴 담당({names})만 새 대화로 시작해.', { names: names.join(', ') }));
+  return parts.join(' ');
 }
+
+// 이어서가 거절된 이유와 누르는 중 표시는 끊긴 목표 알림 세 군데(카드·진행 기록·입력창 위)가 같이 쓴다(목표 id 마다)
+const resumeUi = () => (state.ui.resume ||= {});
 
 // 끊긴 목표 알림: 이어서(주 단추) / 버리기, 어디서부터 다시 도는지 한 줄. 이어서가 거절되면(409·400) 그 이유를 보여 준다.
 // compact: 입력창 위처럼 좁은 자리(한 줄로)
 export function CutBox({ s, m, compact = false }) {
-  const [busy, setBusy] = useState(false);
-  const [why, setWhy] = useState('');
+  const ui = resumeUi()[m.id] || {};
+  const busy = !!ui.busy;
+  const why = ui.why || '';
   const from = resumeFrom(s, m);
+  const set = (v) => { resumeUi()[m.id] = { ...(resumeUi()[m.id] || {}), ...v }; changed(); };
   const resume = async () => {
     if (busy) return;
-    setBusy(true);
-    setWhy('');
-    try { await post(`/api/sessions/${s.id}/mission/resume`, { missionId: m.id }); } catch (e) { setWhy(e.message); toast(e.message, 'error'); }
-    setBusy(false);
+    set({ busy: true, why: '' });
+    try { await post(`/api/sessions/${s.id}/mission/resume`, { missionId: m.id }); set({ busy: false }); } catch (e) { set({ busy: false, why: e.message }); toast(e.message, 'error'); }
   };
   return html`<div class=${compact ? 'warnbox row' : 'warnbox'} role="note" style=${compact ? 'max-width:860px;margin:0 auto 8px;flex-wrap:wrap' : ''}>
     <span>${compact ? '⚠ ' : ''}${t('앱이 꺼져서 목표가 끊겼어. 저절로 다시 시작하지 않아.')} ${from ? html`<span class="small">${from}</span>` : t('이 목표는 끊긴 자리가 적혀 있지 않아서 이어 갈 수 없어. 버리고 요청을 다시 보내 줘.')}</span>

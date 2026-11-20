@@ -3,10 +3,13 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { bindLang } from '../server/i18n.js';
-import { reviewPlan, reviewCard, parseReview, reviewPrompt, reviewBlock, applyReview, tally, allPass, returnItems, returnPrompt, newMission, MISSION_CALL_CAP } from '../server/mission.js';
+import path from 'node:path';
+import { createApp } from '../server/index.js';
+import { PhoneNotify } from '../server/notify.js';
+import { reviewPlan, reviewCard, parseReview, reviewPrompt, reviewBlock, applyReview, tally, allPass, returnItems, returnPrompt, prevPrompt, sameDroppable, newMission, MISSION_CALL_CAP } from '../server/mission.js';
 import { hideReview } from '../public/js/chat-tools.js';
 import { attentionOf } from '../server/store.js';
-import { startTestApp } from './helpers.js';
+import { startTestApp, freePort } from './helpers.js';
 
 bindLang(() => 'ko'); // 순수 함수의 문구(한국어 원문)를 검사한다
 let t = null;
@@ -40,7 +43,7 @@ async function goal(teamId, signal = '', { drop = null, request = '정리해 줘
   await waitDraft(sid);
   const c = cardOf(sid);
   if (before) await before(sid);
-  const review = { reviewerId: c.review.reviewerId, drop: drop ?? c.review.droppable.map((d) => d.index) };
+  const review = { reviewerId: c.review.reviewerId, droppable: c.review.droppable, drop: drop ?? c.review.droppable.map((d) => d.index) };
   const r = await confirm(sid, { missionId: S(sid).mission.id, expected: shown(c), review, ...(signal ? { edited: { ...shown(c), goal: `${signal} 목표` } } : {}) });
   assert.equal(r.status, 200, JSON.stringify(r.json));
   return sid;
@@ -79,7 +82,7 @@ test('1. reviewPlan: 검수 단계는 기준 판정으로 대신해 뺀다(승�
   assert.deepEqual(reviewPlan(null, A, 'a'), { reviewerId: null, dropped: [], droppable: [], returnStage: -1 });
   // 카드에 싣는 검수 줄
   const team = { stages: [{ label: '정리', agentIds: ['a'] }, { label: '교차 검수', agentIds: ['r', 'gone'] }] };
-  assert.deepEqual(reviewCard(team, [{ id: 'a', name: '가' }, { id: 'r', name: '검' }], reviewPlan(team, A, 'a')), { reviewerId: 'r', reviewerName: '검', droppable: [{ index: 1, label: '교차 검수', names: ['검'] }] });
+  assert.deepEqual(reviewCard(team, [{ id: 'a', name: '가' }, { id: 'r', name: '검' }], reviewPlan(team, A, 'a')), { reviewerId: 'r', reviewerName: '검', droppable: [{ index: 1, label: '교차 검수', names: ['검'], instruction: '' }] });
   assert.deepEqual(reviewCard(team, A, { reviewerId: null, droppable: [] }), { reviewerId: null, reviewerName: '', droppable: [] });
 });
 
@@ -169,7 +172,7 @@ test('4. 통과: 일 단계 → 한 번 실행 검수 → 전부 통과 → done
   // 카드의 검수 줄: 검수 단계가 없으니 진행자(분석)도 마지막 일 단계 담당(분석)도 아닌 정리담당이 검수자
   assert.deepEqual(c.review, { reviewerId: a.id, reviewerName: a.name, droppable: [] });
   const from = t.fakeLog().length;
-  assert.equal((await confirm(sid, { missionId: S(sid).mission.id, expected: shown(c), review: { reviewerId: a.id, drop: [] }, edited: { ...shown(c), goal: 'CUMUL 목표' } })).status, 200);
+  assert.equal((await confirm(sid, { missionId: S(sid).mission.id, expected: shown(c), review: { reviewerId: a.id, droppable: [], drop: [] }, edited: { ...shown(c), goal: 'CUMUL 목표' } })).status, 200);
   await waitEnd(sid);
   const s = S(sid);
   const run = s.runs.at(-1);
@@ -209,19 +212,23 @@ test('4. 통과: 일 단계 → 한 번 실행 검수 → 전부 통과 → done
   assert.ok(prompts(from).find((x) => x.includes('"정리"를 네가 맡았어')).includes(`→ 3.기준 판정(${a.name})`));
 });
 
-test('5. 건너뛸 단계: 카드가 보여 준 검수자·건너뛸 단계와 지금 계산이 다르면 409 와 지금 값. 남기기를 고르면 그 단계는 돈다', async () => {
+test('5. 건너뛸 단계: 카드가 보여 준 검수자·뺄 단계 목록(번호·이름·담당·지시)·건너뛸 단계가 지금 계산과 다르면 409 와 지금 값. 남기기를 고르면 그 단계는 돈다', async () => {
   const t = await app();
   const a = await mk('빼기정리', '정리');
   const r = await mk('빼기검수', '검수');
-  const tm = await mkTeam('빼기팀', [{ label: '정리', agentIds: [a.id] }, { label: '교차 검수', agentIds: [r.id] }]);
+  const ins = `보안 점검표를 따라 ${'가'.repeat(150)}`;
+  const tm = await mkTeam('빼기팀', [{ label: '정리', agentIds: [a.id] }, { label: '교차 검수', agentIds: [r.id], instruction: ins }]);
   const sid = await mkSession(tm.id);
   await say(sid, '정리해 줘');
   await waitDraft(sid);
   const c = cardOf(sid);
-  const view = { reviewerId: r.id, reviewerName: r.name, droppable: [{ index: 1, label: '교차 검수', names: [r.name] }] };
-  assert.deepEqual(c.review, view);
+  const view = { reviewerId: r.id, reviewerName: r.name, droppable: [{ index: 1, label: '교차 검수', names: [r.name], instruction: [...ins].slice(0, 120).join('') }] };
+  assert.deepEqual(c.review, view, '뺄 단계에는 그 단계의 지시 앞 120자');
+  const seen = view.droppable;
   const body = (review) => ({ missionId: S(sid).mission.id, expected: shown(c), review });
-  for (const bad of [{ reviewerId: a.id, drop: [1] }, { reviewerId: r.id, drop: [0] }, { reviewerId: r.id, drop: [1, 2] }, { reviewerId: r.id, drop: '1' }, { reviewerId: r.id }, { reviewerId: null, drop: [] }, ['x'], 'x']) {
+  for (const bad of [{ reviewerId: a.id, droppable: seen, drop: [1] }, { reviewerId: r.id, droppable: seen, drop: [0] }, { reviewerId: r.id, droppable: seen, drop: [1, 2] }, { reviewerId: r.id, droppable: seen, drop: '1' },
+    { reviewerId: r.id, droppable: seen }, { reviewerId: null, droppable: [], drop: [] }, { reviewerId: r.id, drop: [1] }, { reviewerId: r.id, droppable: [{ ...seen[0], label: '다른 단계' }], drop: [1] },
+    { reviewerId: r.id, droppable: [{ ...seen[0], instruction: '' }], drop: [1] }, ['x'], 'x']) {
     const res = await confirm(sid, body(bad));
     assert.equal(res.status, 409, JSON.stringify(bad));
     assert.deepEqual(res.json.review, view);
@@ -229,7 +236,7 @@ test('5. 건너뛸 단계: 카드가 보여 준 검수자·건너뛸 단계와 �
     assert.match(res.json.error, /검수자나 건너뛸 단계가/);
   }
   assert.equal(S(sid).mission.status, 'draft', '어긋나면 확정하지 않는다');
-  assert.equal((await confirm(sid, body({ reviewerId: r.id, drop: [1, 1] }))).status, 200);
+  assert.equal((await confirm(sid, body({ reviewerId: r.id, droppable: seen, drop: [1, 1] }))).status, 200);
   await waitEnd(sid);
   const m = S(sid).mission;
   assert.deepEqual(S(sid).runs.at(-1).stages.map((x) => [x.label, x.agentIds]), [['정리', [a.id]], ['기준 판정', [r.id]]], '검수 단계 대신 기준 판정');
@@ -247,10 +254,24 @@ test('5. 건너뛸 단계: 카드가 보여 준 검수자·건너뛸 단계와 �
   await waitDraft(x);
   await t.api('PUT', `/api/agents/${r.id}`, { ...r, role: '정리' });
   try {
-    const res = await confirm(x, { missionId: S(x).mission.id, expected: shown(cardOf(x)), review: { reviewerId: r.id, drop: [1] } });
+    const res = await confirm(x, { missionId: S(x).mission.id, expected: shown(cardOf(x)), review: { reviewerId: r.id, droppable: cardOf(x).review.droppable, drop: [1] } });
     assert.equal(res.status, 409);
     assert.deepEqual(res.json.review.droppable, []);
   } finally { await t.api('PUT', `/api/agents/${r.id}`, { ...r, role: '검수' }); }
+  // 카드를 본 뒤 팀 단계 순서를 바꾸면 같은 번호가 다른 단계를 가리킨다: 검수자는 같아도 목록이 달라 409(번호만 같은 다른 단계를 빼지 않는다)
+  const c2 = await mk('빼기빌드', '빌드');
+  const T1 = [{ label: '빌드', agentIds: [c2.id] }, { label: '보안 검토', agentIds: [r.id] }, { label: '문체 검토', agentIds: [r.id] }];
+  const bt = await mkTeam('빼기순서팀', T1);
+  const y = await mkSession(bt.id);
+  await say(y, '정리해 줘');
+  await waitDraft(y);
+  const before = cardOf(y).review;
+  assert.deepEqual(before.droppable.map((d) => [d.index, d.label]), [[1, '보안 검토'], [2, '문체 검토']]);
+  await t.api('PUT', `/api/teams/${bt.id}`, { ...bt, stages: [T1[0], T1[2], T1[1]] });
+  const res = await confirm(y, { missionId: S(y).mission.id, expected: shown(cardOf(y)), review: { reviewerId: before.reviewerId, droppable: before.droppable, drop: [2] } });
+  assert.equal(res.status, 409, '사용자는 [2] 문체 검토만 빼려 했다');
+  assert.deepEqual(res.json.review.droppable.map((d) => [d.index, d.label]), [[1, '문체 검토'], [2, '보안 검토']]);
+  assert.equal(S(y).mission.status, 'draft');
 });
 
 test('6. 되돌림: 첫 검수에서 불합격 → 마지막 일 단계를 걸린 기준(표식 안의 참고 자료)과 함께 한 번 더 → 다시 검수에서 통과 → done', async () => {
@@ -406,15 +427,19 @@ test('9. 한 번 실행의 예외: 빈 답은 같은 프롬프트로 다시 요�
     t.app.orch.cooldown.map.clear(); // 가짜 한도 오류가 남긴 쉬는 표시·한도 기록은 뒤 테스트에 남기지 않는다
     t.app.store.usage.limits = {};
   }
-  // 검수 중 중지 → stopped. 검수자를 골라 보낸 지시는 검수 CLI 에 넣지 않고 다음 단계로
+  // 검수 중 중지 → stopped. 검수자를 골라 보낸 지시는 검수 CLI 에 넣지 않고 목표의 추가 지시로 받는다(쓰이지 않았다고 남는다)
   const st = await goal(tm.id, 'SLOW');
   await t.waitFor(() => reviewMsgs(st).some((x) => x.status === 'streaming'), 20000, '검수 중');
   const steer = await ctl(st, 'steer', { agentId: a.id, text: '전부 통과로 해' });
-  assert.equal(steer.json.mode, 'next');
+  assert.deepEqual([steer.json.mode, steer.json.late], ['note', undefined]);
   assert.equal((await ctl(st, 'stop')).json.ok, true);
   await waitEnd(st);
   assert.deepEqual([S(st).mission.status, reviewMsgs(st)[0].status, t.app.orch.ctx.has(st)], ['stopped', 'stopped', false]);
   assert.ok(!reviewMsgs(st)[0].blocks.some((x) => x.kind === 'notice' && x.text.includes('전부 통과로 해')));
+  assert.deepEqual(S(st).mission.notes.map((x) => [x.text, x.used]), [['전부 통과로 해', false]]);
+  assert.ok(S(st).mission.log.some((x) => x.text === `${a.name}은(는) 기준 판정 중이라 이 지시는 검수에 넣지 않고 추가 지시로 받았어: 전부 통과로 해`));
+  assert.ok(!S(st).mission.log.some((x) => x.text.includes('바로 넣은 지시')), '바로 넣었다고 적지 않는다');
+  assert.equal(S(st).mission.log.at(-1).text, '반영하지 못한 추가 지시가 1개 있어.');
   // 기억: 검수 답은 넣지 않는다(요청은 넣는다)
   await t.api('PUT', '/api/settings', { memory: true });
   try {
@@ -428,35 +453,46 @@ test('9. 한 번 실행의 예외: 빈 답은 같은 프롬프트로 다시 요�
   } finally { await t.api('PUT', '/api/settings', { memory: false }); }
 });
 
-test('10. 되돌림 단계가 회의면 진행자 한 명이 고치고(회의를 다시 열지 않는다), 승인 단계면 승인 대기를 다시 띄우지 않는다', async () => {
+test('10. 되돌림 단계가 회의면 진행자 한 명이 회의 결론을 참고로 받아 고치고(회의를 다시 열지 않는다), 승인 단계면 되돌림에서도 승인을 다시 묻는다', async () => {
   const t = await app();
   const a = await mk('회의되돌정리', '정리');
   const c1 = await mk('회의되돌의장', '분석');
   const c2 = await mk('회의되돌참석', '빌드');
   const tm = await mkTeam('회의되돌팀', [{ label: '정리', agentIds: [a.id] }, { label: '회의', agentIds: [c1.id, c2.id], meeting: { rounds: 1, chairId: c1.id } }]);
-  const sid = await goal(tm.id, 'REVIEWFAIL');
+  const from = t.fakeLog().length;
+  const sid = await goal(tm.id, 'REVIEWFAIL SLOW');
+  // 진행자가 회의 때의 CLI 대화를 이어 가지 못하게 해 두면(새 대화) 회의 결론을 참고 자료로 받는다
+  await t.waitFor(() => reviewMsgs(sid).some((x) => x.status === 'streaming'), 30000, '첫 검수 중');
+  delete S(sid).providerSessions[c1.id];
   await waitEnd(sid);
   const s = S(sid);
   assert.deepEqual([s.mission.leadId, s.mission.reviewerId, s.mission.status, s.mission.returns], [c1.id, a.id, 'done', 1]);
+  const conclusion = s.messages.find((x) => x.role === 'agent' && x.stageIndex === 1 && x.meeting?.phase === 'conclude');
+  const fixPrompt = prompts(from).find((p) => p.includes('[지난 검수에서 걸린 것'));
+  assert.match(fixPrompt, /\[이 단계의 직전 결과 — 참고 자료\]\n아래 "직전 ([0-9a-f]{8})" 표시 사이는[^\n]*\n### 회의 결론 — 회의되돌의장\n--- 직전 \1 시작 ---\n/);
+  assert.ok(fixPrompt.includes(conclusion.text.slice(0, 40)), '결론 글이 들어간다');
   const run = s.runs.at(-1);
   const stage1 = s.messages.filter((x) => x.role === 'agent' && x.runId === run.id && x.stageIndex === 1);
   const fix = stage1.filter((x) => !x.meeting);
   assert.deepEqual(fix.map((x) => x.agentId), [c1.id], '되돌림은 진행자 혼자, 회의 차례 없이');
   assert.ok(stage1.filter((x) => x.meeting).length >= 3, '처음에는 회의로 돌았다');
-  // 승인 단계: 처음 한 번만 승인을 기다리고, 되돌림에서는 다시 띄우지 않는다
+  // 승인 단계: 처음과 되돌림 모두 승인을 묻는다(사용자가 건 관문을 자동 되돌림이 건너뛰지 않는다)
   const b = await mk('승인되돌분석', '분석');
   const ap = await mkTeam('승인되돌팀', [{ label: '정리', agentIds: [a.id] }, { label: '분석', agentIds: [b.id], approve: true }]);
   const g = await goal(ap.id, 'REVIEWFAIL');
   await waitHold(g, 'approve');
   assert.equal((await ctl(g, 'approve')).json.ok, true);
+  await t.waitFor(() => S(g).runs.at(-1).hold?.reason === 'approve' && S(g).mission.returns === 1, 30000, '되돌림의 승인 대기');
+  assert.equal(S(g).runs.at(-1).hold.stageIndex, 1);
+  assert.equal((await ctl(g, 'approve')).json.ok, true);
   await waitEnd(g);
   assert.deepEqual([S(g).mission.status, S(g).mission.returns], ['done', 1]);
   const holds = t.events.filter((x) => x.type === 'run' && x.data.sessionId === g && x.data.run.hold?.reason === 'approve').map((x) => x.data.run.hold.at);
-  assert.equal(new Set(holds).size, 1, '승인 대기는 한 번');
+  assert.equal(new Set(holds).size, 2, '승인 대기는 처음과 되돌림 두 번');
   assert.equal(S(g).messages.filter((x) => x.role === 'agent' && x.runId === S(g).runs.at(-1).id && x.stageIndex === 1).length, 2, '분석은 처음과 되돌림 두 번');
 });
 
-test('11. 안 쓴 추가 지시가 있으면 판정 뒤에 묻는다: 반영해서 한 번 더 → 마지막 일 단계에 들어가고 다시 검수 → done', async () => {
+test('11. 안 쓴 추가 지시가 있으면 판정 뒤에 묻는다: 반영해서 한 번 더 → 마지막 일 단계에 들어가고 다시 검수 → done. 한 번 더는 되돌림 한 번뿐이라 그 뒤 불합격이면 바로 묻는다', async () => {
   const t = await app();
   const a = await mk('지시묻기정리', '정리');
   const b = await mk('지시묻기분석', '분석');
@@ -473,12 +509,25 @@ test('11. 안 쓴 추가 지시가 있으면 판정 뒤에 묻는다: 반영해�
   // SLOW 검수는 두 번째에도 통과한다(그사이 새 지시가 없으니 묻지 않고 끝난다)
   await waitEnd(sid);
   const m = S(sid).mission;
-  assert.deepEqual([m.status, m.returns, m.returnCap, m.notes.map((x) => x.used)], ['done', 1, 2, [true]]);
+  assert.deepEqual([m.status, m.returns, m.returnCap, m.notes.map((x) => x.used)], ['done', 1, 1, [true]], '한 번 더 = returns + 1');
   assert.ok(m.log.some((x) => x.text === '되돌림 1번째: "분석" 단계를 추가 지시와 함께 다시 해.'));
   const again = prompts(from).filter((p) => p.startsWith('[확정된 목표') && p.includes('"분석"를 네가 맡았어'));
   assert.equal(again.length, 2);
   assert.ok(again[1].includes('[사용자 추가 지시]\n- 결론에 표를 넣어 줘') && !again[1].includes('[지난 검수에서 걸린 것'), '걸린 기준이 없으면 되돌림 블록은 없다');
   assert.ok(reviews(from).every((p) => !p.includes('결론에 표를 넣어 줘')), '검수자에게는 주지 않는다');
+  // 되돌린 분석 담당은 자기 CLI 대화를 이어 가니 직전 결과를 다시 받지 않는다
+  assert.ok(!again[1].includes('[이 단계의 직전 결과'));
+  // 첫 검수가 불합격이어도 안 쓴 지시가 있으면 지시부터 묻는다. 반영해서 한 번 더 → 되돌림 한 번 → 또 불합격이면 자동으로 또 돌지 않고 바로 묻는다
+  const f2 = await goal(tm.id, 'REVIEWFAIL2 SLOW');
+  await t.waitFor(() => reviewMsgs(f2).some((x) => x.status === 'streaming'), 20000, '검수 중');
+  await say(f2, '표를 넣어 줘');
+  const r1 = await waitHold(f2, 'mission');
+  assert.deepEqual([r1.hold.kind, S(f2).mission.round, S(f2).mission.returns], ['notes', 1, 0]);
+  await ctl(f2, 'more');
+  await t.waitFor(() => S(f2).runs.at(-1).hold?.reason === 'mission' && S(f2).mission.round === 2, 30000, '두 번째 묻기');
+  assert.deepEqual([S(f2).runs.at(-1).hold.kind, S(f2).mission.returns, S(f2).mission.returnCap], ['verdict', 1, 1]);
+  await ctl(f2, 'stop');
+  await waitEnd(f2);
 });
 
 test('12. 호출 상한: 단계를 시작하기 전에 남은 수가 모자라면 묻는다. 20번 더 → 이어 감, 그만 → stopped. 여러 명이 도는 단계는 인원만큼 본다', async () => {
@@ -490,7 +539,7 @@ test('12. 호출 상한: 단계를 시작하기 전에 남은 수가 모자라�
   // 목표 차례 1 + 정리 1 + 분석 1 = 3. 상한 3 이면 검수 앞에서 묻는다
   const sid = await goal(tm.id, '', { before: (x) => { S(x).mission.calls.cap = 3; } });
   const run = await waitHold(sid, 'cap');
-  assert.deepEqual([run.hold.used, run.hold.cap, run.hold.stageIndex, S(sid).mission.status], [3, 3, 2, 'waiting']);
+  assert.deepEqual([run.hold.used, run.hold.cap, run.hold.step, run.hold.stageIndex, S(sid).mission.status], [3, 3, 20, 2, 'waiting']);
   assert.equal(t.app.store.sessionMeta(S(sid)).attention.kind, 'cap');
   assert.equal((await ctl(sid, 'accept')).json.ok, false, '상한 대기는 받아들이기를 받지 않는다');
   assert.equal((await ctl(sid, 'more')).json.ok, true);
@@ -513,4 +562,199 @@ test('12. 호출 상한: 단계를 시작하기 전에 남은 수가 모자라�
   await ctl(p, 'more');
   await waitEnd(p);
   assert.equal(S(p).mission.status, 'done');
+});
+
+test('13. 한 번 실행으로 쓴 검수 답은 그 에이전트가 답한 것으로 세지 않는다: 목표 뒤 보통 실행에서 놓친 대화에 뒤 단계 답이 들어가고, 검수만 한 에이전트는 인수인계 메모를 쓸 자격이 없다', async () => {
+  const t = await app();
+  const a = await mk('놓침정리', '정리');
+  const b = await mk('놓침분석', '분석');
+  const tm = await mkTeam('놓침팀', [{ label: '정리', agentIds: [a.id] }, { label: '분석', agentIds: [b.id] }]);
+  const sid = await goal(tm.id);
+  await waitEnd(sid);
+  assert.deepEqual([S(sid).mission.status, S(sid).mission.reviewerId], ['done', a.id]);
+  assert.equal((await t.api('PATCH', `/api/sessions/${sid}`, { goalMode: false })).status, 200);
+  const from = t.fakeLog().length;
+  await say(sid, '이어서 요약해 줘');
+  await t.waitFor(() => S(sid).runs.length === 3 && S(sid).runs.at(-1).endedAt && idle(sid), 30000, '보통 실행');
+  const logs = t.fakeLog().slice(from).filter((l) => l.cli === 'claude');
+  const at = logs.findIndex((l) => l.text?.includes('"정리"를 네가 맡았어'));
+  assert.ok(logs.slice(0, at).filter((l) => Array.isArray(l.args)).at(-1).args.includes('--resume'), '검수자는 일 단계의 대화를 이어 간다');
+  const missed = logs[at].text.match(/\[네가 지난번 답한 뒤 오간 대화\][\s\S]*?--- 대화 [0-9a-f]{8} 끝 ---/)?.[0] || '';
+  assert.ok(missed.includes(`${b.name}: 안녕하세요`), `분석 답이 놓친 대화에 들어간다: ${missed.slice(0, 300)}`);
+  // 검수만 한 에이전트(검수 단계를 기준 판정으로 대신함)는 인수인계 메모를 쓸 자격이 없다
+  const r = await mk('놓침검수', '검수');
+  const rt = await mkTeam('놓침검수팀', [{ label: '정리', agentIds: [a.id] }, { label: '교차 검수', agentIds: [r.id] }]);
+  const x = await goal(rt.id);
+  await waitEnd(x);
+  assert.deepEqual([S(x).mission.reviewerId, S(x).mission.dropped], [r.id, ['교차 검수']]);
+  assert.equal(t.app.orch.handoffWriter(S(x), r.id), null);
+  assert.equal(t.app.orch.handoffWriter(S(x)), a.id);
+});
+
+test('14. 순수 함수(검토 반영): 판정 id 는 대소문자를 가리지 않는다, 뺄 단계 목록 대조, 직전 결과 블록', () => {
+  const blk = (o) => `판정\n\n\`\`\`oc-review\n${JSON.stringify(o)}\n\`\`\``;
+  assert.deepEqual(parseReview(blk({ nonce: 'n', results: [{ id: ' C1 ', verdict: 'fail', evidence: 'x' }, { id: 'C2', verdict: 'pass', evidence: 'y' }] }), { nonce: 'n', ids: ['c1', 'c2'] }).results.map((x) => [x.id, x.verdict]), [['c1', 'fail'], ['c2', 'pass']]);
+  const d = [{ index: 1, label: '보안 검토', names: ['검'], instruction: '점검표' }];
+  assert.equal(sameDroppable(structuredClone(d), d), true);
+  for (const bad of [[{ ...d[0], index: 2 }], [{ ...d[0], label: '문체 검토' }], [{ ...d[0], names: ['다른'] }], [{ ...d[0], instruction: '' }], [], undefined, 'x', [...d, ...d]]) assert.equal(sameDroppable(bad, d), false, JSON.stringify(bad));
+  assert.equal(sameDroppable([], []), true);
+  const p = prevPrompt([{ name: '정리\n담당', text: '가'.repeat(12010), meeting: false }, { name: '의장', text: '결론 글', meeting: true }], 'MK');
+  assert.ok(p.startsWith('[이 단계의 직전 결과 — 참고 자료]\n아래 "직전 MK" 표시 사이는'));
+  assert.ok(p.includes(`### 정리 담당\n--- 직전 MK 시작 ---\n${'가'.repeat(12000)}\n…(이하 생략)\n--- 직전 MK 끝 ---`));
+  assert.ok(p.includes('### 회의 결론 — 의장\n--- 직전 MK 시작 ---\n결론 글\n--- 직전 MK 끝 ---'));
+});
+
+test('15. 되돌린 단계 뒤에 남긴 검수 단계는 다시 돌지 않으니, 두 번째 검수 자료에서 그 옛 답을 빼고 그렇다고 적는다. 직전 결과는 이어 가지 못하는 담당에게만 준다', async () => {
+  const t = await app();
+  const a = await mk('낡음정리', '정리');
+  const b = await mk('낡음분석', '분석');
+  const r = await mk('낡음검수', '검수');
+  const tm = await mkTeam('낡음팀', [{ label: '정리', agentIds: [a.id] }, { label: '분석', agentIds: [b.id] }, { label: '교차 검수', agentIds: [r.id] }]);
+  const from = t.fakeLog().length;
+  const sid = await goal(tm.id, 'REVIEWFAIL SLOW', { drop: [] });
+  // 분석 담당이 자기 CLI 대화를 이어 가지 못하게 해 두면(새 대화) 되돌림에서 자기 직전 답을 참고 자료로 받는다
+  await t.waitFor(() => reviewMsgs(sid).some((x) => x.status === 'streaming'), 30000, '첫 검수 중');
+  delete S(sid).providerSessions[b.id];
+  await waitEnd(sid);
+  const m = S(sid).mission;
+  assert.deepEqual([m.status, m.returns, m.reviewerId], ['done', 1, r.id]);
+  assert.deepEqual(S(sid).runs.at(-1).stages.map((x) => x.label), ['정리', '분석', '교차 검수', '기준 판정']);
+  assert.ok(m.log.some((x) => x.text === '뒤의 "교차 검수" 단계는 다시 돌지 않아서, 다음 검수에는 그 단계의 옛 답을 넣지 않아.'));
+  const rs = reviews(from);
+  assert.equal(rs.length, 2);
+  assert.equal(rs[0].match(/--- 결과 [0-9a-f]{8} 시작 ---/g).length, 3, '첫 검수에는 세 단계 답');
+  assert.equal(rs[1].match(/--- 결과 [0-9a-f]{8} 시작 ---/g).length, 2, '두 번째 검수에는 다시 돌지 않은 교차 검수의 옛 답을 뺀다');
+  assert.ok(rs[1].includes(`### 3. 교차 검수 — ${r.name}\n(되돌림 뒤에 다시 돌지 않은 단계라 그 옛 답은 넣지 않았어. 작업 폴더에서 직접 확인해)`));
+  const fix = prompts(from).filter((p) => p.startsWith('[확정된 목표') && p.includes('"분석"를 네가 맡았어'));
+  assert.equal(fix.length, 2);
+  const firstB = S(sid).messages.find((x) => x.role === 'agent' && x.agentId === b.id && x.stageIndex === 1);
+  assert.match(fix[1], /\[이 단계의 직전 결과 — 참고 자료\]\n아래 "직전 ([0-9a-f]{8})" 표시 사이는[^\n]*\n### 낡음분석\n--- 직전 \1 시작 ---\n/);
+  assert.ok(fix[1].includes(firstB.text) && fix[1].indexOf('[이 단계의 직전 결과') < fix[1].indexOf('[지난 검수에서 걸린 것'));
+});
+
+test('16. 검수자에게 보낸 지시: 한도가 풀리길 기다리는 검수자에게도 검수에 넣지 않고 추가 지시로 받아 판정 뒤에 묻는다. 검수자 없는 팀의 판정 대기 중 지시는 late, 지시 묻기에는 "검수할 사람이 없다"는 표시', async () => {
+  const t = await app();
+  // 검수자(정리 담당)는 Codex, 일 단계 분석은 Claude: 분석 중에 Codex 한도만 곧 풀린다고 해 둔다(Claude 결과가 보내는 한도 기록이 덮어쓰지 않게)
+  const a = await mk('기다림정리', '정리', { provider: 'codex', model: 'gpt-6.1-sol' });
+  const b = await mk('기다림분석', '분석');
+  const tm = await mkTeam('기다림팀', [{ label: '정리', agentIds: [a.id] }, { label: '분석', agentIds: [b.id] }]);
+  try {
+    const sid = await goal(tm.id, '', { request: 'SLOW 정리해 줘' });
+    // 분석 단계가 도는 동안 Claude 한도가 곧 풀린다고 해 두면, 검수자(정리 담당)는 검수 차례에서 한도가 풀리길 기다린다
+    await t.waitFor(() => S(sid).runs.at(-1).stages[1].status === 'running', 20000, '분석 중');
+    t.app.store.settings.waitForResetMin = 5;
+    t.app.store.usage.limits = { ...t.app.store.usage.limits, codex: { windows: { five_hour: { pct: 97, resetsAt: (Date.now() + 2500) / 1000 } }, observedAt: Date.now() } };
+    await t.waitFor(() => t.app.orch.ctx.get(sid)?.waiting.has(a.id), 20000, '검수자가 한도를 기다림');
+    const r = await ctl(sid, 'steer', { agentId: a.id, text: '숫자를 꼭 확인해' });
+    assert.equal(r.json.mode, 'note');
+    delete t.app.store.usage.limits.codex;
+    const run = await waitHold(sid, 'mission');
+    assert.deepEqual([run.hold.kind, run.hold.notes, run.hold.reviewer], ['notes', 1, undefined]);
+    assert.ok(reviewMsgs(sid).every((x) => !x.text.includes('숫자를 꼭 확인해')));
+    assert.ok(S(sid).mission.log.some((x) => x.text === `${a.name}은(는) 기준 판정 중이라 이 지시는 검수에 넣지 않고 추가 지시로 받았어: 숫자를 꼭 확인해`));
+    await ctl(sid, 'accept');
+    await waitEnd(sid);
+    assert.equal(S(sid).mission.status, 'accepted', '가짜 Codex 는 판정 블록을 쓰지 않아 판정 없음');
+  } finally { t.app.store.settings.waitForResetMin = 0; t.app.store.usage.limits = {}; }
+  // 검수자 없는 팀: 일하는 동안 온 지시는 판정 없이 지시부터 묻는다(검수할 사람이 없다는 표시). 판정 대기 중에 온 지시는 쓰일 길이 없어 late
+  const solo = await mkTeam('기다림혼자', [{ label: '분석', agentIds: [b.id] }]);
+  const x = await goal(solo.id, '', { request: 'SLOW 분석해 줘' });
+  await t.waitFor(() => S(x).messages.some((m) => m.role === 'agent' && m.runId === S(x).runs.at(-1).id && m.status === 'streaming'), 20000, '분석 중');
+  assert.equal((await say(x, '표로 써 줘')).json.late, undefined);
+  const h1 = await waitHold(x, 'mission');
+  assert.deepEqual([h1.hold.kind, h1.hold.more, h1.hold.reviewer], ['notes', undefined, false]);
+  assert.equal((await ctl(x, 'accept')).json.ok, true);
+  await waitEnd(x);
+  const y = await goal(solo.id);
+  const h2 = await waitHold(y, 'mission');
+  assert.deepEqual([h2.hold.kind, h2.hold.more, h2.hold.reviewer], ['verdict', false, false]);
+  const late = await say(y, '이건 늦은 지시');
+  assert.deepEqual([late.json.noted, late.json.late], [true, true], '한 번 더를 못 고르니 이번 목표에 쓰일 길이 없다');
+  await ctl(y, 'accept');
+  await waitEnd(y);
+  assert.equal(S(y).mission.log.at(-1).text, '반영하지 못한 추가 지시가 1개 있어.');
+});
+
+test('17. 한 번 실행 보강: 이어받기(한도 → 다른 AI)를 해도 세션의 대화 번호·사용량 누적·역할 노트 기록이 그대로', async () => {
+  const t = await app();
+  const a = await mk('보강정리', '정리');
+  const b = await mk('보강분석', '분석');
+  const tm = await mkTeam('보강팀', [{ label: '정리', agentIds: [a.id] }, { label: '분석', agentIds: [b.id] }]);
+  // 일 단계가 끝난 뒤(분석 중) 검수자 칸을 표시 값으로 바꿔 두고, 검수 뒤에도 그 값인지 본다(검수가 쓰면 바뀐다)
+  const keys = ['providerSessions', 'sessionProvider', 'usageBase', 'noteHashes'];
+  const mark = { providerSessions: 'sess-mark', sessionProvider: 'claude', usageBase: { id: 'sess-mark', input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0 }, noteHashes: 'hash-mark' };
+  t.app.store.settings.failover = true;
+  // 이어받을 AI 가 있게(테스트에선 탐지를 안 하므로 Claude·Codex 를 로그인된 것으로 두고 모델 목록을 고정한다. 끝나면 되돌린다)
+  const reg = t.app.providers;
+  const saved = [reg.detected, reg.modelCache];
+  reg.detected = { claude: { installed: true, loggedIn: true }, codex: { installed: true, loggedIn: true } };
+  reg.modelCache = { claude: { at: Date.now(), version: '', list: [{ id: 'claude-sonnet-5-5', label: 'Sonnet', tier: 'balanced' }] }, codex: { at: Date.now(), version: '', list: [{ id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', tier: 'balanced', efforts: ['low', 'medium', 'high'] }] } };
+  try {
+    const sid = await goal(tm.id, 'REVIEWQUOTA', { request: 'SLOW 정리해 줘' });
+    await t.waitFor(() => S(sid).runs.at(-1).stages[1].status === 'running', 20000, '분석 중');
+    assert.ok(S(sid).noteHashes?.[a.id], '정리 단계가 받은 역할 노트 기록이 있었다');
+    for (const k of keys) (S(sid)[k] ||= {})[a.id] = structuredClone(mark[k]);
+    await waitHold(sid, 'mission');
+    const msgs = reviewMsgs(sid);
+    assert.ok(msgs.some((x) => x.failover && x.provider !== 'claude'), JSON.stringify(msgs.map((x) => [x.provider, x.failover, x.error])));
+    assert.deepEqual(keys.map((k) => S(sid)[k]?.[a.id]), keys.map((k) => mark[k]), '이어받은 검수도 세션 칸을 건드리지 않는다');
+    await ctl(sid, 'stop');
+    await waitEnd(sid);
+  } finally {
+    [reg.detected, reg.modelCache] = saved;
+    t.app.orch.cooldown.map.clear();
+    t.app.store.usage.limits = {};
+  }
+});
+
+test('18. 목표 대기(판정·상한) 중 일시정지와 앱 끄기(stopAll), 재시작 뒤 정리, 휴대폰 알림 문구', async () => {
+  const t = await app();
+  const a = await mk('대기정리', '정리');
+  const b = await mk('대기분석', '분석');
+  const tm = await mkTeam('대기팀', [{ label: '정리', agentIds: [a.id] }, { label: '분석', agentIds: [b.id] }]);
+  // 판정 대기 중 일시정지 → 한 번 더 → 되돌림 단계 앞에서 멈춘다 → 재개하면 이어 간다
+  const p = await goal(tm.id, 'REVIEWFAIL2');
+  await waitHold(p, 'mission');
+  assert.equal((await ctl(p, 'pause')).json.ok, true);
+  assert.equal((await ctl(p, 'more')).json.ok, true);
+  await t.waitFor(() => S(p).runs.at(-1).status === 'paused' && S(p).runs.at(-1).hold?.reason === 'pause', 20000, '일시정지');
+  assert.equal(S(p).runs.at(-1).hold.stageIndex, 1, '되돌릴 단계 앞');
+  assert.equal((await ctl(p, 'resume')).json.ok, true);
+  await t.waitFor(() => S(p).runs.at(-1).hold?.reason === 'mission' && S(p).mission.round === 3, 30000, '다시 묻기');
+  await ctl(p, 'stop');
+  await waitEnd(p);
+  // 상한 대기 중 앱 끄기(stopAll) → 목표는 stopped, 실행도 끝
+  const c = await goal(tm.id, '', { before: (x) => { S(x).mission.calls.cap = 2; } });
+  await waitHold(c, 'cap');
+  t.app.orch.stopAll();
+  await waitEnd(c);
+  assert.deepEqual([S(c).mission.status, S(c).runs.at(-1).status, t.app.orch.ctx.has(c)], ['stopped', 'stopped', false]);
+  // 판정 대기 중에 앱이 꺼진 모양(디스크) → 다시 켜면 실행은 stopped(대기 표시 없음), 목표는 cut. 저절로 다시 돌지 않는다
+  const w = await goal(tm.id, 'REVIEWFAIL2');
+  await waitHold(w, 'mission');
+  t.app.store.saveSessionNow(S(w));
+  await new Promise((r) => setTimeout(r, 500));
+  const before = t.fakeLog().length;
+  const app2 = createApp({ home: path.join(t.root, 'home'), port: 0, detect: false });
+  app2.store.settings.lang = 'ko';
+  try {
+    await app2.listen(await freePort());
+    const s2 = app2.store.getSession(w);
+    assert.deepEqual([s2.runs.at(-1).status, s2.runs.at(-1).hold, s2.mission.status], ['stopped', null, 'cut']);
+    assert.equal(app2.store.sessionMeta(s2).attention?.kind, undefined, '기다리는 일에 남지 않는다');
+    await new Promise((r) => setTimeout(r, 300));
+    assert.deepEqual([app2.orch.ctx.size, t.fakeLog().length], [0, before], '저절로 다시 돌지 않는다');
+  } finally { try { await app2.close(); } catch { /* 윈도우 파일 잠금 무시 */ } }
+  await ctl(w, 'stop');
+  await waitEnd(w);
+  // 휴대폰 알림: 판정 뒤 묻기·상한 대기는 그 이름으로
+  const sent = [];
+  let on = null;
+  const phone = new PhoneNotify({ store: { settings: { phoneNotify: true, phoneType: 'webhook', phoneUrl: 'http://127.0.0.1:9/hook' }, getSession: () => null, get: () => null }, bus: { on: (fn) => { on = fn; } }, fetchFn: async (url, o) => { sent.push(JSON.parse(o.body).title); return { ok: true }; } });
+  assert.ok(phone);
+  on('run', { sessionId: 's1', run: { id: 'r1', status: 'waiting', hold: { reason: 'mission', at: 1 } } });
+  on('run', { sessionId: 's1', run: { id: 'r1', status: 'waiting', hold: { reason: 'cap', at: 2 } } });
+  on('run', { sessionId: 's1', run: { id: 'r1', status: 'waiting', hold: { reason: 'error', at: 3 } } });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(sent, ['목표 판정을 보고 답해 줘', '목표가 호출 상한에 닿았어', '결정이 필요해']);
 });

@@ -574,7 +574,7 @@ test('8. 일하기: 확인 요청에 검수 줄(review)이 없으면(옛 화면)
   await waitDraft(o);
   assert.equal(S(o).mission.leadId, r.id, '팀 첫 단계의 첫 에이전트가 진행자');
   assert.deepEqual(cardOf(o).review, { reviewerId: null, reviewerName: '', droppable: [] }, '검수 단계뿐이면 뺄 단계가 없다');
-  await confirm(o, { missionId: S(o).mission.id, expected: shown(cardOf(o)), review: { reviewerId: null, drop: [] } });
+  await confirm(o, { missionId: S(o).mission.id, expected: shown(cardOf(o)), review: { reviewerId: null, droppable: [], drop: [] } });
   await t.waitFor(() => S(o).runs.at(-1).hold?.reason === 'mission', 20000, '판정 없이 묻기');
   assert.deepEqual(S(o).runs[1].stages.map((x) => x.label), ['검수']);
   assert.deepEqual([S(o).runs[1].hold.kind, S(o).runs[1].hold.more, S(o).mission.criteria.map((c) => c.status)], ['verdict', false, ['unknown', 'unknown']]);

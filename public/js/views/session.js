@@ -8,8 +8,8 @@ import { renderMarkdown } from '../markdown.js';
 import { t, getLang, locale, tmap } from '../i18n/index.js';
 import { MemoryBadge } from './memory.js';
 import { DraftChip } from './rolenotes.js';
-import { continueList, findInMessages, hideAsks, hideCheck, hideGoal } from '../chat-tools.js';
-import { GoalCard, MissionLog, discardMission } from './mission.js';
+import { continueList, findInMessages, hideAsks, hideCheck, hideGoal, hideReview } from '../chat-tools.js';
+import { GoalCard, MissionLog, MissionGate, ReviewTable, discardMission } from './mission.js';
 import { researcherOf, meetingView, boardCards } from '../office/meeting.js';
 
 export const sessionAgents = (s) => {
@@ -425,8 +425,8 @@ class Message extends Component {
     // 긴 답은 접어 둔다(앞부분만 보이고 '전체 보기'로 편다). 쓰는 중인 답과, 펼쳐 두기로 한 답(가장 최근 실행의 마지막 결과)은 펼친다
     this.seen ||= streaming; // 쓰는 걸 지켜본 답은 끝나도 접지 않는다(읽던 답이 갑자기 줄지 않게)
     const asks = (m.asks || []).filter((x) => x.status === 'open'); // 답은 입력창 위의 질문 창에서 한다
-    // 질문 블록은 입력창 위의 질문 창으로, 회의 차례의 조사 질문 블록은 글 아래 "확인 필요" 줄로, 목표 카드 블록은 목표 카드로 보여 준다
-    const body = hideCheck(hideAsks(hideGoal(m.text, m.goalBlock, streaming), m.asks, streaming), m.check, streaming);
+    // 질문 블록은 입력창 위의 질문 창으로, 회의 차례의 조사 질문 블록은 글 아래 "확인 필요" 줄로, 목표 카드 블록은 목표 카드로, 판정 블록은 기준표로 보여 준다
+    const body = m.review ? hideReview(m.text, m.reviewBlock, streaming) : hideCheck(hideAsks(hideGoal(m.text, m.goalBlock, streaming), m.asks, streaming), m.check, streaming);
     // 조사 결과: 누구의 어떤 질문에 답했는지(질문이 든 차례 글에서 찾는다)
     const asker = m.checkOf ? state.sessionData[state.currentId]?.messages.find((x) => x.id === m.checkOf) : null;
     const chip = m.check ? checkChip(m.check.status) : null;
@@ -442,7 +442,7 @@ class Message extends Component {
       <${Avatar} agent=${a} />
       <div style="min-width:0">
         <div class="msg-head">
-          <b>${a.name}</b>${m.stageLabel ? html`<span class="chip">${m.stageLabel}</span>` : ''}${m.meeting ? html`<span class=${`chip${m.meeting.phase === 'conclude' ? ' accent' : ''}`}>${meetLabel(m.meeting)}</span>` : ''}${m.meeting?.opposer ? html`<span class="chip">${t('반대편')}</span>` : ''}${m.verdict ? html`<span class=${`chip${m.verdict.verdict === 'agree' ? ' accent' : ''}`}>${m.verdict.verdict === 'agree' ? t('합의') : t('계속')}</span>` : ''}${m.handoff ? html`<span class="chip accent">${t('인수인계 메모')}</span>` : ''}${m.goalDraft ? html`<span class="chip accent">${t('목표 초안')}</span>` : ''}
+          <b>${a.name}</b>${m.stageLabel ? html`<span class="chip">${m.stageLabel}</span>` : ''}${m.meeting ? html`<span class=${`chip${m.meeting.phase === 'conclude' ? ' accent' : ''}`}>${meetLabel(m.meeting)}</span>` : ''}${m.meeting?.opposer ? html`<span class="chip">${t('반대편')}</span>` : ''}${m.verdict ? html`<span class=${`chip${m.verdict.verdict === 'agree' ? ' accent' : ''}`}>${m.verdict.verdict === 'agree' ? t('합의') : t('계속')}</span>` : ''}${m.handoff ? html`<span class="chip accent">${t('인수인계 메모')}</span>` : ''}${m.goalDraft ? html`<span class="chip accent">${t('목표 초안')}</span>` : ''}${m.review ? html`<span class="chip accent">${t('기준 판정 {n}회차', { n: m.review.round || 1 })}</span>` : ''}${m.review?.retried ? html`<span class="chip">${t('다시 요청')}</span>` : ''}
           <${ProviderChip} id=${m.provider} />
           ${m.model && html`<span class="chip mono">${m.model}${m.effort ? ` · ${EFFORT_LABEL[m.effort] || m.effort}` : ''}</span>`}
           ${streaming && html`<span class="spin"></span>`}
@@ -455,6 +455,7 @@ class Message extends Component {
         ${notices.map((b) => html`<div class="notice">${b.text}${b.count > 1 ? html` <span class="chip">×${b.count}</span>` : ''}</div>`)}
         ${asker?.check && html`<div class="msg-check"><span class="q">🔎 ${t('{name}의 질문', { name: agentById(asker.agentId)?.name || '?' })}: ${asker.check.question}</span></div>`}
         <div class=${`msg-body md${folded ? ' folded' : ''}`} id=${`body-${m.id}`} onFocusCapture=${folded ? () => { this.props.onToggle?.(); this.setState({ open: true }); } : undefined} dangerouslySetInnerHTML=${{ __html: body.trim() ? renderMarkdown(body) : (streaming && !asks.length ? `<p class="muted">${t('작업 중…')}</p>` : '') }}></div>
+        ${m.review && !streaming && html`<${ReviewTable} r=${m.review} />`}
         ${asks.length > 0 && html`<div class="notice">🙋 ${t('아래 질문 창에서 답해 줘.')}</div>`}
         ${chip && html`<div class="msg-check"><span class="q">🔎 ${t('확인 필요: {q}', { q: m.check.question })}</span><span class=${`chip${chip[1]}`}>${chip[0]}</span></div>`}
         ${long && html`<button class="fold-btn" aria-expanded=${!folded} aria-controls=${`body-${m.id}`} onClick=${toggle}>${folded ? t('전체 보기 ({n}자)', { n: body.length.toLocaleString(locale()) }) : t('접기')}</button>`}
@@ -654,6 +655,8 @@ function Gate({ s, run }) {
       <div class="row"><button class="btn primary sm" onClick=${() => ctl('resume')}><${Icon} name="play" /> ${t('재개')}</button><button class="btn sm danger" onClick=${() => ctl('stop')}>${t('중지')}</button></div></div>`;
   }
   if (run.status !== 'waiting' || !hold) return null;
+  // 목표의 판정 뒤 묻기·호출 상한(결정 0015)은 질문 창 모양으로 따로 그린다
+  if (hold.reason === 'mission' || hold.reason === 'cap') return html`<${MissionGate} s=${s} run=${run} key=${hold.at} />`;
   const st = run.stages[hold.stageIndex];
   if (hold.reason === 'approve') {
     const next = run.stages[hold.stageIndex + 1];

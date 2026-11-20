@@ -1849,7 +1849,9 @@ export class Orchestrator {
   async #runAgent(ctx, stageIdx, agentId, feedback, { once: given = null } = {}) {
     const { s, run } = ctx;
     // 목표 일 실행의 회의 차례(일하기 전 회의와 팀의 회의 단계 모두, 회의 중 조사 포함)는 새 대화로(결정 0017). 목표 모드가 아닌 실행의 회의는 지금 그대로(결정 0005·0010)
-    const once = given || (ctx.missionTurn === 'work' && ctx.meet?.has(agentId) ? { meeting: true, notes: !isPrep(run.stages[stageIdx]) } : null);
+    // 일하기 전 회의의 차례는 조사처럼 prep 표시를 달아 프로젝트 기억에 넣지 않는다(팀의 회의 단계는 지금처럼 넣는다)
+    const pre = isPrep(run.stages[stageIdx]);
+    const once = given || (ctx.missionTurn === 'work' && ctx.meet?.has(agentId) ? { meeting: true, notes: !pre, ...(pre ? { prep: { kind: 'meeting' } } : {}) } : null);
     const onceText = (ag, pv) => (typeof once.prompt === 'string' ? once.prompt : this.#prompt(ctx, stageIdx, ag, feedback, pv, false, true));
     let base = this.store.get('agents', agentId);
     // 세션이 정한 덮어쓰기(예: 스킬 번역은 읽기 전용으로) — 저장된 에이전트는 그대로
@@ -1878,7 +1880,7 @@ export class Orchestrator {
     if (ctx.missionTurn === 'goal') msg.goalDraft = true; // 목표 카드 초안을 쓴 답(에이전트에게 넘기는 대화·기억에 싣지 않는다. 결정 0014)
     if (once?.phase === 'review') msg.review = { round: once.round, ...(once.retried ? { retried: true } : {}) }; // 기준 판정 답(기억에 넣지 않는다. 끝나면 판정으로 채운다)
     if (once) msg.once = true; // 한 번 실행의 답: 이 에이전트의 CLI 대화에 없다(놓친 대화·인수인계 메모 자격을 셀 때 뺀다)
-    if (once?.prep) msg.prep = { ...once.prep }; // 일하기 전 조사의 답(훑어보기·조사 질문·조사, 결정 0017. 기억에 넣지 않는다)
+    if (once?.prep) msg.prep = { ...once.prep }; // 일하기 전 조사·회의의 답(훑어보기·조사 질문·조사·준비 회의, 결정 0017. 기억에 넣지 않는다)
     s.messages.push(msg);
     this.bus.emit('message', { sessionId: s.id, message: msg });
     const finish = (status, error) => {
@@ -2414,7 +2416,7 @@ export class Orchestrator {
     if (m.handoffAsk) return; // 정해진 요청 문구라 기억할 내용이 아니다
     if (m.goalDraft) return; // 목표 카드 초안(사용자가 확인하기 전의 글)은 기억에 넣지 않는다
     if (m.review) return; // 목표의 기준 판정 답도 넣지 않는다(결정 0015)
-    if (m.prep) return; // 일하기 전 조사의 답(훑어보기·조사 질문·조사)도 넣지 않는다(결정 0017)
+    if (m.prep) return; // 일하기 전 조사·회의의 답(훑어보기·조사 질문·조사·준비 회의)도 넣지 않는다(결정 0017)
     if (m.role === 'user') { if (m.remembered) return; m.remembered = true; } // 같은 말을 두 번 넣지 않는다(끊긴 실행을 다시 켠 뒤 정리할 때)
     const job = this.memory.of(this.memoryFolder(s))
       .then((mem) => mem.add(m.text, { sessionId: s.id, messageId: m.id, agentId: m.agentId || '', role: m.role, provider: m.provider || (m.local ? 'local' : ''), at: m.createdAt || Date.now(), title: s.titleLocal ? '' : (s.title || '') }))

@@ -309,7 +309,8 @@ test('3. 조사·회의의 모든 호출은 --resume 없이 뜨고 세션의 CLI
   assert.ok(first.texts[0].includes('[사용자 추가 지시]\n- 표로 정리해 줘 노트1') && first.args.includes('--resume') && first.args.includes('claude-sess-r0'), '첫 일 단계는 이어 가던 대화로, 추가 지시와 함께');
   assert.ok(S(sid).mission.notes.every((n) => n.used));
   // 준비 답은 기억 대상에서 빠진다(기억을 켠 세션에서도 넣지 않는다: #remember 가 prep 표시를 본다)
-  assert.ok(agentMsgs(S(sid), (x) => x.prep).length === 5 && agentMsgs(S(sid), (x) => x.prep).every((x) => x.once));
+  assert.deepEqual(agentMsgs(S(sid), (x) => x.prep).map((x) => x.prep.kind), ['scan', 'questions', 'research', 'research', 'research', 'meeting', 'meeting', 'meeting', 'meeting'], '준비 회의 차례도 prep');
+  assert.ok(agentMsgs(S(sid), (x) => x.prep).every((x) => x.once));
 });
 
 test('4. 조사 한 갈래가 실패·빈 답이어도 나머지는 계속하고 그 갈래는 "확인 못 함". 노트 머리에 몇 개가 비었는지 적힌다', async () => {
@@ -602,7 +603,7 @@ test('13. 끊김 4대목 이어서: 훑어보기·조사 질문·조사·회의 
   }
 });
 
-test('14. 조사의 답(훑어보기·조사 질문·조사)은 프로젝트 기억에 넣지 않는다. 팀 단계의 답과 요청은 지금처럼 넣는다', async () => {
+test('14. 조사·준비 회의의 답(훑어보기·조사 질문·조사·준비 회의)은 프로젝트 기억에 넣지 않는다. 팀 단계의 답과 요청은 지금처럼 넣는다', async () => {
   await app();
   await t.api('PUT', '/api/settings', { memory: true });
   try {
@@ -614,7 +615,8 @@ test('14. 조사의 답(훑어보기·조사 질문·조사)은 프로젝트 기
     const hits = async (q) => (await mem.search(q, { budget: 8000 })).hits.filter((h) => h.sessionId === sid);
     assert.ok((await hits('은행나무 보고서')).some((h) => h.role === 'user'), '요청은 들어간다');
     const prepIds = new Set(agentMsgs(S(sid), (x) => x.prep).map((x) => x.id));
-    assert.equal(prepIds.size, 5);
+    assert.equal(prepIds.size, 5 + 4, '훑어보기·질문·조사 3·준비 회의 4');
+    assert.ok(!(await hits('안녕하세요')).some((h) => prepIds.has(h.messageId)), '준비 회의 차례도 안 들어간다');
     for (const q of ['가짜 조사 찾은 사실이야', '가짜 훑어보기 주제는 정리야', '질문을 뽑았어 가짜 질문']) assert.ok(!(await hits(q)).some((h) => prepIds.has(h.messageId)), q);
     const work = agentMsgs(S(sid), (x) => x.runId === S(sid).runs.at(-1).id && x.stageIndex === 5)[0];
     assert.ok((await hits('안녕하세요')).some((h) => h.messageId === work.id), '팀 단계의 답은 들어간다');

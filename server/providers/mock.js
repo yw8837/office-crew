@@ -5,7 +5,7 @@ import { makeHandle } from './util.js';
 import { tr } from '../i18n.js';
 import { roleKind } from '../routing.js';
 import { checkBlock } from '../meeting.js';
-import { goalBlock } from '../mission.js';
+import { goalBlock, reviewBlock } from '../mission.js';
 
 // 역할 키(조사·정리·분석·빌드)는 그대로, 보이는 문구만 설정 언어로.
 // 에이전트의 역할 이름은 첫 실행 때 OS 언어로 저장되므로(Research, 調査 …) 역할 종류로 바꿔서 키를 찾는다
@@ -107,6 +107,28 @@ function goalAnswer(prompt) {
   return `${tr('요청을 목표 카드로 정리했어(데모). 확인하면 팀이 이 기준을 들고 일해.')}\n\n\`\`\`oc-goal\n${JSON.stringify(card)}\n\`\`\``;
 }
 
+// ── 기준 판정 차례(결정 0015) ──
+// 검수 프롬프트는 코드가 만든 머리 문구("[기준 판정 — n번째 검수]")로 시작하고 판정 블록 예시(reviewBlock)로 끝난다. 둘 다 맞을 때만 검수 차례로 보고,
+// 끝의 예시에서 일회용 값을, "- c1: …" 줄에서 기준 id 를 읽어 판정 블록을 낸다. 확정 목표 줄에 REVIEWFAIL(1회차에 c1 불합격)·REVIEWFAIL2(늘 c1 불합격)·REVIEWUNK(c1 확인 못 함)가 있으면 그대로 흉내 낸다
+const reviewHead = () => new RegExp(`${tr('[기준 판정 — {n}번째 검수]').replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace('\\{n\\}', '(\\d+)')}`);
+function reviewTurn(prompt) {
+  const p = String(prompt).trimEnd();
+  const at = p.lastIndexOf('```oc-review\n');
+  if (at < 0 || !p.endsWith('```') || !reviewHead().test(p)) return null;
+  let nonce = '';
+  try { nonce = JSON.parse(p.slice(at + '```oc-review\n'.length, -3)).nonce || ''; } catch { return null; }
+  if (p !== p.slice(0, at) + reviewBlock(nonce)) return null; // 끝이 코드가 만든 예시 그대로일 때만
+  const goal = p.match(new RegExp(`^${tr('목표').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: (.*)$`, 'm'))?.[1] || '';
+  return { nonce, goal, round: Number(p.match(reviewHead())?.[1] || 1), ids: [...p.matchAll(/^- (c\d+): /gm)].map((x) => x[1]) };
+}
+function reviewAnswer({ nonce, goal, round, ids }) {
+  const fail = goal.includes('REVIEWFAIL2') || (goal.includes('REVIEWFAIL') && round === 1);
+  const results = ids.map((id, k) => (k === 0 && fail ? { id, verdict: 'fail', evidence: tr('데모: 결과 파일에 이 내용이 없어') }
+    : k === 0 && goal.includes('REVIEWUNK') ? { id, verdict: 'unknown', evidence: tr('데모: 확인할 방법이 없었어') }
+      : { id, verdict: 'pass', evidence: tr('데모: 작업 폴더의 결과 파일을 열어 확인했어') }));
+  return `${tr('기준마다 확인했어(데모).')}\n\n\`\`\`oc-review\n${JSON.stringify({ nonce, results })}\n\`\`\``;
+}
+
 export default {
   id: 'mock', get label() { return tr('데모'); }, get sub() { return tr('가상 에이전트 · 사용량 0'); }, kind: 'mock', color: '#64748b',
   efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -133,8 +155,9 @@ export default {
       let n = 0;
       const phase = meetingPhase(prompt);
       const goal = !phase && isGoalTurn(prompt);
-      // 회의 중과 목표 잡기 차례에는 도구를 쓰지 않는다(파일을 고치지 말라는 지시와 같게)
-      for (const [name, input, ms] of (phase || goal ? [] : PLANS()[roleKey(agent.role)] || [])) {
+      const review = !phase && !goal ? reviewTurn(prompt) : null;
+      // 회의 중과 목표 잡기·기준 판정 차례에는 도구를 쓰지 않는다(파일을 고치지 말라는 지시와 같게)
+      for (const [name, input, ms] of (phase || goal || review ? [] : PLANS()[roleKey(agent.role)] || [])) {
         if (stopped) break;
         const id = `t${++n}`;
         emit({ type: 'tool', id, name, input, status: 'running' });
@@ -144,8 +167,8 @@ export default {
         }
         emit({ type: 'tool', id, name, status: 'done', output: tr('{name} 완료(데모)', { name }) });
       }
-      if ((phase || goal) && !stopped) await wait(1200); // 읽고 생각하는 시간
-      const body = phase ? meetingAnswer(phase, roleKey(agent.role), isOpposer(prompt), asksCheck(prompt)) : goal ? goalAnswer(prompt) : answer(roleKey(agent.role), agent.name, prompt);
+      if ((phase || goal || review) && !stopped) await wait(1200); // 읽고 생각하는 시간
+      const body = phase ? meetingAnswer(phase, roleKey(agent.role), isOpposer(prompt), asksCheck(prompt)) : goal ? goalAnswer(prompt) : review ? reviewAnswer(review) : answer(roleKey(agent.role), agent.name, prompt);
       for (let i = 0; i < body.length && !stopped;) {
         const step = 2 + Math.floor(Math.random() * 5);
         const piece = body.slice(i, i + step);

@@ -955,8 +955,9 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     } catch (e) {
       const status = e.status || 500;
       if (status === 500) console.error('[오류]', e);
-      // extra 에서는 정해 둔 값만 싣는다(목표 카드 대조가 어긋났을 때의 지금 초안 draft). error 는 덮이지 않게 맨 뒤에
-      if (!res.headersSent) send(res, status, { ...(e.extra?.draft && typeof e.extra.draft === 'object' ? { draft: e.extra.draft } : {}), error: e.message || String(e) });
+      // extra 에서는 정해 둔 값만 싣는다(목표 카드 대조가 어긋났을 때의 지금 초안 draft, 검수 줄 대조가 어긋났을 때의 지금 검수 줄 review). error 는 덮이지 않게 맨 뒤에
+      const pick = (k) => (e.extra?.[k] && typeof e.extra[k] === 'object' ? { [k]: e.extra[k] } : {});
+      if (!res.headersSent) send(res, status, { ...pick('draft'), ...pick('review'), error: e.message || String(e) });
       else try { res.end(); } catch { /* 이미 닫힘 */ }
     }
   });

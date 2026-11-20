@@ -458,8 +458,11 @@ test('10. 회의 중 끊김: 회의는 1바퀴부터 참석자 전원과 조사 
   // 2바퀴 차례 글의 질문을 조사 담당이 찾는 중에 끊긴다
   await t.waitFor(() => h1.S(sid).messages.some((m) => m.meeting?.phase === 'research' && m.status === 'streaming') && h1.S(sid).mission.at.working.includes(r.id), 40000, '회의 조사 중');
   assert.equal(h1.S(sid).mission.at.stageIndex, 0);
-  const { h2, snap } = await crash(h1, sid, (x) => { x.providerSessions[r.id] = 'claude-sess-research'; (x.sessionProvider ||= {})[r.id] = 'claude'; });
-  assert.ok(snap.providerSessions[a.id] && snap.providerSessions[b.id], '참석자는 회의 차례의 대화가 있었다');
+  // 목표 실행의 회의는 새 대화로 돈다(결정 0017): 회의 차례는 참석자의 CLI 대화 번호를 만들지 않는다.
+  // 끊긴 회의를 이어서 할 때 참석자·조사 담당의 저장된 대화를 버리는지 보려고, 얼린 세션에 대화 번호를 심어 둔다
+  assert.ok(!h1.S(sid).providerSessions[a.id] && !h1.S(sid).providerSessions[b.id], '회의 차례는 참석자의 대화 번호를 만들지 않는다');
+  const { h2, snap } = await crash(h1, sid, (x) => { for (const [id, sess] of [[r.id, 'claude-sess-research'], [a.id, 'claude-sess-chair'], [b.id, 'claude-sess-member']]) { x.providerSessions[id] = sess; (x.sessionProvider ||= {})[id] = 'claude'; } });
+  assert.ok(snap.providerSessions[a.id] && snap.providerSessions[b.id], '참석자에게 이어 갈 대화 번호가 있었다');
   await stays(h2, sid, snap);
   // 회의 설정(바퀴 수)을 바꾸면 무엇이 달라졌는지 알려 주며 거절하고, 되돌리면 이어 간다
   const team = structuredClone(h2.app.store.get('teams', tm.id));

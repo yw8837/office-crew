@@ -202,6 +202,8 @@ function handle(type, d) {
     case 'providers': state.providers = d; setAccountNames(d); break;
     case 'agents': state.agents = d; break;
     case 'notes': state.noteDrafts = { ...state.noteDrafts, [d.agentId]: d.drafts || 0 }; break;
+    // 목표 모드와 목표(결정 0014): 세션 요약 이벤트에는 실리지 않아서 따로 온다
+    case 'mission': { const s = state.sessionData[d.sessionId]; if (s) { s.goalMode = !!d.goalMode; s.mission = d.mission || null; } break; }
     case 'teams': state.teams = d; break;
     case 'skills': state.skills = d; break;
     case 'connectors': state.connectors = d; break;

@@ -18,7 +18,8 @@ export async function api(method, path, body) {
   const text = await r.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = { error: text }; }
-  if (!r.ok) throw new Error(data?.error || t('요청 실패 ({status})', { status: r.status }));
+  // 오류 본문도 같이 넘긴다(목표 카드 확인이 어긋나면 서버가 지금 초안을 같이 준다)
+  if (!r.ok) throw Object.assign(new Error(data?.error || t('요청 실패 ({status})', { status: r.status })), { status: r.status, data });
   return data;
 }
 
@@ -47,7 +48,7 @@ export const uploadUrl = (id) => `/api/uploads/${id}?token=${encodeURIComponent(
 export function connectEvents(onEvent, onStatus) {
   let es = null, retry = 0, closed = false;
   const types = ['hello', 'session', 'sessionDeleted', 'message', 'delta', 'block', 'messageDone', 'messageUsage', 'messageMeta',
-    'agentState', 'run', 'handoff', 'usage', 'providers', 'agents', 'teams', 'skills', 'connectors', 'plugins', 'skins', 'schedules', 'watch', 'tasks', 'skillKo', 'settings', 'sessionsReset', 'cooldown', 'notes'];
+    'agentState', 'run', 'handoff', 'usage', 'providers', 'agents', 'teams', 'skills', 'connectors', 'plugins', 'skins', 'schedules', 'watch', 'tasks', 'skillKo', 'settings', 'sessionsReset', 'cooldown', 'notes', 'mission'];
   const open = () => {
     es = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
     es.onopen = () => { retry = 0; onStatus(true); };

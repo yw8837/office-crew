@@ -5,6 +5,7 @@ import { makeHandle } from './util.js';
 import { tr } from '../i18n.js';
 import { roleKind } from '../routing.js';
 import { checkBlock } from '../meeting.js';
+import { goalBlock } from '../mission.js';
 
 // 역할 키(조사·정리·분석·빌드)는 그대로, 보이는 문구만 설정 언어로.
 // 에이전트의 역할 이름은 첫 실행 때 OS 언어로 저장되므로(Research, 調査 …) 역할 종류로 바꿔서 키를 찾는다
@@ -91,6 +92,21 @@ function meetingAnswer(phase, role, opposer, ask) {
   ].join('\n');
 }
 
+// ── 목표 잡기 차례(결정 0014) ──
+// 목표 차례 프롬프트는 코드가 만든 끝 모양(블록 예시 goalBlock())으로 끝난다. 그 끝 모양일 때만 목표 차례로 보고 그럴듯한 목표 카드 블록을 낸다
+// (요청 글에 "[목표 잡기]"가 들어 있다고 착각하지 않게. 데모 팀으로 사용량 0으로 눌러 볼 수 있게)
+const isGoalTurn = (prompt) => String(prompt).trimEnd().endsWith(goalBlock());
+function goalAnswer(prompt) {
+  const t = topic(prompt);
+  const card = {
+    goal: tr('"{t}"을(를) 작게 끝까지 해내기', { t }),
+    criteria: [tr('작업 폴더에 결과 파일이 있다'), tr('결과에 요청의 핵심이 빠짐없이 들어 있다'), tr('처음 보는 사람이 한 번 읽고 무엇을 했는지 안다')],
+    outOfScope: [tr('실제 배포나 결제')],
+    userDecides: [tr('결과물의 형식(문서·표·화면)')],
+  };
+  return `${tr('요청을 목표 카드로 정리했어(데모). 확인하면 팀이 이 기준을 들고 일해.')}\n\n\`\`\`oc-goal\n${JSON.stringify(card)}\n\`\`\``;
+}
+
 export default {
   id: 'mock', get label() { return tr('데모'); }, get sub() { return tr('가상 에이전트 · 사용량 0'); }, kind: 'mock', color: '#64748b',
   efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -116,8 +132,9 @@ export default {
       await wait(900);
       let n = 0;
       const phase = meetingPhase(prompt);
-      // 회의 중에는 도구를 쓰지 않는다(파일을 고치지 말라는 회의 지시와 같게)
-      for (const [name, input, ms] of (phase ? [] : PLANS()[roleKey(agent.role)] || [])) {
+      const goal = !phase && isGoalTurn(prompt);
+      // 회의 중과 목표 잡기 차례에는 도구를 쓰지 않는다(파일을 고치지 말라는 지시와 같게)
+      for (const [name, input, ms] of (phase || goal ? [] : PLANS()[roleKey(agent.role)] || [])) {
         if (stopped) break;
         const id = `t${++n}`;
         emit({ type: 'tool', id, name, input, status: 'running' });
@@ -127,8 +144,8 @@ export default {
         }
         emit({ type: 'tool', id, name, status: 'done', output: tr('{name} 완료(데모)', { name }) });
       }
-      if (phase && !stopped) await wait(1200); // 읽고 생각하는 시간
-      const body = phase ? meetingAnswer(phase, roleKey(agent.role), isOpposer(prompt), asksCheck(prompt)) : answer(roleKey(agent.role), agent.name, prompt);
+      if ((phase || goal) && !stopped) await wait(1200); // 읽고 생각하는 시간
+      const body = phase ? meetingAnswer(phase, roleKey(agent.role), isOpposer(prompt), asksCheck(prompt)) : goal ? goalAnswer(prompt) : answer(roleKey(agent.role), agent.name, prompt);
       for (let i = 0; i < body.length && !stopped;) {
         const step = 2 + Math.floor(Math.random() * 5);
         const piece = body.slice(i, i + step);

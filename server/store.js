@@ -4,6 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { seedData, defaultSettings } from './seed.js';
 import { tr } from './i18n.js';
+import { cutMission } from './mission.js';
 
 export function newId(prefix = 'id') {
   return `${prefix}-${crypto.randomBytes(6).toString('base64url').replace(/[-_]/g, '').slice(0, 8).toLowerCase()}`;
@@ -146,6 +147,7 @@ export class Store {
     // cut: 끊긴 실행·대기열에 있던 말이라는 표시. 오케스트레이터가 기억에 넣을 때 보고 지운다
     for (const r of s.runs || []) if (['running', 'paused', 'waiting'].includes(r.status)) { r.status = 'stopped'; r.endedAt ||= Date.now(); r.hold = null; r.cut = true; }
     for (const m of s.messages || []) if (m.status === 'streaming' || m.status === 'queued') { if (m.status === 'queued') m.cut = true; m.status = 'stopped'; }
+    cutMission(s); // 도는 중이던 목표는 끊김으로(저절로 다시 시작하지 않는다. 결정 0014)
     return s;
   }
 
@@ -165,12 +167,15 @@ export class Store {
   hasSession(id) { return this.meta.has(id); }
 
   #metaOf(s) {
-    const last = s.messages.findLast((m) => m.text); // 글이 없는 것(영입 제안 카드)은 건너뛴다
+    const last = s.messages.findLast((m) => m.text); // 글이 없는 것(영입 제안·목표 카드)은 건너뛴다
+    // 진행자 답 끝의 목표 카드 블록(```oc-goal 부터)은 미리보기에 넣지 않는다(화면에서는 카드로 보인다. 결정 0014)
+    const text = String(last?.text || '');
+    const cut = text.indexOf('```oc-goal');
     return {
       id: s.id, title: s.title, teamId: s.teamId, agentId: s.agentId, cwd: s.cwd,
       pinned: !!s.pinned, createdAt: s.createdAt, updatedAt: s.updatedAt,
       messageCount: s.messages.length,
-      preview: last ? String(last.text || '').slice(0, 80) : '',
+      preview: (cut >= 0 ? text.slice(0, cut).trimEnd() : text).slice(0, 80),
       running: s.runs.some((r) => ['running', 'paused', 'waiting'].includes(r.status)),
       attention: attentionOf(s.runs[s.runs.length - 1]),
     };

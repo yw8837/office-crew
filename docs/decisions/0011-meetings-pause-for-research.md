@@ -4,6 +4,10 @@
 - Date: 2026-11-17
 - Related: [0010](0010-meetings-take-turns.md) (the turns and verdicts this adds a step to; 0010 is otherwise unchanged), [0009](0009-agents-ask-with-a-marked-block.md) (the question uses the same kind of marked block), `server/meeting.js` (`CHECK_MAX`, `parseCheck`, `checkBlock`, `pickResearcher`), `server/orchestrator.js` (`#meeting`, `#meetingPrompt`, `#runAgent`, `recover`), `server/providers/mock.js`, `public/js/chat-tools.js` (`hideCheck`), `public/js/views/session.js`, `test/meeting-research.test.js`
 
+## Revision 2026-11-20: fewer research turns when a goal is low on calls
+
+In a goal's work run ([0017](0017-goal-mode-research-and-meeting-first.md)) the research turn runs once in a new conversation like the meeting's other turns, and when fewer than a quarter of the goal's call cap is left, research during the meeting is turned off: a question is answered "not checked" without a call (`check.status: 'low'`), with one line in the goal's progress log.
+
 ## Context
 
 In a meeting (0010) the participants answer from what they know and what has been said. Nobody looks anything up: a turn that depends on a fact nobody in the meeting has (a price, what a file says, whether a source agrees) is answered with a guess, and the chair concludes on it. Many teams have a research agent, but it works only in its own stage.

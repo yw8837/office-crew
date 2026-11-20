@@ -723,12 +723,13 @@ test('18. 목표 대기(판정·상한) 중 일시정지와 앱 끄기(stopAll),
   await t.waitFor(() => S(p).runs.at(-1).hold?.reason === 'mission' && S(p).mission.round === 3, 30000, '다시 묻기');
   await ctl(p, 'stop');
   await waitEnd(p);
-  // 상한 대기 중 앱 끄기(stopAll) → 목표는 stopped, 실행도 끝
+  // 상한 대기 중 앱 끄기(stopAll) → 실행은 끝나고, 목표는 그대로 둔다(다시 켜면 cut 이 되어 이어서 할 수 있다. 결정 0016)
   const c = await goal(tm.id, '', { before: (x) => { S(x).mission.calls.cap = 2; } });
   await waitHold(c, 'cap');
   t.app.orch.stopAll();
   await waitEnd(c);
-  assert.deepEqual([S(c).mission.status, S(c).runs.at(-1).status, t.app.orch.ctx.has(c)], ['stopped', 'stopped', false]);
+  assert.deepEqual([S(c).mission.status, S(c).runs.at(-1).status, t.app.orch.ctx.has(c)], ['waiting', 'stopped', false]);
+  t.app.orch.closing = false; // 앱을 실제로 닫지는 않았으니 끄는 중 표시를 되돌리고 이어 간다
   // 판정 대기 중에 앱이 꺼진 모양(디스크) → 다시 켜면 실행은 stopped(대기 표시 없음), 목표는 cut. 저절로 다시 돌지 않는다
   const w = await goal(tm.id, 'REVIEWFAIL2');
   await waitHold(w, 'mission');

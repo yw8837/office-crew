@@ -146,7 +146,12 @@ export class Store {
   // 디스크에서 읽은 세션의 "실행 중" 흔적은 이전 실행이 끊긴 것이므로 정리
   #fixStale(s) {
     // cut: 끊긴 실행·대기열에 있던 말이라는 표시. 오케스트레이터가 기억에 넣을 때 보고 지운다
-    for (const r of s.runs || []) if (['running', 'paused', 'waiting'].includes(r.status)) { r.status = 'stopped'; r.endedAt ||= Date.now(); r.hold = null; r.cut = true; }
+    // 그 실행에서 돌던 단계(도는 중·승인 대기)도 멈춘 단계로(단계 띠에 도는 표시가 남지 않게)
+    for (const r of s.runs || []) {
+      if (!['running', 'paused', 'waiting'].includes(r.status)) continue;
+      r.status = 'stopped'; r.endedAt ||= Date.now(); r.hold = null; r.cut = true;
+      for (const st of r.stages || []) if (st.status === 'running' || st.status === 'review') st.status = 'stopped';
+    }
     for (const m of s.messages || []) if (m.status === 'streaming' || m.status === 'queued') { if (m.status === 'queued') m.cut = true; m.status = 'stopped'; }
     cutMission(s); // 도는 중이던 목표는 끊김으로(저절로 다시 시작하지 않는다. 결정 0014)
     return s;

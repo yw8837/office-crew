@@ -739,7 +739,8 @@ export class Orchestrator {
         this.#missionEnd(ctx); // 대기열의 다음 말(새 목표 요청일 수 있다)을 시작하기 전에 이 목표의 끝 상태를 정한다
         this.store.saveSession(s, 50);
         this.bus.emit('session', this.store.sessionMeta(s));
-        const next = ctx.queue.shift();
+        // 앱을 끄는 중이면 줄 선 다음 말을 시작하지 않는다(닫힌 저장소 위에서 CLI 를 띄우지 않게. 그 말은 대기 표시로 남아 다시 켤 때 정리된다)
+        const next = this.closing ? null : ctx.queue.shift();
         if (next) {
           const nctx = () => this.ctx.get(s.id);
           this.#start(s, next);

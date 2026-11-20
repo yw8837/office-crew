@@ -16,7 +16,8 @@ import { pickOpposer, turnOrder, parseVerdict, verdictBlock, CHECK_MAX, parseChe
 import { writeConversation, readImported, saveImported, pickEarlier, toolNames, handoffRequest, NOTE_MAX } from './handoff.js';
 import { readTranscript } from './importer.js';
 import { pickForPrompt, promptRef } from './notes.js';
-import { parseGoal, goalBlock, goalWarn, newMission, toCriteria, cardOf, sameCard, cleanGoal, pickLead, mixedLocal, logLine, alive, NOTE_COUNT } from './mission.js';
+import { parseGoal, goalBlock, goalWarn, newMission, toCriteria, cardOf, sameCard, cleanGoal, pickLead, mixedLocal, logLine, alive, NOTE_COUNT,
+  reviewPlan, reviewCard, parseReview, reviewPrompt, applyReview, tally, allPass, returnItems, returnPrompt, prevPrompt, sameDroppable, MISSION_CALL_CAP, CAP_STEP, RETURN_CAP } from './mission.js';
 
 const ACTIVE = new Set(['running', 'paused', 'waiting']);
 const FORCE_END_MS = 5000; // 멈춘 CLI를 끄라고 한 뒤 이만큼 기다려도 안 끝나면 강제로 끝낸다
@@ -207,25 +208,38 @@ export class Orchestrator {
     if (now) this.store.saveSessionNow(s); else this.store.saveSession(s, 50);
   }
 
+  // 목표 실행의 CLI 호출 하나를 센다(결정 0015). 화면 알림은 0.5초에 한 번까지(단계 끝·판정마다 목표를 다시 알리니 마지막 값도 곧 간다)
+  #countCall(ctx) {
+    ctx.mission.calls.used++;
+    const key = `mc:${ctx.s.id}`;
+    const now = Date.now();
+    if (now - (this.throttle.get(key) || 0) < 500) { this.store.saveSession(ctx.s, 50); return; }
+    this.throttle.set(key, now);
+    this.emitMission(ctx.s);
+  }
+
   // 목표가 도는 동안 온 말: 새 실행으로 줄 세우지 않고 그 뒤에 시작하는 단계들(승인 거절·다시 하기로 같은 단계를 다시 돌 때 포함)에 넣을 추가 지시로 받는다(확정된 목표·기준은 안 바뀐다).
   // 메시지에는 missionNote 표시를 달아 에이전트에게 넘기는 대화에서 뺀다(지시는 [사용자 추가 지시]로만 간다).
   // 기억에는 목표 실행이 끝날 때 넣는다(그때 받은 AI 가 모두 내 PC 모델이었는지 알 수 있다. 결정 0007). 지금은 보낼 때의 팀 구성으로 표시만 해 둔다.
-  // 뒤에 시작할 단계가 없으면(마지막 단계가 이미 도는 중이고 승인·오류 대기도 아님) 응답에 late 를 싣는다(이번 목표에는 반영되지 않을 수 있다)
-  #missionNote(s, text, attachments) {
+  // 일 실행이 없거나 검수자가 없는 팀의 판정 대기 중이면 응답에 late 를 싣는다(이번 목표에는 반영되지 않을 수 있다). 그 밖의 일 실행 중이면 판정 뒤에 반영할지 묻는다
+  // logText: 진행 기록에 남길 문구(에이전트를 골라 보낸 지시를 추가 지시로 돌렸을 때. 없으면 "추가 지시: …")
+  #missionNote(s, text, attachments, logText = '') {
     const m = s.mission;
     if ((m.notes || []).length >= NOTE_COUNT) throw Object.assign(new Error(tr('추가 지시는 목표 하나에 {n}개까지야. 더 보내려면 목표를 멈추고 새 요청으로 보내 줘.', { n: NOTE_COUNT })), { status: 400 });
     const files = attachments.map((a) => ({ id: a.id, name: a.name, mime: a.mime, size: a.size, path: a.path }));
     const userMsg = { id: newId('m'), role: 'user', text, mention: null, createdAt: Date.now(), status: 'done', attachments: files, missionNote: true };
     s.messages.push(userMsg);
     (m.notes ||= []).push({ id: newId('nt'), text, at: userMsg.createdAt, used: false, msgId: userMsg.id, ...(files.length ? { files: files.map((f) => ({ name: f.name, path: f.path })) } : {}) });
-    logLine(m, 'note', tr('추가 지시: {text}', { text: [...text.replace(/\s+/g, ' ').trim()].slice(0, 120).join('') || tr('(첨부 파일)') }), userMsg.id);
+    logLine(m, 'note', logText || tr('추가 지시: {text}', { text: [...text.replace(/\s+/g, ' ').trim()].slice(0, 120).join('') || tr('(첨부 파일)') }), userMsg.id);
     this.#premark(s, userMsg);
     this.store.saveSession(s, 50);
     this.bus.emit('message', { sessionId: s.id, message: userMsg });
     this.bus.emit('session', this.store.sessionMeta(s));
     this.emitMission(s);
-    const run = this.ctx.get(s.id)?.missionTurn === 'work' ? this.ctx.get(s.id).run : null;
-    const late = !run || (run.stageIndex >= run.stages.length - 1 && run.stages[run.stageIndex]?.status !== 'pending' && !run.hold);
+    // 일 실행이 도는 동안 온 지시는 늦지 않는다: 뒤에 시작할 일 단계가 없어도 판정 뒤에 "반영해서 한 번 더"를 묻는다(결정 0015).
+    // 다만 검수자가 없는 팀의 판정 대기(한 번 더를 못 고른다) 중에 온 지시는 이번 목표에 쓰일 길이 없다
+    const wctx = this.ctx.get(s.id);
+    const late = wctx?.missionTurn !== 'work' || (wctx.run.hold?.reason === 'mission' && wctx.run.hold.more === false);
     return { noted: true, messageId: userMsg.id, ...(late ? { late: true } : {}) };
   }
 
@@ -304,9 +318,13 @@ export class Orchestrator {
         got.msg.goalBlock = { from: got.p.from, to: got.p.to }; // 화면이 그 자리를 감추고 카드로 보여 준다
         this.bus.emit('message', { sessionId: s.id, message: got.msg });
       }
+      // 검수 줄(결정 0015): 누가 기준마다 판정하는지, 기준 판정으로 대신해서 건너뛸 수 있는 단계. 사용자가 확인하기 전에 보여 준다
+      const team = this.store.get('teams', s.teamId);
+      const agents = this.store.all('agents');
       const card = {
         id: newId('m'), role: 'proposal', kind: 'goal', status: 'open', text: '', missionId: m.id, leadId: lead, draftMsgId: got?.msg.id || null,
         goal: draft.goal, criteria: draft.criteria, outOfScope: draft.outOfScope, userDecides: draft.userDecides,
+        review: reviewCard(team, agents, reviewPlan(team, agents, lead)),
         ...(warn ? { warn } : {}), ...(got ? {} : { fallback: true }), createdAt: Date.now(),
       };
       s.messages.push(card);
@@ -341,6 +359,21 @@ export class Orchestrator {
     if (s.messages.slice(at + 1).some((x) => x.role === 'user')) throw fail(409, tr('카드 뒤에 새 말이 있어서 이 카드로는 시작할 수 없어. 요청을 다시 보내 줘.'));
     const draft = cardOf(m);
     if (!sameCard(body.expected, draft)) throw fail(409, tr('화면에 보이던 카드와 저장된 초안이 달라. 지금 초안을 다시 보여 줄게.'), { draft: { missionId: m.id, ...draft } });
+    // 검수 줄 대조(결정 0015): 화면이 보여 주던 검수자, 뺄 수 있는 단계 목록(droppable: 번호·이름·담당·지시), 건너뛸 단계(drop)가 지금 팀으로 다시 계산한 값과 맞아야 한다.
+    // 검수자가 다르거나, 목록이 글자까지 같지 않거나(팀 단계를 고쳐 번호만 같은 다른 단계가 빠지지 않게), drop 이 뺄 수 있는 단계의 부분집합이 아니면 409 와 지금 값.
+    // review 가 없는 요청(옛 화면)은 아무것도 빼지 않는다(검수자는 계산값)
+    const team = this.store.get('teams', s.teamId);
+    const agents = this.store.all('agents');
+    const now = reviewPlan(team, agents, m.leadId);
+    const nowCard = reviewCard(team, agents, now);
+    let drop = [];
+    if (body.review !== undefined && body.review !== null) {
+      const r = typeof body.review === 'object' && !Array.isArray(body.review) ? body.review : {};
+      const want = Array.isArray(r.drop) ? r.drop : null;
+      const fits = !!want && want.every((x) => Number.isInteger(x) && now.droppable.includes(x));
+      if (!fits || !sameDroppable(r.droppable, nowCard.droppable) || String(r.reviewerId ?? '') !== String(now.reviewerId ?? '')) throw fail(409, tr('검수자나 건너뛸 단계가 화면에 보이던 것과 달라. 지금 값을 다시 보여 줄게.'), { review: nowCard });
+      drop = [...new Set(want)];
+    }
     const final = body.edited ? cleanGoal(body.edited) : draft;
     if (!final.goal) throw fail(400, tr('목표가 비어 있어.'));
     if (!final.criteria.length) throw fail(400, tr('합격 기준이 하나도 없어. "고쳐서 시작"으로 기준을 적어 줘.'));
@@ -348,19 +381,25 @@ export class Orchestrator {
     if (why) throw fail(400, why);
     const userMsg = s.messages.find((x) => x.id === m.requestMsgId && x.role === 'user');
     if (!userMsg) throw fail(409, tr('요청 메시지를 찾지 못했어. 요청을 다시 보내 줘.'));
-    // 일하기: 팀 단계표를 하나도 빼지 않고 그대로(검수 역할 단계·승인 관문 포함). 기준 판정이 아직 없어서 빼면 검수가 아예 없어진다.
+    // 일하기: 팀 단계표에서 사용자가 남기지 않은 검수 단계(승인 관문·회의가 아닌 것)를 빼고, 검수자가 있으면 맨 끝에 기준 판정 단계를 붙인다.
     // 에이전트가 없으면 여기서 던진다(목표를 바꾸기 전에)
-    const plan = this.#plan(s, null);
+    const rp = reviewPlan(team, agents, m.leadId, now.droppable.filter((x) => !drop.includes(x)));
+    const plan = this.#missionPlan(team, rp);
     const edited = !sameCard(final, draft);
     Object.assign(m, {
       goal: final.goal, criteria: toCriteria(final.criteria), outOfScope: final.outOfScope, userDecides: final.userDecides,
       status: 'active', phase: 'work', confirmedAt: Date.now(), editedByUser: edited,
+      // 2a-1 때 만든 초안(이 칸이 없음)도 같은 값으로 시작한다
+      reviewerId: rp.reviewerId, dropped: rp.dropped.map((i) => String(team.stages[i]?.label || '')), round: 0, returns: 0, returnCap: RETURN_CAP,
+      calls: m.calls && Number.isFinite(m.calls.used) && Number.isFinite(m.calls.cap) ? m.calls : { used: 0, cap: MISSION_CALL_CAP },
     });
     Object.assign(card, { status: 'confirmed', confirmed: { ...final }, edited, resolvedAt: Date.now() });
     logLine(m, 'confirm', edited ? tr('사용자가 고쳐서 확인했어(기준 {n}개).', { n: final.criteria.length }) : tr('사용자가 목표를 확인했어(기준 {n}개).', { n: final.criteria.length }), card.id);
+    logLine(m, 'confirm', rp.reviewerId ? tr('검수: {name}이(가) 기준마다 판정해.', { name: this.store.get('agents', rp.reviewerId)?.name || rp.reviewerId }) : tr('검수할 다른 팀원이 없어서 판정 없이 끝나고 네게 물어.'));
+    if (m.dropped.length) logLine(m, 'confirm', tr('기준 판정으로 대신해서 건너뛰는 단계: {labels}', { labels: m.dropped.join(', ') }));
     // 실행을 먼저 넣고 저장한다: 도는 목표(active)와 도는 실행이 같이 저장돼야, 그 틈에 앱이 꺼져도 다시 켤 때 끊김으로 보고 대화에 알림을 남긴다.
     // 확정된 값은 이 실행이 끝날 때까지 메모리에 든 값을 쓴다(실행 중에 세션 파일을 다시 읽지 않는다)
-    this.#start(s, userMsg, { plan, card: { goal: final.goal, criteria: [...final.criteria], outOfScope: [...final.outOfScope] } });
+    this.#start(s, userMsg, { plan, returnStage: rp.returnStage, card: { goal: final.goal, criteria: [...final.criteria], outOfScope: [...final.outOfScope] } });
     this.bus.emit('message', { sessionId: s.id, message: card });
     this.emitMission(s, true);
     return { ok: true, missionId: m.id };
@@ -409,7 +448,8 @@ export class Orchestrator {
     this.emitMission(ctx.s);
   }
 
-  // 목표 실행이 끝날 때: 목표 차례가 카드를 못 냈으면 목표를 닫고, 일 실행이면 끝 상태로(2a-1 에는 검수가 없어서 다 끝나도 done 이 아니라 unreviewed)
+  // 목표 실행이 끝날 때: 목표 차례가 카드를 못 냈으면 목표를 닫고, 일 실행이면 끝 상태로(결정 0015: 전부 통과 done, 사용자가 받아들임 accepted, 그 밖 stopped).
+  // 옛 데이터의 unreviewed(2a-1 에서 판정 없이 끝난 목표)는 끝 상태로 그대로 읽는다
   #missionEnd(ctx) {
     const { s, run } = ctx;
     const m = ctx.mission;
@@ -424,15 +464,20 @@ export class Orchestrator {
       if (!stopped) this.#systemNote(s, why);
     } else {
       if (m.status !== 'active' && m.status !== 'waiting') return;
-      if (run.status === 'done') {
-        m.status = 'unreviewed';
-        logLine(m, 'done', tr('일은 끝났어. 기준 판정은 아직 없어.'));
+      const end = !ctx.stopped && run.status === 'done' ? ctx.missionEnd : null;
+      const t = tally(m);
+      if (end === 'done') {
+        m.status = 'done';
+        logLine(m, 'done', tr('기준 {n}개 중 {n}개 통과. 목표를 끝냈어.', { n: t.total }));
+      } else if (end === 'accepted') {
+        m.status = 'accepted';
+        logLine(m, 'done', tr('받아들여서 끝냈어. 기준 {total}개 중 통과 {pass}개, 남은 {left}개는 판정 그대로 둬.', { total: t.total, pass: t.pass, left: t.total - t.pass }));
       } else {
         m.status = 'stopped';
-        logLine(m, 'stop', run.status === 'error' ? tr('실행 오류로 목표를 멈췄어.') : tr('중지해서 목표를 멈췄어.'));
+        logLine(m, 'stop', run.status === 'error' || (run.status === 'done' && !end) ? tr('실행 오류로 목표를 멈췄어.') : tr('중지해서 목표를 멈췄어.'));
       }
       const left = (m.notes || []).filter((n) => !n.used).length;
-      if (left) logLine(m, 'note', run.status === 'done' ? tr('반영하지 못한 추가 지시가 {n}개 있어(마지막 단계가 시작된 뒤에 왔어).', { n: left }) : tr('반영하지 못한 추가 지시가 {n}개 있어.', { n: left }));
+      if (left) logLine(m, 'note', tr('반영하지 못한 추가 지시가 {n}개 있어.', { n: left }));
     }
     this.emitMission(s);
   }
@@ -495,7 +540,18 @@ export class Orchestrator {
     return { teamId: null, stages: [{ label: a.role || a.name, agentIds: [a.id], approve: false, instruction: '' }] };
   }
 
-  // work: 확인한 목표의 일 실행({ plan, card: 확정한 목표·기준·범위 밖 }). 목표 차례는 userMsg.mission 으로 알아본다(결정 0014)
+  // 목표 일 실행의 단계표(결정 0015): 팀 단계표(#plan 과 같은 모양)에서 rp.dropped(팀 단계 번호)를 빼고, 검수자가 있으면 맨 끝에 기준 판정 단계
+  #missionPlan(team, rp) {
+    const agents = (ids) => ids.filter((id) => this.store.get('agents', id));
+    const stages = (team?.stages || []).map((st, index) => ({ index, label: st.label, agentIds: agents(st.agentIds || []), approve: !!st.approve, instruction: st.instruction || '', meeting: st.meeting || null }))
+      .filter((st) => st.agentIds.length && !rp.dropped.includes(st.index))
+      .map(({ index, ...st }) => ({ ...st, meeting: normMeeting(st.meeting, st.agentIds) }));
+    if (!stages.length) throw Object.assign(new Error(tr('에이전트가 하나도 없어. 에이전트를 먼저 만들어줘.')), { status: 400 });
+    if (rp.reviewerId) stages.push({ label: tr('기준 판정'), agentIds: [rp.reviewerId], approve: false, instruction: '', meeting: null, mission: 'review' });
+    return { teamId: team.id, stages };
+  }
+
+  // work: 확인한 목표의 일 실행({ plan, returnStage: 되돌릴 단계 번호, card: 확정한 목표·기준·범위 밖 }). 목표 차례는 userMsg.mission 으로 알아본다(결정 0014)
   #start(s, userMsg, work = null) {
     let plan;
     let goal = false;
@@ -532,14 +588,17 @@ export class Orchestrator {
       s, run, userMsg, handles: new Map(), outputs: [], gate: null, stopped: false, pauseRequested: false,
       skipped: new Set(), pendingSteer: new Map(), nextNotes: [], queue: [], asks: new Map(),
       waiting: new Set(), waitNotes: new Map(), // 한도가 풀리길 기다리는 에이전트, 그 에이전트를 골라 보낸 지시(시작할 때 프롬프트에 넣는다)
-      // 목표 실행: 그 목표(메모리의 값), 목표 차례인지 일 실행인지, 확정한 카드(일 실행만), 단계에 넣은 추가 지시
+      // 목표 실행: 그 목표(메모리의 값), 목표 차례인지 일 실행인지, 확정한 카드(일 실행만), 단계에 넣은 추가 지시,
+      // 되돌릴 단계 번호, 되돌리는 동안 넣을 지난 검수의 걸린 기준(#prompt), 끝 상태(done·accepted. #missionEnd 가 적는다)
       mission: goal || work ? s.mission : null, missionTurn: goal ? 'goal' : work ? 'work' : null, goalCard: work?.card || null, liveNotes: [],
+      // 되돌린 단계 번호(그 뒤 단계의 옛 답은 다음 검수 자료에서 뺀다), 되돌릴 단계의 직전 결과, 지금 한 번 실행 중인(또는 그 차례를 기다리는) 에이전트
+      returnStage: work?.returnStage ?? -1, missionReturn: null, missionEnd: null, returnedAt: -1, missionPrev: null, onceAgents: new Set(),
     };
     this.ctx.set(s.id, ctx);
     this.store.pin(s.id); // 실행 중엔 메모리에서 내리지 않는다
     for (const st of run.stages) for (const id of st.agentIds) this.#state(s.id, id, 'idle', tr('대기 중'));
     this.#emitRun(ctx);
-    (goal ? this.#goalTurn(ctx) : this.#execute(ctx))
+    (goal ? this.#goalTurn(ctx) : work ? this.#missionRun(ctx) : this.#execute(ctx))
       .catch((e) => { run.status = 'error'; this.#systemNote(s, tr('실행 오류: {msg}', { msg: e.message })); })
       .finally(() => {
         run.endedAt = Date.now();
@@ -578,58 +637,8 @@ export class Orchestrator {
         if (d.action === 'stop' || ctx.stopped) break;
       }
       const st = run.stages[i];
-      let feedback = null;
-      if (ctx.missionTurn === 'work') this.#missionStage(ctx, i, 'start');
-      for (;;) {
-        st.status = 'running';
-        this.#emitRun(ctx);
-        const results = st.meeting ? await this.#meeting(ctx, i, feedback) : await this.#together(ctx, i, st.agentIds, feedback);
-        ctx.outputs[i] = results;
-        if (ctx.stopped) break;
-        const failed = results.filter((r) => r.error && !r.skipped);
-        if (failed.length) {
-          st.status = 'error';
-          // 사람이 안 보는 예약 실행이 멈췄으면 결정을 기다리지 않고 끝낸다(기다리는 동안 뒤 회차가 전부 막히지 않게)
-          if (ctx.stalled && ctx.s.scheduleId) {
-            this.#systemNote(ctx.s, ctx.looped ? tr('예약 실행이 같은 일만 되풀이해서 끝냈어. 다음 회차는 정상으로 돌아.') : tr('예약 실행이 멈춰서 끝냈어. 다음 회차는 정상으로 돌아.'));
-            ctx.stopped = true;
-            break;
-          }
-          // 자동으로 시킨 인수인계 메모가 실패하면 결정을 기다리지 않는다(뒤에 줄 선 사용자 요청이 묶이지 않게)
-          if (ctx.userMsg?.handoffAsk && ctx.userMsg.auto) {
-            this.#systemNote(ctx.s, tr('인수인계 메모를 쓰지 못했어. 메모 없이 이어서 진행해.'));
-            ctx.stopped = true;
-            break;
-          }
-          const d = await this.#hold(ctx, 'waiting', { reason: 'error', stageIndex: i, message: failed.map((f) => `${f.agent?.name || ''}: ${f.error}`).join('\n').slice(0, 600) });
-          if (d.action === 'retry') {
-            feedback = d.text || null;
-            if (ctx.missionTurn === 'work') this.#missionStage(ctx, i, 'again'); // 기다리는 동안 온 추가 지시도 다시 도는 이 단계에
-            continue;
-          }
-          if (d.action === 'skip') { st.status = 'skipped'; break; }
-          ctx.stopped = true;
-          break;
-        }
-        if (st.approve) {
-          st.status = 'review';
-          const d = await this.#hold(ctx, 'waiting', { reason: 'approve', stageIndex: i });
-          if (d.action === 'reject' || d.action === 'retry') {
-            feedback = d.text || tr('결과를 다시 검토해서 더 낫게 고쳐줘.');
-            if (ctx.missionTurn === 'work') this.#missionStage(ctx, i, 'again');
-            continue;
-          }
-          if (d.action === 'stop') { ctx.stopped = true; break; }
-          for (const id of st.agentIds) this.#state(ctx.s.id, id, 'done', tr('승인됨'));
-        }
-        // 전원이 건너뛰어졌으면 'skipped', 일부만이면 완료 + 건너뛴 인원 기록
-        const skippedN = results.filter((r) => r.skipped).length;
-        st.status = skippedN && skippedN === results.length ? 'skipped' : 'done';
-        if (skippedN) st.note = tr('{n}명 건너뜀', { n: skippedN });
-        break;
-      }
+      await this.#runStage(ctx, i);
       if (ctx.stopped) { st.status = st.status === 'done' ? 'done' : 'stopped'; break; }
-      if (ctx.missionTurn === 'work') this.#missionStage(ctx, i, 'end');
       const next = run.stages[i + 1];
       if (next) {
         for (const from of st.agentIds) this.bus.emit('handoff', { sessionId: ctx.s.id, from, to: next.agentIds[0], label: st.label });
@@ -637,6 +646,272 @@ export class Orchestrator {
     }
     run.status = ctx.stopped ? 'stopped' : run.stages.some((x) => x.status === 'error') ? 'error' : 'done';
     for (const st of run.stages) if (st.status === 'pending') st.status = ctx.stopped ? 'stopped' : 'skipped';
+  }
+
+  // 단계 하나: 돌리고, 오류면 결정(다시·건너뛰기·중지)을, 승인 단계면 승인을 기다린다(거절·다시 하기면 같은 단계를 다시).
+  // agentIds: 이 단계의 일부만 돌릴 때(목표의 되돌림에서 회의 대신 한 명. 회의를 열지 않는다). 되돌림에서도 승인 관문은 그대로 묻는다(결정 0015)
+  async #runStage(ctx, i, feedback = null, { agentIds = null } = {}) {
+    const st = ctx.run.stages[i];
+    for (;;) {
+      st.status = 'running';
+      this.#emitRun(ctx);
+      const results = st.meeting && !agentIds ? await this.#meeting(ctx, i, feedback) : await this.#together(ctx, i, agentIds || st.agentIds, feedback);
+      ctx.outputs[i] = results;
+      if (ctx.stopped) break;
+      const failed = results.filter((r) => r.error && !r.skipped);
+      if (failed.length) {
+        st.status = 'error';
+        // 사람이 안 보는 예약 실행이 멈췄으면 결정을 기다리지 않고 끝낸다(기다리는 동안 뒤 회차가 전부 막히지 않게)
+        if (ctx.stalled && ctx.s.scheduleId) {
+          this.#systemNote(ctx.s, ctx.looped ? tr('예약 실행이 같은 일만 되풀이해서 끝냈어. 다음 회차는 정상으로 돌아.') : tr('예약 실행이 멈춰서 끝냈어. 다음 회차는 정상으로 돌아.'));
+          ctx.stopped = true;
+          break;
+        }
+        // 자동으로 시킨 인수인계 메모가 실패하면 결정을 기다리지 않는다(뒤에 줄 선 사용자 요청이 묶이지 않게)
+        if (ctx.userMsg?.handoffAsk && ctx.userMsg.auto) {
+          this.#systemNote(ctx.s, tr('인수인계 메모를 쓰지 못했어. 메모 없이 이어서 진행해.'));
+          ctx.stopped = true;
+          break;
+        }
+        const d = await this.#hold(ctx, 'waiting', { reason: 'error', stageIndex: i, message: failed.map((f) => `${f.agent?.name || ''}: ${f.error}`).join('\n').slice(0, 600) });
+        if (d.action === 'retry') {
+          feedback = d.text || null;
+          if (ctx.missionTurn === 'work') this.#missionStage(ctx, i, 'again'); // 기다리는 동안 온 추가 지시도 다시 도는 이 단계에
+          continue;
+        }
+        if (d.action === 'skip') { st.status = 'skipped'; break; }
+        ctx.stopped = true;
+        break;
+      }
+      if (st.approve) {
+        st.status = 'review';
+        const d = await this.#hold(ctx, 'waiting', { reason: 'approve', stageIndex: i });
+        if (d.action === 'reject' || d.action === 'retry') {
+          feedback = d.text || tr('결과를 다시 검토해서 더 낫게 고쳐줘.');
+          if (ctx.missionTurn === 'work') this.#missionStage(ctx, i, 'again');
+          continue;
+        }
+        if (d.action === 'stop') { ctx.stopped = true; break; }
+        for (const id of st.agentIds) this.#state(ctx.s.id, id, 'done', tr('승인됨'));
+      }
+      // 전원이 건너뛰어졌으면 'skipped', 일부만이면 완료 + 건너뛴 인원 기록
+      const skippedN = results.filter((r) => r.skipped).length;
+      st.status = skippedN && skippedN === results.length ? 'skipped' : 'done';
+      if (skippedN) st.note = tr('{n}명 건너뜀', { n: skippedN });
+      break;
+    }
+  }
+
+  // ── 목표 일 실행(결정 0015) ──
+  // 일 단계들 → 기준 판정(검수자 한 번 실행) → 판정에 따라 되돌림(마지막 일 단계를 걸린 기준과 함께 다시) → 다시 판정 → 사용자에게 묻기 → 끝.
+  // 판정 뒤에 보는 순서: 중지 → 안 쓴 추가 지시가 있으면 묻기 → 전부 통과면 done → 불합격이 있고 되돌림이 남았으면 자동 되돌림 → 그 밖은 묻기.
+  // 끝 상태(done·accepted)는 ctx.missionEnd 에 두고 #missionEnd 가 적는다
+  async #missionRun(ctx) {
+    const { s, run } = ctx;
+    const m = ctx.mission;
+    await this.#ensureImported(s);
+    this.rememberImported(s);
+    const rv = run.stages.findIndex((st) => st.mission === 'review'); // 기준 판정 단계(검수자가 없으면 -1)
+    const end = rv >= 0 ? rv : run.stages.length;
+    for (let i = 0; i < end && !ctx.stopped; i++) await this.#missionWork(ctx, i);
+    const close = () => { ctx.missionEnd = allPass(m) && !ctx.asks.size ? 'done' : 'accepted'; }; // done 은 기준이 전부 통과이고 열린 질문이 없을 때만
+    while (!ctx.stopped) {
+      if (rv >= 0) await this.#reviewStage(ctx, rv);
+      else this.#noReviewer(ctx);
+      if (ctx.stopped) break;
+      const at = rv >= 0 ? rv : end - 1;
+      const notes = (m.notes || []).filter((n) => !n.used).length;
+      let back = false;
+      if (notes) {
+        const d = await this.#missionAsk(ctx, 'notes', at, true, rv >= 0);
+        if (d === 'stop') break;
+        if (d === 'accept') { close(); break; }
+        m.returnCap = m.returns + 1; // 한 번 더 = 되돌림 한 번(그 뒤에 또 불합격이면 자동으로 돌지 않고 묻는다)
+        back = true;
+      } else if (allPass(m) && !ctx.asks.size) {
+        ctx.missionEnd = 'done';
+        break;
+      } else if (tally(m).fail && m.returns < m.returnCap) back = true;
+      else {
+        const d = await this.#missionAsk(ctx, 'verdict', at, rv >= 0, rv >= 0);
+        if (d === 'stop') break;
+        if (d === 'accept') { close(); break; }
+        m.returnCap = m.returns + 1; // 한 번 더 = 되돌림 한 번(그 뒤에 또 불합격이면 자동으로 돌지 않고 묻는다)
+        back = true;
+      }
+      if (!back) break;
+      // 되돌림: 마지막 일 단계를 걸린 기준(표식 안의 참고 자료)과 그 단계의 직전 결과와 함께 다시. 회의면 진행자 한 명, 승인 단계면 승인을 다시 묻는다
+      const i = ctx.returnStage >= 0 && ctx.returnStage < end ? ctx.returnStage : end - 1;
+      m.returns++;
+      const items = returnItems(m);
+      logLine(m, 'return', items.length ? tr('되돌림 {n}번째: "{label}" 단계가 걸린 기준 {k}개를 고쳐.', { n: m.returns, label: run.stages[i].label, k: items.length }) : tr('되돌림 {n}번째: "{label}" 단계를 추가 지시와 함께 다시 해.', { n: m.returns, label: run.stages[i].label }));
+      // 되돌린 단계 뒤의 남은 단계(남긴 검수 단계 등)는 다시 돌지 않는다: 다음 검수 자료에서 그 단계의 옛 답은 뺀다(#reviewStage)
+      const after = run.stages.slice(i + 1, end).map((x) => x.label);
+      if (after.length) logLine(m, 'return', tr('뒤의 "{labels}" 단계는 다시 돌지 않아서, 다음 검수에는 그 단계의 옛 답을 넣지 않아.', { labels: after.join('", "') }));
+      ctx.returnedAt = i;
+      this.emitMission(s);
+      ctx.missionReturn = items.length ? items : null;
+      ctx.missionPrev = this.#stagePrev(ctx, i);
+      if (rv >= 0) run.stages[rv].status = 'pending';
+      try { await this.#missionWork(ctx, i, true); } finally { ctx.missionReturn = null; ctx.missionPrev = null; }
+    }
+    run.status = ctx.stopped ? 'stopped' : 'done';
+    for (const st of run.stages) if (st.status === 'pending') st.status = ctx.stopped ? 'stopped' : 'skipped';
+  }
+
+  // 되돌릴 단계의 직전 결과(되돌림 프롬프트에 참고 자료로 넣는다): 일 단계면 에이전트마다 자기 답, 회의면 결론.
+  // sid: 그 답을 쓴 CLI 대화(그 대화를 이어 가는 에이전트에게는 다시 주지 않는다)
+  #stagePrev(ctx, i) {
+    const { s, run } = ctx;
+    const st = run.stages[i];
+    return (ctx.outputs[i] || []).filter((o) => !o.error && o.agent && o.text && o.text.trim()).map((o) => {
+      const msg = s.messages.findLast((x) => x.role === 'agent' && x.runId === run.id && x.stageIndex === i && x.agentId === o.agent.id && !x.review
+        && (st.meeting ? x.meeting?.phase === 'conclude' : !x.meeting));
+      return { agentId: String(o.agent.id), name: o.agent.name || '', text: o.text, sid: msg?.providerSessionId || null, provider: msg?.provider || null, meeting: !!st.meeting };
+    });
+  }
+
+  // 목표의 일 단계 하나: 일시정지·호출 상한을 먼저 보고, 추가 지시를 넣고(진행 기록), 단계를 돌린다.
+  // back: 되돌림(회의면 진행자 한 명이, 진행자가 그 단계에 없으면 첫 에이전트가 고친다. 승인 단계면 승인을 다시 묻는다)
+  async #missionWork(ctx, i, back = false) {
+    const { run, s } = ctx;
+    const m = ctx.mission;
+    run.stageIndex = i;
+    if (ctx.stopped) return;
+    if (ctx.pauseRequested) {
+      const d = await this.#hold(ctx, 'paused', { reason: 'pause', stageIndex: i });
+      if (d.action === 'stop' || ctx.stopped) { ctx.stopped = true; return; }
+    }
+    const st = run.stages[i];
+    const ids = back && st.meeting ? [st.agentIds.includes(String(m.leadId)) ? String(m.leadId) : st.agentIds[0]] : null;
+    if (!(await this.#capCheck(ctx, i, (ids || st.agentIds).length))) return;
+    m.phase = 'work';
+    this.#missionStage(ctx, i, back ? 'again' : 'start');
+    await this.#runStage(ctx, i, null, { agentIds: ids });
+    if (ctx.stopped) { st.status = st.status === 'done' ? 'done' : 'stopped'; return; }
+    this.#missionStage(ctx, i, 'end');
+    const next = run.stages[i + 1];
+    if (next) for (const from of (ids || st.agentIds)) this.bus.emit('handoff', { sessionId: s.id, from, to: next.agentIds[0], label: st.label });
+  }
+
+  // 호출 상한(결정 0015): 단계를 시작하기 전에 남은 호출 수가 그 단계 인원보다 적으면 묻는다("20번 더" / 그만). 단계 안에서 넘는 양(다시 시도·이어받기)은 막지 않는다
+  async #capCheck(ctx, i, need) {
+    const m = ctx.mission;
+    const c = m.calls;
+    while (!ctx.stopped && c && c.cap - c.used < need) {
+      m.status = 'waiting';
+      logLine(m, 'cap', tr('호출 {used}번에 닿았어(상한 {cap}번). 다음 단계에 {need}번이 들어서 물어봤어.', { used: c.used, cap: c.cap, need }));
+      this.emitMission(ctx.s);
+      const d = await this.#hold(ctx, 'waiting', { reason: 'cap', stageIndex: i, used: c.used, cap: c.cap, step: CAP_STEP });
+      if (ctx.stopped || d.action !== 'more') { ctx.stopped = true; break; }
+      c.cap += CAP_STEP;
+      m.status = 'active';
+      logLine(m, 'answer', tr('호출 상한을 {n}번 늘렸어(이제 {cap}번).', { n: CAP_STEP, cap: c.cap }));
+      this.emitMission(ctx.s);
+    }
+    return !ctx.stopped;
+  }
+
+  // 판정 뒤에 사용자에게 묻는다(kind: 'verdict' 남은 기준 / 'notes' 안 쓴 추가 지시). 답: 'accept' | 'more' | 'stop'.
+  // more 는 되돌릴 수 있을 때만 받는다(검수자가 없으면 판정 대기에서는 못 고른다). reviewer: 검수자가 있는지(없으면 다시 해도 판정 없이 다시 묻는다)
+  async #missionAsk(ctx, kind, i, more, reviewer) {
+    const m = ctx.mission;
+    const left = (m.criteria || []).filter((c) => c.status !== 'pass').map((c) => ({ id: c.id, text: c.text, status: c.status, evidence: c.evidence || '' }));
+    const notes = (m.notes || []).filter((n) => !n.used).length;
+    m.status = 'waiting';
+    logLine(m, 'ask', kind === 'notes' ? tr('반영 안 한 추가 지시가 {n}개 있어서 어떻게 할지 물어봤어.', { n: notes }) : tr('통과하지 못한 기준이 {n}개 남아서 어떻게 할지 물어봤어.', { n: left.length }));
+    this.emitMission(ctx.s);
+    const d = await this.#hold(ctx, 'waiting', { reason: 'mission', kind, stageIndex: i, round: m.round || 0, left, notes, ...(more ? {} : { more: false }), ...(reviewer ? {} : { reviewer: false }) });
+    if (ctx.stopped || d.action === 'stop') { ctx.stopped = true; return 'stop'; }
+    m.status = 'active';
+    logLine(m, 'answer', d.action === 'accept' ? tr('받아들이기를 골랐어.') : kind === 'notes' ? tr('추가 지시를 반영해서 한 번 더 하기를 골랐어.') : tr('한 번 더 고치기를 골랐어.'));
+    this.emitMission(ctx.s);
+    return d.action;
+  }
+
+  // 검수자가 없는 팀: 판정 없이 기준을 전부 "확인 못 함"으로 둔다(그 뒤에 사용자에게 묻는다)
+  #noReviewer(ctx) {
+    const m = ctx.mission;
+    applyReview(m, []);
+    logLine(m, 'review', tr('검수할 다른 팀원이 없어서 판정 없이 끝났어. 기준은 모두 "확인 못 함"이야.'));
+    this.emitMission(ctx.s);
+  }
+
+  // 기준 판정 단계: 검수자를 한 번 실행으로 돌린다(대화 번호를 읽지도 저장하지도 않고, 질문 창은 끈다). 판정 블록은 일회용 값과 맞아야 받는다.
+  // 형식이 깨졌으면 새 일회용 값으로 한 번 다시(새 메시지). 그래도 안 되면 판정 없음(기준은 모두 확인 못 함). 오류·건너뛰기도 판정 없음, 중지면 그대로 멈춘다
+  async #reviewStage(ctx, i) {
+    const { s, run } = ctx;
+    const m = ctx.mission;
+    const st = run.stages[i];
+    const rid = st.agentIds[0];
+    run.stageIndex = i;
+    if (ctx.pauseRequested) {
+      const d = await this.#hold(ctx, 'paused', { reason: 'pause', stageIndex: i });
+      if (d.action === 'stop' || ctx.stopped) { ctx.stopped = true; return; }
+    }
+    if (!(await this.#capCheck(ctx, i, 1))) return;
+    m.phase = 'review';
+    const round = (m.round || 0) + 1;
+    st.status = 'running';
+    this.#emitRun(ctx);
+    this.emitMission(s);
+    let base = this.store.get('agents', rid);
+    if (base && s.agentOverride && typeof s.agentOverride === 'object') base = { ...base, ...s.agentOverride };
+    // 남은 일 단계마다 가장 최근 답(되돌린 단계는 다시 한 답만. 앞 답은 outputs 에서 덮였다).
+    // 되돌린 단계 뒤에 있고 다시 돌지 않은 단계의 답은 되돌림 전 결과를 보고 쓴 낡은 답이라 넣지 않고, 그렇다고만 적는다
+    const works = run.stages.slice(0, i).flatMap((x, k) => {
+      const outs = (ctx.outputs[k] || []).filter((o) => !o.error && o.text && o.text.trim());
+      if (ctx.returnedAt >= 0 && k > ctx.returnedAt) return outs.length ? [{ label: x.label, name: [...new Set(outs.map((o) => o.agent?.name || ''))].join(', '), text: '', stale: true }] : [];
+      return outs.map((o) => ({ label: x.label, name: o.agent?.name || '', text: o.text }));
+    });
+    const ids = m.criteria.map((c) => c.id);
+    const textOf = new Map(m.criteria.map((c) => [c.id, c.text]));
+    let got = null;
+    let last = null;
+    let why = '';
+    for (let n = 0; n < 2 && !ctx.stopped; n++) {
+      const nonce = randomBytes(8).toString('hex');
+      const prompt = reviewPrompt({ goal: m.goal, criteria: m.criteria.map((c) => ({ id: c.id, text: c.text })), outOfScope: m.outOfScope || [], cwd: this.cwdOf(s), round, works, readOnly: base?.permission === 'plan', nonce, retry: n > 0 });
+      const mark = s.messages.length;
+      ctx.onceAgents.add(rid); // 그사이 이 에이전트를 골라 보낸 지시는 검수에 넣지 않고 목표의 추가 지시로 받는다(control steer)
+      const r = await this.#runAgent(ctx, i, rid, null, { once: { prompt, phase: 'review', round, retried: n > 0 } })
+        .catch((e) => ({ agent: base, error: tr('내부 오류: {msg}', { msg: e.message }) }))
+        .finally(() => ctx.onceAgents.delete(rid));
+      ctx.outputs[i] = [r];
+      const msg = s.messages.slice(mark).find((x) => x.role === 'agent' && x.runId === run.id && x.stageIndex === i && x.agentId === rid);
+      if (msg) last = msg;
+      const mark2 = (fields) => { if (!msg) return; msg.review = { round, ...fields, ...(n ? { retried: true } : {}) }; this.bus.emit('message', { sessionId: s.id, message: msg }); this.store.saveSession(s, 100); };
+      if (ctx.stopped) { mark2({ results: [], missing: true }); break; }
+      if (r.error || r.stopped) {
+        why = r.skipped || r.stopped ? 'skipped' : isQuotaError(r.error || '') ? 'outside' : 'error';
+        mark2({ results: [], missing: true });
+        break;
+      }
+      const p = msg ? parseReview(msg.text, { nonce, ids }) : { error: 'none' };
+      if (!p.error) {
+        got = p.results;
+        msg.reviewBlock = { from: p.from, to: p.to }; // 화면이 그 자리를 감추고 기준표로 보여 준다
+        mark2({ results: got.map((x) => ({ ...x, text: textOf.get(x.id) || '' })), missing: false });
+        break;
+      }
+      if (msg) this.#notice(s, msg, n === 0 ? tr('답 끝에서 판정 블록(oc-review)을 받지 못해서 새 일회용 값으로 한 번 다시 요청했어.') : tr('다시 요청했는데도 판정 블록을 받지 못했어. 이번 검수는 판정 없이 끝나.'));
+      mark2({ results: [], missing: true });
+      why = 'format';
+    }
+    if (ctx.stopped) { st.status = 'stopped'; return; }
+    m.round = round;
+    const t = applyReview(m, got || []);
+    st.status = got || why === 'format' ? 'done' : why === 'skipped' ? 'skipped' : 'error';
+    if (!got) st.note = tr('판정 없음');
+    else delete st.note;
+    const words = { n: round, total: t.total, pass: t.pass, fail: t.fail, unknown: t.unknown };
+    const line = logLine(m, 'review', got ? tr('검수 {n}회차: 기준 {total}개 중 통과 {pass} · 불합격 {fail} · 확인 못 함 {unknown}', words)
+      : why === 'format' ? tr('검수 {n}회차: 판정 블록을 받지 못해서 판정 없이 끝남', words)
+        : why === 'skipped' ? tr('검수 {n}회차: 검수자를 건너뛰어서 판정 없이 끝남', words) : tr('검수 {n}회차: 검수가 오류로 끝나서 판정 없이 끝남', words), last?.id || null);
+    if (got && t.fail) line.fail = 'review';
+    else if (why === 'outside') line.fail = 'outside';
+    this.#emitRun(ctx);
+    this.emitMission(s);
   }
 
   // 한 단계의 여러 명을 동시에 돌린다. 한 명이 예외로 끝나도 나머지 결과를 잃지 않게 allSettled
@@ -987,16 +1262,16 @@ export class Orchestrator {
       return null;
     }
     this.#notice(s, msg, `⚡ ${tr('{from} 사용량 한도에 걸려서 {to}({model})가 이어받아 계속해.', { from, to: PROVIDERS[fb.provider]?.label || fb.provider, model: fb.modelLabel })}`);
-    const { agent: next, note } = this.#pace({ ...ag, provider: fb.provider, model: fb.model, effort: fb.effort }, msg.meeting?.phase);
+    const { agent: next, note } = this.#pace({ ...ag, provider: fb.provider, model: fb.model, effort: fb.effort }, msg.review ? 'review' : msg.meeting?.phase);
     if (note) this.#notice(s, msg, note);
     return next;
   }
 
   // 하루 예산: 오늘 속도가 빠르면 이번 실행의 노력을 낮춘다(저장된 에이전트는 그대로). 이어받는 AI에도 똑같이 적용한다.
-  // 검수 역할과 회의의 판정·결론 차례(phase)는 낮추지 않는다(낮추지 않았으면 알림도 없다)
+  // 검수 역할과 회의의 판정·결론 차례, 목표의 기준 판정(phase)은 낮추지 않는다(낮추지 않았으면 알림도 없다)
   #pace(agent, phase = null) {
     const b = agent ? this.usage.budget(agent.provider) : null;
-    if (!b?.steps || roleKind(agent.role) === 'review' || phase === 'judge' || phase === 'conclude') return { agent, note: null };
+    if (!b?.steps || roleKind(agent.role) === 'review' || phase === 'judge' || phase === 'conclude' || phase === 'review') return { agent, note: null };
     const effort = lowerEffort(agent.effort, b.steps);
     if (effort === agent.effort) return { agent, note: null };
     return {
@@ -1005,11 +1280,13 @@ export class Orchestrator {
     };
   }
 
-  async #route(ctx, stageIdx, agent) {
+  // phase: 'review' 면 역할과 상관없이 검수로 대우한다(목표의 기준 판정)
+  async #route(ctx, stageIdx, agent, phase = null) {
     if (!agent || !this.providers) return { agent, note: null, error: null };
     const fo = this.store.settings.failover !== false;
+    const review = roleKind(agent.role) === 'review' || phase === 'review';
     // 하루 예산은 약한 제한이라 검수에서는 교차 검증을 먼저 지킨다(노력도 낮추지 않는다, #pace)
-    const budgetOpt = roleKind(agent.role) === 'review' ? { overBudget: null } : {};
+    const budgetOpt = review ? { overBudget: null } : {};
     if (agent.routing !== 'auto') {
       // 직접 설정한 AI가 쉬는 중이거나 한도가 거의 찼으면, 이번 실행만 같은 역할의 다른 AI에게 맡긴다(대안이 없으면 그대로 시도)
       let opts = this.#foOpts(budgetOpt);
@@ -1039,7 +1316,7 @@ export class Orchestrator {
     }
     this.#state(ctx.s.id, agent.id, 'thinking', tr('자동 라우팅 중…'));
     // 검수는 검수 대상(앞 단계 빌드, 없으면 바로 앞 결과)을 만든 AI와 다른 AI로 교차 검증(같은 AI 알림과 같은 기준)
-    const avoid = roleKind(agent.role) === 'review' ? [...new Set(this.#reviewedBy(ctx, stageIdx).map((a) => a.provider))] : null;
+    const avoid = review ? [...new Set(this.#reviewedBy(ctx, stageIdx).map((a) => a.provider))] : null;
     try {
       // 쉬는 중·한도 임박 AI는 빼고 고른다(전부 막혔으면 원래 목록으로 시도)
       const cat = await this.providers.catalog();
@@ -1082,14 +1359,17 @@ export class Orchestrator {
     } finally { ctx.waiting.delete(agentId); }
   }
 
-  async #runAgent(ctx, stageIdx, agentId, feedback) {
+  // once: { prompt, phase, round, retried } 한 번 실행(목표의 기준 판정, 결정 0015). 이 세션의 CLI 대화를 이어 가지도 남기지도 않는다:
+  // 대화 번호 읽기·저장, 사용량 직전 누적(usageBase) 읽기·쓰기, 받은 역할 노트 기록(noteHashes)을 하지 않고, 프롬프트는 once.prompt 만 준다
+  // (앞 대화·놓친 대화·인수인계 메모·대화 전체 파일·프로젝트 기억·API 대화 배열 없음). 질문 창과 밀린 추가 지시 처리도 끄고, 답은 기억에 넣지 않는다
+  async #runAgent(ctx, stageIdx, agentId, feedback, { once = null } = {}) {
     const { s, run } = ctx;
     let base = this.store.get('agents', agentId);
     // 세션이 정한 덮어쓰기(예: 스킬 번역은 읽기 전용으로) — 저장된 에이전트는 그대로
     if (base && s.agentOverride && typeof s.agentOverride === 'object') base = { ...base, ...s.agentOverride };
     // 뺀 Codex 계정을 가리키는 에이전트는 기본 Codex 로 실행한다
     if (base && /^codex-[a-z0-9]+$/.test(base.provider || '') && !PROVIDERS[base.provider]) base = { ...base, provider: 'codex' };
-    const routed = await this.#route(ctx, stageIdx, base);
+    const routed = await this.#route(ctx, stageIdx, base, once?.phase || null);
     // 라우팅(모델 목록 읽기·한도가 풀리길 기다리기)을 기다리는 사이에 중지됐으면 시작하지 않는다. 회의 끝내기·건너뛰기로 기다림이 끝났으면 이 차례를 건너뛴다
     if (ctx.stopped || routed.cut) {
       ctx.skipped.delete(agentId);
@@ -1097,7 +1377,7 @@ export class Orchestrator {
       this.#state(ctx.s.id, agentId, 'idle', routed.cut && !ctx.stopped ? tr('건너뜀') : tr('중지됨')); // 사무실에 '자동 라우팅 중…'이 남지 않게
       return { agent: routed.agent, text: '', stopped: true, ...(routed.skip && !ctx.stopped ? { skipped: true } : {}) };
     }
-    const { agent, note: budgetNote } = routed.error ? { agent: routed.agent, note: null } : this.#pace(routed.agent, ctx.meet?.get(agentId)?.phase);
+    const { agent, note: budgetNote } = routed.error ? { agent: routed.agent, note: null } : this.#pace(routed.agent, once?.phase || ctx.meet?.get(agentId)?.phase);
     const prov = agent && !routed.error && PROVIDERS[agent.provider];
     const msg = {
       id: newId('m'), role: 'agent', agentId, runId: run.id, stageIndex: stageIdx, stageLabel: run.stages[stageIdx].label,
@@ -1109,6 +1389,7 @@ export class Orchestrator {
     if (meet?.checkOf) msg.checkOf = meet.checkOf; // 조사 결과: 어느 차례 글의 질문에 답했는지
     if (ctx.userMsg?.handoffAsk) msg.handoff = true; // 이 답이 인수인계 메모다
     if (ctx.missionTurn === 'goal') msg.goalDraft = true; // 목표 카드 초안을 쓴 답(에이전트에게 넘기는 대화·기억에 싣지 않는다. 결정 0014)
+    if (once?.phase === 'review') msg.review = { round: once.round, ...(once.retried ? { retried: true } : {}) }; // 기준 판정 답(기억에 넣지 않는다. 끝나면 판정으로 채운다)
     s.messages.push(msg);
     this.bus.emit('message', { sessionId: s.id, message: msg });
     const finish = (status, error) => {
@@ -1124,11 +1405,11 @@ export class Orchestrator {
       this.#state(s.id, agentId, 'error', msg.error.slice(0, 80));
       return { agent, error: msg.error };
     }
-    this.#received(ctx, agent.provider);
+    this.#received(ctx, agent.provider, !once); // 한 번 실행에는 추가 지시를 주지 않는다
     if (routed.note) { msg.routed = true; this.#notice(s, msg, routed.note); }
     if (routed.waited) this.#notice(s, msg, routed.waited);
     if (budgetNote) this.#notice(s, msg, budgetNote);
-    if (roleKind(agent.role) === 'review') this.#flagSameAi(ctx, stageIdx, msg, agent);
+    if (roleKind(agent.role) === 'review' || once?.phase === 'review') this.#flagSameAi(ctx, stageIdx, msg, agent); // 기준 판정은 역할과 상관없이
     this.#state(s.id, agentId, 'thinking', tr('생각 중…'));
 
     let res;
@@ -1138,6 +1419,7 @@ export class Orchestrator {
     let fresh = false; // 헛돌아서 끈 대화는 이어 가지 않는다(다시 시도하면 새 대화로)
     let notesWarned = false; // 역할 노트를 못 읽었다는 알림은 이어받는 AI 가 있어도 한 번만
     const remember = (id) => {
+      if (once) return; // 한 번 실행은 세션의 대화 번호를 건드리지 않는다(헛돌아서 끈 대화를 지우는 것도)
       if (fresh) { delete s.providerSessions[agentId]; delete s.usageBase?.[agentId]; return; }
       if (!id || !cur.prov.caps.resume) return;
       s.providerSessions[agentId] = id;
@@ -1148,8 +1430,8 @@ export class Orchestrator {
       const cwd = this.cwdOf(s);
       const settings = this.store.settings;
       const atts = ctx.userMsg.attachments || [];
-      // 사용자에게 물어도 되는 실행인지: 사람이 안 보는 예약 실행, 회의, 인수인계 메모 쓰기에서는 묻지 않는다
-      const askOk = settings.agentAsks !== false && !s.scheduleId && !ctx.userMsg?.handoffAsk && !meet && !s.agentOverride;
+      // 사용자에게 물어도 되는 실행인지: 사람이 안 보는 예약 실행, 회의, 인수인계 메모 쓰기, 한 번 실행(기준 판정)에서는 묻지 않는다
+      const askOk = settings.agentAsks !== false && !s.scheduleId && !ctx.userMsg?.handoffAsk && !meet && !s.agentOverride && !once;
       // 에이전트가 읽을 수 있게 여는 폴더. 대화 전체 파일을 건네면 그 폴더가 여기에 더해진다
       const addDirs = [this.dirs.uploads];
       const extraDirs = []; // 대화 전체 파일 폴더만(Codex·Gemini 처럼 올린 파일 폴더를 따로 열지 않는 CLI 용)
@@ -1166,44 +1448,47 @@ export class Orchestrator {
         const base = {
           agent: ag, cwd, settings, connectors, tmpDir: this.dirs.tmp, addDirs, extraDirs,
           system: sys.text, images: pv.caps.images ? atts.filter((a) => a.mime?.startsWith('image/')).map((a) => a.path) : [],
-          mcpConfigPath, history: ag.provider === 'openai' ? this.#history(s, msg, agentId, ag.provider) : [],
+          mcpConfigPath, history: !once && ag.provider === 'openai' ? this.#history(s, msg, agentId, ag.provider) : [],
         };
         const start = (p, rid) => {
+          // 목표 실행의 호출 수(결정 0015): CLI 를 한 번 띄울 때마다(다시 시도·이어받기·빈 답 다시 요청·질문 답 뒤 이어 쓰기 포함) 센다
+          if (ctx.mission?.calls) this.#countCall(ctx);
           // 불러온 Claude 세션은 처음 이어갈 때 갈래(fork)로 시작해 원래 기록을 그대로 둔다
           const forkSession = !!rid && ag.provider === 'claude' && s.importedFrom?.source === 'claude' && rid === s.importedFrom.id;
           const watch = this.#watchStall(ctx, pv.caps.quiet, () => { fresh = true; });
-          // 이 CLI 호출: 이어 간 대화 id, 지금 대화 id, 정산한 결과 수, 직전 결과의 누적, 앱이 껐는지(사용량 정산용)
-          const call = { rid, sid: rid, n: 0, base: null, killed: false };
+          // 이 CLI 호출: 이어 간 대화 id, 지금 대화 id, 정산한 결과 수, 직전 결과의 누적, 앱이 껐는지(사용량 정산용), 한 번 실행인지(세션의 직전 누적을 안 쓴다)
+          const call = { rid, sid: rid, n: 0, base: null, killed: false, ...(once ? { once: true } : {}) };
           const emit = (ev) => { if (watch.saw(ev) === false) return; this.#onEvent(ctx, msg, ag, ev, call); }; // 헛돌아서 끈 뒤에 밀려 나오는 출력은 버린다
           // 이어 가는 대화가 마지막으로 받은 역할 노트와 지금 노트가 다르면 지시를 다시 붙이게 한다(이어 갈 때 지시를 건너뛰는 CLI 용. 결정 0013).
           // 노트가 다 비었으면(notesCleared) 앞에서 받은 노트를 쓰지 말라는 줄도 같이 간다
-          const refresh = !!rid && sys.notesHash !== (s.noteHashes?.[agentId] ?? NO_NOTES);
+          const refresh = !once && !!rid && sys.notesHash !== (s.noteHashes?.[agentId] ?? NO_NOTES);
           const raw = pv.run({ ...base, prompt: p, resumeId: rid, forkSession, ...(refresh ? { refreshSystem: true, notesCleared: sys.notesHash === NO_NOTES } : {}) }, emit);
           // 앱이 끄는 CLI(중지·건너뛰기·회의 끝내기·멈춤·헛돌기·앱 종료)는 누적을 저장하지 못할 수 있다(Claude 는 정상 종료 때만 저장).
           // 이미 결과를 낸 호출이면 그 결과로 남긴 직전 누적을 버린다(끈 뒤에 온 결과도 #settle 이 저장하지 않는다)
           const kill = raw.stop;
-          raw.stop = (...a) => { call.killed = true; if (call.n) delete s.usageBase?.[agentId]; return kill.apply(raw, a); };
+          raw.stop = (...a) => { call.killed = true; if (call.n && !once) delete s.usageBase?.[agentId]; return kill.apply(raw, a); };
           const h = watch.attach(raw);
           // 이어 갈 수 있는 AI 의 대화가 이 호출을 끝까지 받았으면, 그 대화가 받은 노트로 적어 둔다(오류·중지면 다음에 다시 준다)
-          if (pv.caps.resume) h.done = h.done.then((r) => { if (r && !r.error && !r.stopped) (s.noteHashes ||= {})[agentId] = sys.notesHash; return r; });
-          ctx.handles.set(agentId, { handle: h, msg, agent: ag, prov: pv });
+          if (pv.caps.resume && !once) h.done = h.done.then((r) => { if (r && !r.error && !r.stopped) (s.noteHashes ||= {})[agentId] = sys.notesHash; return r; });
+          ctx.handles.set(agentId, { handle: h, msg, agent: ag, prov: pv, ...(once ? { once: true } : {}) });
           return h;
         };
         return { agent: ag, prov: pv, start };
       };
       cur = prepare(agent);
       const owner = s.sessionProvider?.[agentId];
-      const resumeId = prov.caps.resume && (!owner || owner === agent.provider) ? (s.providerSessions[agentId] || null) : null;
+      const resumeId = !once && prov.caps.resume && (!owner || owner === agent.provider) ? (s.providerSessions[agentId] || null) : null;
       // 회의 2바퀴부터: 이 참석자가 이번 회의의 앞 차례를 자기 CLI 대화로 이어 갈 때만 앞 단계 결과를 다시 넣지 않는다.
       // 이어 가지 못하면(기억 못 하는 AI, 다른 AI가 이어받음, 이어하기 실패) full 을 써서 앞 단계 결과를 다시 준다
       const lean = !!resumeId && !!ctx.meetSeen?.has(agentId);
-      const full = this.#prompt(ctx, stageIdx, agent, feedback, prov, false);
+      const full = once ? once.prompt : this.#prompt(ctx, stageIdx, agent, feedback, prov, false);
       const prompt = lean ? this.#prompt(ctx, stageIdx, agent, feedback, prov, true) : full;
       // 이어갈 대화가 없으면(처음 맡음·AI 바뀜·불러온 세션) 이 세션의 앞 대화를 넣어 맥락을 잇는다(앞 대화가 없으면 그대로)
       // 이어가는 대화면 지난 턴 뒤에 다른 에이전트와 오간 대화만 덧붙인다(그 대화는 이 AI가 모른다)
       // 프로젝트 기억: 요청과 관련된 지난 대화 조각(이 AI가 이미 아는 것은 빼고). 넣은 만큼 [이전 대화]는 줄인다
-      const recall = await this.#recall(ctx, agent, msg, !!resumeId);
-      const firstPrompt = recall.text + (resumeId ? this.#withMissed(prompt, ctx, agent) : prov.caps.resume ? this.#withHistory(prompt, s, msg, undefined, recall.chars, { ctx, agent, prov }) : prompt);
+      // 한 번 실행은 once.prompt 만 준다
+      const recall = once ? { text: '', chars: 0 } : await this.#recall(ctx, agent, msg, !!resumeId);
+      const firstPrompt = once ? once.prompt : recall.text + (resumeId ? this.#withMissed(prompt, ctx, agent) : prov.caps.resume ? this.#withHistory(prompt, s, msg, undefined, recall.chars, { ctx, agent, prov }) : prompt);
       res = await cur.start(firstPrompt, resumeId).done;
       // (한도 오류는 이어하기 실패가 아니다: "session limit" 같은 문구에 걸려 원래 대화를 잃지 않게)
       if (res.error && resumeId && !res.stopped && !res.looped && !isQuotaError(res.error) && /conversation|session|not found|no such|resume/i.test(res.error)) {
@@ -1223,14 +1508,14 @@ export class Orchestrator {
         const partial = msg.text;
         const facts = handoffFacts(msg.blocks, cwd); // 서버가 본 도구 기록(쓴 도구·손댄 파일·마지막 명령)
         const nextProv = PROVIDERS[next.provider];
-        // 이어받는 AI 기준으로 프롬프트를 다시 만든다(이미지 지원 여부 등). 이어가는 대화가 없으니 앞 대화도 넣는다
-        const basePrompt = this.#prompt(ctx, stageIdx, next, feedback, nextProv);
-        const nextPrompt = recall.text + (nextProv.caps.resume ? this.#withHistory(basePrompt, s, msg, next.provider, recall.chars, { ctx, agent: next, prov: nextProv }) : basePrompt);
+        // 이어받는 AI 기준으로 프롬프트를 다시 만든다(이미지 지원 여부 등). 이어가는 대화가 없으니 앞 대화도 넣는다(한 번 실행은 once.prompt 그대로)
+        const basePrompt = once ? once.prompt : this.#prompt(ctx, stageIdx, next, feedback, nextProv);
+        const nextPrompt = once ? once.prompt : recall.text + (nextProv.caps.resume ? this.#withHistory(basePrompt, s, msg, next.provider, recall.chars, { ctx, agent: next, prov: nextProv }) : basePrompt);
         cur = prepare(next);
-        this.#received(ctx, next.provider);
+        this.#received(ctx, next.provider, !once);
         Object.assign(msg, { provider: next.provider, model: next.model, effort: next.effort, failover: true });
         this.bus.emit('messageMeta', { sessionId: s.id, messageId: msg.id, model: next.model, provider: next.provider, effort: next.effort });
-        if (roleKind(agent.role) === 'review') this.#flagSameAi(ctx, stageIdx, msg, next);
+        if (roleKind(agent.role) === 'review' || once?.phase === 'review') this.#flagSameAi(ctx, stageIdx, msg, next);
         if (msg.text.trim()) {
           msg.text += '\n\n';
           this.bus.emit('delta', { sessionId: s.id, messageId: msg.id, text: '\n\n' });
@@ -1238,9 +1523,9 @@ export class Orchestrator {
         this.#state(s.id, agentId, 'thinking', tr('{to}가 이어받는 중…', { to: PROVIDERS[next.provider]?.label || next.provider }));
         res = await cur.start(continuationPrompt(nextPrompt, partial, from, tr, facts), null).done;
       }
-      // 실행 중 주입 못 한 추가 지시는 이어서 처리
+      // 실행 중 주입 못 한 추가 지시는 이어서 처리(한 번 실행에는 주지 않는다)
       const drainSteer = async () => {
-      while (!ctx.stopped && !res.stopped && !res.error && (ctx.pendingSteer.get(agentId) || []).length) {
+      while (!once && !ctx.stopped && !res.stopped && !res.error && (ctx.pendingSteer.get(agentId) || []).length) {
         const t = ctx.pendingSteer.get(agentId).shift();
         this.#notice(s, msg, `📝 ${tr('추가 지시로 이어서 진행: {text}', { text: t })}`);
         const sep = '\n\n';
@@ -1259,7 +1544,7 @@ export class Orchestrator {
       // 오류 없이 빈 답으로 끝나면(도구 거부 뒤 그냥 멈춤 등) 한 번만 최종 답변을 다시 요청한다
       if (!ctx.stopped && !res.stopped && !res.error && !msg.text.trim()) {
         this.#notice(s, msg, tr('응답이 비어 있어서(도구 거부 등) 최종 답변을 한 번 더 요청했어.'));
-        const rid = cur.prov.caps.resume ? res.providerSessionId : null;
+        const rid = !once && cur.prov.caps.resume ? res.providerSessionId : null; // 한 번 실행은 once.prompt 를 다시 준다
         remember(rid);
         const nudge = tr('도구를 더 쓰지 말고, 지금까지 알아낸 것과 네 지식으로 요청에 대한 최종 답변을 바로 글로 써줘.');
         res = await cur.start(rid ? nudge : `${full}\n\n${tr('[중요]')} ${nudge}`, rid).done;
@@ -1407,7 +1692,7 @@ export class Orchestrator {
     const n = Math.max(0, Number(this.store.settings.historyTurns) || 0) * 2;
     // 지금 작성 중인 답(이어받기 때의 앞부분)은 빼고(이어받기 지시에 따로 들어감)
     const list = s.messages.filter((m) => m !== currentMsg && m.id !== s.runs.at(-1)?.userMessageId && m.status !== 'queued' && m.status !== 'streaming'
-      && (m.role === 'user' || (m.role === 'agent' && m.agentId === agentId)) && m.text && !m.hire && !m.handoffAsk && !m.missionNote && !m.goalDraft
+      && (m.role === 'user' || (m.role === 'agent' && m.agentId === agentId && !m.review)) && m.text && !m.hire && !m.handoffAsk && !m.missionNote && !m.goalDraft
       && (!localOnly(m) || receiver === 'local'));
     return n ? list.slice(-n) : []; // 0이면 넣지 않는다(slice(-0)은 전부를 돌려준다)
   }
@@ -1504,13 +1789,14 @@ export class Orchestrator {
 
   // 인수인계 메모를 쓸 에이전트: 이 세션에서 답한 적 있는 에이전트 가운데, 자기 CLI 대화를 이어 갈 수 있는 쪽을 먼저,
   // 그중 이 세션에서 가장 많이 답한 쪽(가장 많이 아는 쪽), 같으면 가장 최근에 답한 쪽. want 를 주면 그 에이전트가 자격이 있는지만 본다
-  // 목표 카드 초안(goalDraft)은 답한 것으로 세지 않는다: 목표 차례가 끝나면 진행자의 CLI 대화를 그 전으로 되돌려서 그 대화가 남지 않는다(결정 0014)
+  // 목표 카드 초안(goalDraft)은 답한 것으로 세지 않는다: 목표 차례가 끝나면 진행자의 CLI 대화를 그 전으로 되돌려서 그 대화가 남지 않는다(결정 0014).
+  // 기준 판정 답(review)도: 한 번 실행이라 그 에이전트의 CLI 대화에 없다(결정 0015)
   handoffWriter(s, want = null, skip = []) {
-    const mine = (id) => s.messages.filter((m) => m.role === 'agent' && m.agentId === id && m.text && !m.handoff && !m.goalDraft);
-    const talked = [...new Set(s.messages.filter((m) => m.role === 'agent' && m.text && !m.handoff && !m.goalDraft).map((m) => m.agentId))]
+    const mine = (id) => s.messages.filter((m) => m.role === 'agent' && m.agentId === id && m.text && !m.handoff && !m.goalDraft && !m.review);
+    const talked = [...new Set(s.messages.filter((m) => m.role === 'agent' && m.text && !m.handoff && !m.goalDraft && !m.review).map((m) => m.agentId))]
       .filter((id) => this.store.get('agents', id) && !skip.includes(id));
     if (want) return talked.includes(want) ? want : null;
-    const last = (id) => s.messages.findLastIndex((m) => m.role === 'agent' && m.agentId === id && m.text && !m.handoff && !m.goalDraft);
+    const last = (id) => s.messages.findLastIndex((m) => m.role === 'agent' && m.agentId === id && m.text && !m.handoff && !m.goalDraft && !m.review);
     const keeps = (id) => (s.providerSessions?.[id] ? 1 : 0);
     return talked.sort((x, y) => keeps(y) - keeps(x) || mine(y).length - mine(x).length || last(y) - last(x))[0] || null;
   }
@@ -1534,11 +1820,11 @@ export class Orchestrator {
   #autoWriter(s, mention) {
     let ids;
     try { ids = this.#plan(s, mention).stages.flatMap((st) => st.agentIds); } catch { return null; }
-    const spoke = (id) => s.messages.some((m) => m.role === 'agent' && m.agentId === id && m.text && !m.goalDraft); // 목표 카드 초안은 답한 것으로 세지 않는다
+    const spoke = (id) => s.messages.some((m) => m.role === 'agent' && m.agentId === id && m.text && !m.goalDraft && !m.review); // 목표 카드 초안과 기준 판정 답은 답한 것으로 세지 않는다
     const newcomers = ids.filter((id) => !spoke(id));
     if (!newcomers.length) return null;
     if (s.messages.filter((m) => m.text && (m.role === 'user' || m.role === 'agent') && !m.handoffAsk).length < 6) return null; // 짧은 대화는 최근 대화로 충분하다
-    const last = (id) => s.messages.findLastIndex((m) => m.role === 'agent' && m.agentId === id && m.text && !m.handoff && !m.goalDraft);
+    const last = (id) => s.messages.findLastIndex((m) => m.role === 'agent' && m.agentId === id && m.text && !m.handoff && !m.goalDraft && !m.review);
     const w = this.handoffWriter(s, null, ids);
     if (!w || !s.providerSessions?.[w]) return null; // 자기 대화를 이어 갈 수 있는 AI만(그래야 앞부분까지 안다)
     // 그 뒤에 쓴(또는 쓰려다 실패한, 쓰려고 줄 선) 메모가 이미 있으면 다시 시키지 않는다
@@ -1567,11 +1853,12 @@ export class Orchestrator {
     const n = Math.max(0, Number(this.store.settings.historyTurns) || 0) * 2;
     if (ctx.missedSent?.has(agent.id)) return prompt;
     (ctx.missedSent ||= new Set()).add(agent.id);
-    const last = s.messages.findLastIndex((m) => m.role === 'agent' && m.agentId === agent.id && m.runId !== run.id && m.text);
+    // 지난 답: 이 에이전트의 CLI 대화에 남은 답만 센다(목표 카드 초안은 차례가 끝나면 대화를 되돌리고, 기준 판정은 한 번 실행이라 대화에 없다. 결정 0014·0015)
+    const last = s.messages.findLastIndex((m) => m.role === 'agent' && m.agentId === agent.id && m.runId !== run.id && m.text && !m.goalDraft && !m.review);
     const note = ctx.noteGiven?.has(agent.id) ? '' : this.#handoffNote(ctx, agent, agent.provider, last); // 지난 답 뒤에 쓰인 인수인계 메모는 통째로 준다
     if (!n || last < 0) return `${note}${prompt}`;
     const missed = s.messages.slice(last + 1).filter((m) => m.text && m.runId !== run.id && m.id !== run.userMessageId && m.status !== 'queued'
-      && (m.role === 'user' || (m.role === 'agent' && m.agentId !== agent.id)) && !m.hire && !m.handoffAsk && !m.handoff && !m.missionNote && !m.goalDraft
+      && (m.role === 'user' || (m.role === 'agent' && (m.agentId !== agent.id || m.review))) && !m.hire && !m.handoffAsk && !m.handoff && !m.missionNote && !m.goalDraft
       && (!localOnly(m) || agent.provider === 'local')).slice(-n);
     if (!missed.length) return `${note}${prompt}`;
     const who = (m) => (m.role === 'user' ? tr('사용자') : (this.store.get('agents', m.agentId)?.name || 'AI'));
@@ -1588,11 +1875,12 @@ export class Orchestrator {
   }
 
   // 이번 요청을 받은 AI를 적는다. 내 PC 모델만 받았으면 사용자 말에 표시를 남긴다(클라우드 AI가 하나라도 받으면 표시를 지운다)
-  #received(ctx, provider) {
+  // notes: false 면 추가 지시는 이 AI 가 받지 않는다(기준 판정 한 번 실행)
+  #received(ctx, provider, notes = true) {
     if (provider === 'local') ctx.sawLocal = true; else ctx.sawCloud = true;
     // 목표 실행: 지금까지 단계에 넣은 추가 지시도 이 AI 가 받는다. 받은 AI 가 모두 내 PC 모델이면 표시하고, 클라우드 AI 가 하나라도 받으면 지운다(기억에는 목표 실행이 끝날 때 넣는다)
     let flipped = false;
-    for (const n of ctx.liveNotes || []) {
+    for (const n of notes ? ctx.liveNotes || [] : []) {
       const u = ctx.s.messages.find((x) => x.id === n.msgId && x.missionNote);
       if (!u) continue;
       const was = u.local === true;
@@ -1630,6 +1918,7 @@ export class Orchestrator {
     if (!this.memory || !this.store.settings.memory || !m?.text?.trim()) return;
     if (m.handoffAsk) return; // 정해진 요청 문구라 기억할 내용이 아니다
     if (m.goalDraft) return; // 목표 카드 초안(사용자가 확인하기 전의 글)은 기억에 넣지 않는다
+    if (m.review) return; // 목표의 기준 판정 답도 넣지 않는다(결정 0015)
     if (m.role === 'user') { if (m.remembered) return; m.remembered = true; } // 같은 말을 두 번 넣지 않는다(끊긴 실행을 다시 켠 뒤 정리할 때)
     const job = this.memory.of(this.memoryFolder(s))
       .then((mem) => mem.add(m.text, { sessionId: s.id, messageId: m.id, agentId: m.agentId || '', role: m.role, provider: m.provider || (m.local ? 'local' : ''), at: m.createdAt || Date.now(), title: s.titleLocal ? '' : (s.title || '') }))
@@ -1812,7 +2101,8 @@ export class Orchestrator {
       parts.push(tr('[팀 작업] {team} — 전체 {total}단계 중 {n}단계 "{label}"를 네가 맡았어.', { team: team?.name || tr('팀'), total: run.stages.length, n: i + 1, label: st.label }));
       parts.push(`${tr('흐름:')} ${run.stages.map((x, k) => `${k + 1}.${x.label}(${x.agentIds.map(name).join('+')})${k === i ? ` ← ${tr('지금')}` : ''}`).join(' → ')}`);
       const peers = st.agentIds.filter((id) => id !== agent.id);
-      if (peers.length && !meet) parts.push(tr('같은 단계에서 {names}도 병렬로 작업 중이야. 네 역할({role})에 집중해.', { names: peers.map(name).join(', '), role: agent.role }));
+      // 목표의 되돌림은 그 단계의 한 명만 돌 수 있다(회의 대신 진행자)
+      if (peers.length && !meet && !ctx.missionReturn) parts.push(tr('같은 단계에서 {names}도 병렬로 작업 중이야. 네 역할({role})에 집중해.', { names: peers.map(name).join(', '), role: agent.role }));
     }
     if (st.instruction) parts.push(`${tr('[이번 단계 지시]')}\n${st.instruction}`);
     // 기억(resume) 못 하는 CLI 는 최근 대화를 넣어준다
@@ -1843,6 +2133,14 @@ export class Orchestrator {
     const notes = [...ctx.nextNotes, ...said, ...(ctx.waitNotes?.get(agent.id) || [])]; // 한도가 풀리길 기다리는 동안 이 에이전트를 골라 보낸 지시도
     // 목표 실행에서는 확정 블록처럼 < > 를 전각으로(목표 모드가 아닌 실행은 예전 그대로)
     if (notes.length) parts.push(`${tr('[사용자 추가 지시]')}\n${notes.map((t) => `- ${ctx.goalCard ? wide(t) : t}`).join('\n')}`);
+    // 목표의 되돌림(결정 0015): 그 단계의 직전 결과(자기 답, 회의면 결론)와 지난 검수에서 걸린 기준과 근거. 에이전트가 쓴 글이라 "사용자 피드백" 자리가 아니라 무작위 표식 안의 참고 자료로.
+    // 직전 결과는 그 답을 쓴 CLI 대화를 이어 갈 에이전트(같은 AI·같은 대화 id)에게는 다시 주지 않는다(이미 그 대화에 있다)
+    if (ctx.missionPrev && !meet) {
+      const knows = (p) => p.agentId === String(agent.id) && !!p.sid && !!prov.caps.resume && s.providerSessions?.[agent.id] === p.sid && (s.sessionProvider?.[agent.id] || p.provider) === agent.provider;
+      const prev = ctx.missionPrev.filter((p) => (p.meeting || p.agentId === String(agent.id)) && !knows(p));
+      if (prev.length) parts.push(prevPrompt(prev));
+    }
+    if (ctx.missionReturn) parts.push(returnPrompt(ctx.missionReturn));
     if (feedback) parts.push(`${tr('[사용자 피드백 — 이걸 반영해서 다시 해줘]')}\n${feedback}`);
     if (meet) parts.push(this.#meetingPrompt(ctx, i, agent, meet));
     if (multi && i < run.stages.length - 1 && !meet) parts.push(tr('결과는 다음 단계 담당이 바로 쓸 수 있게 핵심 위주의 마크다운으로 정리해.'));
@@ -1958,8 +2256,9 @@ export class Orchestrator {
   // 호출이 바로 그 id 를 이어 갈 때만 쓰므로 새 대화·다른 AI·불러온 대화에는 쓰이지 않는다. 한 호출에서 결과가 여러 번 오면 앞 결과의 누적을 뺀다.
   // 정산 규칙은 CLI 버전(detect 가 읽은 값)으로 가른다. 믿을 수 없는 누적은 직전 누적으로 남기지 않는다:
   // 누적을 모르는 결과(modelUsage 없음)와 직전 누적보다 작은 누적은 직전 누적을 지우고, 합이 0인 누적(충돌)은 저장하지 않고, 앱이 끈 호출의 결과도 저장하지 않는다
+  // 한 번 실행(call.once, 목표의 기준 판정)은 세션의 직전 누적을 읽지도 쓰지도 않는다: 버리는 칸에 적어 그 호출 안에서만 쓴다(그 호출의 값만 센다)
   #settle(s, agentId, ev, call) {
-    const bases = (s.usageBase ||= {});
+    const bases = call.once ? {} : (s.usageBase ||= {});
     const prev = bases[agentId];
     const baseline = call.n ? call.base : (call.rid && prev?.id === call.rid ? prev : null);
     const got = settleClaude({ usage: ev, modelUsage: ev.tree.modelUsage, totalCost: ev.tree.totalCost, baseline, resumed: !!call.rid || call.n > 0,
@@ -2046,11 +2345,13 @@ export class Orchestrator {
     if (!ctx) throw Object.assign(new Error(tr('진행 중인 작업이 없어.')), { status: 409 });
     const { s } = ctx;
     // 대기 사유마다 받을 수 있는 동작만 통과시킨다(예: 승인 대기 중 '건너뛰기'가 승인으로 처리되면 안 됨)
-    const ALLOWED = { approve: ['approve', 'reject', 'retry', 'stop'], error: ['retry', 'skip', 'stop'], pause: ['resume', 'stop'] };
+    // 목표(결정 0015): 판정 뒤에 묻는 대기(mission)와 호출 상한 대기(cap)
+    const ALLOWED = { approve: ['approve', 'reject', 'retry', 'stop'], error: ['retry', 'skip', 'stop'], pause: ['resume', 'stop'], mission: ['accept', 'more', 'stop'], cap: ['more', 'stop'] };
     const gate = (d) => {
       if (!ctx.gate) return false;
       const reason = ctx.run.hold?.reason;
       if (reason && !ALLOWED[reason]?.includes(d.action)) return false;
+      if (d.action === 'more' && ctx.run.hold?.more === false) return false; // 되돌릴 수 없는 대기(검수자가 없는 팀의 판정 대기)
       ctx.gate(d);
       return true;
     };
@@ -2058,23 +2359,37 @@ export class Orchestrator {
       case 'steer': {
         const t = String(text || '').trim();
         if (!t) throw Object.assign(new Error(tr('지시 내용이 비었어.')), { status: 400 });
-        // 목표가 도는 중에 에이전트를 골라 바로 넣은 지시는 지금처럼 넣고, 진행 기록에 한 줄 남긴다(결정 0014)
-        if (ctx.missionTurn === 'work' && ctx.mission === s.mission) {
-          const short = [...t.replace(/\s+/g, ' ')].slice(0, 120).join('');
-          logLine(ctx.mission, 'note', agentId ? tr('{name}에게 바로 넣은 지시: {text}', { name: this.store.get('agents', agentId)?.name || agentId, text: short }) : tr('바로 넣은 지시: {text}', { text: short }));
-          this.emitMission(s);
+        // 목표 일 실행(결정 0014·0015): 진행 기록에는 실제로 어떻게 처리했는지를 남긴다
+        const work = ctx.missionTurn === 'work' && ctx.mission === s.mission;
+        const name = (id) => this.store.get('agents', id)?.name || id;
+        const short = [...t.replace(/\s+/g, ' ')].slice(0, 120).join('');
+        const note = (text) => { if (work) { logLine(ctx.mission, 'note', text); this.emitMission(s); } };
+        // 한 번 실행(목표의 기준 판정) 중이거나 그 차례를 시작하려는(한도가 풀리길 기다리는) 에이전트에게 온 지시는 검수에 넣지 않는다(검수는 확정 기준으로만).
+        // 목표의 추가 지시로 받아서, 판정 뒤에 반영할지 묻는다
+        const once = ctx.onceAgents || new Set();
+        if (work && (agentId ? once.has(agentId) : ctx.handles.size > 0 && [...ctx.handles.keys()].every((id) => once.has(id)))) {
+          const r = this.#missionNote(s, t, [], agentId ? tr('{name}은(는) 기준 판정 중이라 이 지시는 검수에 넣지 않고 추가 지시로 받았어: {text}', { name: name(agentId), text: short })
+            : tr('기준 판정 중이라 이 지시는 검수에 넣지 않고 추가 지시로 받았어: {text}', { text: short }));
+          return { ok: true, mode: 'note', messageId: r.messageId, ...(r.late ? { late: true } : {}) };
         }
         // 한도가 풀리길 기다리는 에이전트를 골라 보낸 말은 다음 단계가 아니라 그 에이전트가 시작할 때 프롬프트에 넣는다
         if (agentId && ctx.waiting.has(agentId)) {
           if (!ctx.waitNotes.has(agentId)) ctx.waitNotes.set(agentId, []);
           ctx.waitNotes.get(agentId).push(t);
-          this.#systemNote(s, `📝 ${tr('{name}의 다음 실행에 넣을 추가 지시: {text}', { name: this.store.get('agents', agentId)?.name || agentId, text: t })}`);
+          this.#systemNote(s, `📝 ${tr('{name}의 다음 실행에 넣을 추가 지시: {text}', { name: name(agentId), text: t })}`);
+          note(tr('{name}이(가) 한도가 풀리길 기다리는 중이라 시작할 때 넣을 지시: {text}', { name: name(agentId), text: short }));
           return { ok: true, mode: { [agentId]: 'start' } };
         }
         // 회의에서 조사하는 중에 대상 없이 보낸 말은 조사하는 에이전트에게 넣지 않고 다음 차례부터 반영한다(조사하는 에이전트를 직접 고른 말은 그대로 넣는다)
         const researching = !agentId && [...(ctx.meet?.values() || [])].some((m) => m.phase === 'research');
         const targets = agentId ? [agentId] : researching ? [] : [...ctx.handles.keys()];
         if (!targets.length || !targets.some((id) => ctx.handles.has(id))) {
+          // 목표 일 실행이면 추가 지시로 받는다(뒤에 시작하는 단계에 들어가고, 안 쓰이면 판정 뒤에 묻는다)
+          if (work) {
+            const r = this.#missionNote(s, t, [], agentId ? tr('{name}은(는) 지금 일하는 중이 아니라서 이 지시는 추가 지시로 받았어: {text}', { name: name(agentId), text: short })
+              : tr('지금 일하는 에이전트가 없어서 이 지시는 추가 지시로 받았어: {text}', { text: short }));
+            return { ok: true, mode: 'note', messageId: r.messageId, ...(r.late ? { late: true } : {}) };
+          }
           ctx.nextNotes.push(t);
           this.#systemNote(s, `📝 ${tr('다음 단계에 반영할 추가 지시: {text}', { text: t })}`);
           return { ok: true, mode: 'next' };
@@ -2092,6 +2407,9 @@ export class Orchestrator {
             res[id] = 'after';
           }
         }
+        const live = Object.values(res).includes('live');
+        note(agentId ? (live ? tr('{name}에게 바로 넣은 지시: {text}', { name: name(agentId), text: short }) : tr('{name}에게 지금 작업이 끝나면 이어서 넣을 지시: {text}', { name: name(agentId), text: short }))
+          : live ? tr('바로 넣은 지시: {text}', { text: short }) : tr('지금 작업이 끝나면 이어서 넣을 지시: {text}', { text: short }));
         return { ok: true, mode: res };
       }
       case 'pause':
@@ -2152,6 +2470,8 @@ export class Orchestrator {
       case 'approve': return { ok: gate({ action: 'approve' }) };
       case 'reject': return { ok: gate({ action: 'reject', text }) };
       case 'retry': return { ok: gate({ action: 'retry', text }) };
+      case 'accept': return { ok: gate({ action: 'accept' }) }; // 목표: 판정을 받아들이고 끝낸다
+      case 'more': return { ok: gate({ action: 'more' }) }; // 목표: 한 번 더 고친다 / 호출 20번 더
       default: throw Object.assign(new Error(tr('모르는 동작: {action}', { action })), { status: 400 });
     }
   }

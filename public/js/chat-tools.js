@@ -64,3 +64,13 @@ export function hideGoal(text, goal = null, streaming = false) {
   const out = ok ? src.slice(0, goal.from) + src.slice(goal.to) : src;
   return streaming ? out.replace(/```oc-goal[\s\S]*$/, '') : out;
 }
+
+// 검수 답 끝의 판정 블록(oc-review)은 기준표로 보여 주니 본문에서는 뺀다(hideGoal 과 같은 방식, 결정 0015).
+// block: 서버가 판정으로 받은 블록의 자리({ from, to }). 받지 않은 블록(일회용 값이 틀렸거나 형식이 깨진 것)은 그대로 보인다. 쓰는 중이면 끝의 블록도 감춘다
+export function hideReview(text, block = null, streaming = false) {
+  const src = String(text || '');
+  const ok = block && Number.isInteger(block.from) && Number.isInteger(block.to) && block.from >= 0 && block.to > block.from && block.to <= src.length
+    && src.startsWith('```oc-review', block.from);
+  const out = ok ? src.slice(0, block.from) + src.slice(block.to) : src;
+  return streaming ? out.replace(/```oc-review[\s\S]*$/, '') : out;
+}

@@ -40,7 +40,7 @@ export class PhoneNotify {
     const st = this.store.settings;
     if (!st.phoneNotify || !st.phoneUrl) return;
     const title = {
-      waiting: run.hold?.reason === 'approve' ? tr('승인이 필요해') : tr('결정이 필요해'),
+      waiting: { approve: tr('승인이 필요해'), mission: tr('목표 판정을 보고 답해 줘'), cap: tr('목표가 호출 상한에 닿았어') }[run.hold?.reason] || tr('결정이 필요해'), // 목표의 판정 뒤 묻기·호출 상한(결정 0015)
       done: tr('작업이 끝났어'),
       error: tr('작업이 실패했어'),
     }[run.status];

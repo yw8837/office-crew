@@ -34,7 +34,8 @@ function readJson(file, fallback) {
 export function attentionOf(run) {
   if (!run) return null;
   const at = (t) => ({ runId: run.id, since: t || run.startedAt });
-  if (run.status === 'waiting') return { kind: run.hold?.reason === 'approve' ? 'approve' : 'decide', ...at(run.hold?.at) };
+  // 목표의 판정 뒤 묻기(mission)와 호출 상한(cap)은 따로 보여 준다(결정 0015)
+  if (run.status === 'waiting') return { kind: { approve: 'approve', mission: 'verdict', cap: 'cap' }[run.hold?.reason] || 'decide', ...at(run.hold?.at) };
   if (run.status === 'running' && run.asks?.length) return { kind: 'ask', ...at(run.asks[0].at) };
   if (run.status === 'paused') return { kind: 'paused', ...at(run.hold?.at) };
   if (run.status === 'error' && run.endedAt) return { kind: 'failed', ...at(run.endedAt) };
@@ -168,9 +169,10 @@ export class Store {
 
   #metaOf(s) {
     const last = s.messages.findLast((m) => m.text); // 글이 없는 것(영입 제안·목표 카드)은 건너뛴다
-    // 진행자 답 끝의 목표 카드 블록(```oc-goal 부터)은 미리보기에 넣지 않는다(화면에서는 카드로 보인다. 결정 0014)
+    // 진행자 답 끝의 목표 카드 블록(```oc-goal 부터)과 검수 답 끝의 판정 블록(```oc-review 부터)은 미리보기에 넣지 않는다(화면에서는 카드·기준표로 보인다. 결정 0014·0015)
     const text = String(last?.text || '');
-    const cut = text.indexOf('```oc-goal');
+    const at = [text.indexOf('```oc-goal'), text.indexOf('```oc-review')].filter((i) => i >= 0);
+    const cut = at.length ? Math.min(...at) : -1;
     return {
       id: s.id, title: s.title, teamId: s.teamId, agentId: s.agentId, cwd: s.cwd,
       pinned: !!s.pinned, createdAt: s.createdAt, updatedAt: s.updatedAt,

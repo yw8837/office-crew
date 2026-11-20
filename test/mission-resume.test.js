@@ -4,6 +4,8 @@
 // (그 뒤로는 세션·목록·사용량을 하나도 쓰지 않는다) 앱을 닫아 CLI 를 끄고, 같은 데이터 폴더로 앱을 새로 만든다.
 // 진짜 꺼짐과 다른 점(남는 한계): 닫는 동안 메모리에서는 중지 흐름이 돈다(디스크에는 안 남는다). CLI 는 앱이 끈다(진짜로는 고아로 남을 수 있다).
 // 세션 목록(index.json)이 "실행 중"으로 저장될 때까지 기다린 뒤 얼린다(진짜 꺼짐에서는 목록이 늦게 쓰여 끊김 알림 한 줄이 빠질 수 있다. 목표는 그래도 cut).
+// CLI 가 도는 중에 끊을 때는 그 CLI 가 실제로 떠서 첫 차례를 받은 것이 가짜 기록에 남고, 디스크의 끊긴 자리·호출 수가 메모리와 같아진 뒤에 끊는다:
+// 서버는 CLI 를 띄우기 직전에 호출을 세는데, 끄는 속도가 OS 마다 달라(리눅스·맥은 바로, 윈도우는 taskkill 이 뜨는 동안) 막 띄운 가짜 CLI 가 기록을 남기기도 하고 못 남기기도 한다.
 // 테스트 공용 첫 앱(t)은 에이전트·팀을 만들고, 미리 만들어 둔 끊긴 세션(14번)을 디스크에 쓰는 데만 쓴다
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -80,13 +82,23 @@ const running = (h, sid, agentId, stageIndex, nth = 1) => {
   const mine = s.messages.filter((m) => m.role === 'agent' && m.agentId === agentId && m.stageIndex === stageIndex && m.runId === s.runs.at(-1)?.id && !m.review);
   return mine.length === nth && mine.at(-1).status === 'streaming';
 };
-// 앱이 꺼진 모양(머리 주석): 세션 목록에 "실행 중"이 저장되기를 기다린 뒤 이 앱의 디스크를 얼리고(그 순간의 세션 파일을 떠 둔다. edit 로 고칠 수 있다), 앱을 닫고 다시 켠다
+// 끊는 순간을 정하는 조건: 가짜 CLI 기록(from 뒤)에 그 글이 든 차례가 남았다. 끊길 CLI 가 실제로 떠서 첫 차례를 받은 뒤에 끊는다
+// (서버는 CLI 를 띄우기 직전에 호출을 세고 디스크에 쓰는데, 가짜 CLI 는 프로세스가 뜬 뒤에야 기록을 남긴다. 그 사이에 끊으면 OS 마다 기록이 남기도 하고 안 남기도 한다)
+const logged = (from, needle) => calls(from).some((x) => x.texts.some((p) => p.includes(needle)));
+// 앱이 꺼진 모양(머리 주석): 세션 목록에 "실행 중"이, 세션 파일에 지금의 끊긴 자리와 호출 수가 저장되기를 기다린 뒤 이 앱의 디스크를 얼리고
+// (그 순간의 세션 파일을 떠 둔다. edit 로 고칠 수 있다), 앱을 닫고 다시 켠다. 기다림이 끝난 뒤 얼리기까지 사이에 다른 저장이 끼지 않는다(같은 차례 안)
 async function crash(h, sid, edit = null) {
   const index = path.join(h.app.store.dirs.sessions, 'index.json');
-  await t.waitFor(() => { try { return JSON.parse(fs.readFileSync(index, 'utf8'))[sid]?.running === true; } catch { return false; } }, 5000, '목록에 실행 중');
-  h.app.store.closed = true; // 이 뒤로는 아무것도 쓰지 않는다
   const file = path.join(h.app.store.dirs.sessions, `${sid}.json`);
-  const snap = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+  await t.waitFor(() => read(index)?.[sid]?.running === true, 5000, '목록에 실행 중');
+  await t.waitFor(() => {
+    const disk = read(file)?.mission;
+    const mem = h.S(sid).mission;
+    return !!disk && JSON.stringify(disk.at) === JSON.stringify(mem.at) && disk.calls?.used === mem.calls.used;
+  }, 5000, '디스크에 끊긴 자리와 호출 수');
+  h.app.store.closed = true; // 이 뒤로는 아무것도 쓰지 않는다
+  const snap = read(file);
   if (edit) { edit(snap); fs.writeFileSync(file, JSON.stringify(snap)); }
   h.app.store.close = () => {}; // 닫을 때 남은 저장·목록 쓰기도 하지 않는다
   await h.app.close(); // CLI 를 끄고 서버를 닫는다
@@ -168,11 +180,12 @@ test('2. 일 단계 중 끊김 → 이어서: 끊긴 사람만 새 대화로(--r
   const b = await mk('잇기분석', '분석');
   const c = await mk('잇기빌드', '빌드');
   const tm = await mkTeam('잇기팀', [{ label: '정리', agentIds: [a.id] }, { label: '분석', agentIds: [b.id] }, { label: '빌드', agentIds: [c.id] }]);
+  const base = t.fakeLog().length;
   const h1 = await reopen();
   const sid = await goal(h1, tm.id, '', { request: 'SLOW 정리해 줘' });
   assert.deepEqual([h1.S(sid).mission.keep, h1.S(sid).mission.roles], [[], { [a.id]: 'organize', [b.id]: 'analysis', [c.id]: 'build' }]);
   assert.equal(h1.S(sid).mission.cwd, h1.app.orch.cwdOf(h1.S(sid)), '확정 때의 작업 폴더');
-  await t.waitFor(() => running(h1, sid, b.id, 1) && h1.S(sid).mission.at.working.length === 1, 30000, '분석 중');
+  await t.waitFor(() => running(h1, sid, b.id, 1) && h1.S(sid).mission.at.working.length === 1 && logged(base, '"분석"를 네가 맡았어'), 30000, '분석 중');
   const live = structuredClone(h1.S(sid).mission.at);
   assert.deepEqual(live, { stageIndex: 1, phase: 'work', back: false, working: [b.id], finished: [], wait: null });
   const { h2, snap } = await crash(h1, sid, (x) => {
@@ -230,9 +243,10 @@ test('3. 기준 판정 중 끊김 → 판정부터(같은 회차를 다시 센�
   const a = await mk('판정끊정리', '정리');
   const b = await mk('판정끊분석', '분석');
   const tm = await mkTeam('판정끊팀', [{ label: '정리', agentIds: [a.id] }, { label: '분석', agentIds: [b.id] }]);
+  const base = t.fakeLog().length;
   const h1 = await reopen();
   const sid = await goal(h1, tm.id, 'SLOW'); // 목표 문장의 SLOW 는 판정 차례만 느리게 한다
-  await t.waitFor(() => h1.S(sid).mission.at?.phase === 'review' && h1.S(sid).messages.some((m) => m.review && m.status === 'streaming'), 30000, '판정 중');
+  await t.waitFor(() => h1.S(sid).mission.at?.phase === 'review' && h1.S(sid).messages.some((m) => m.review && m.status === 'streaming') && logged(base, '[기준 판정 — 1번째 검수]'), 30000, '판정 중');
   assert.deepEqual(h1.S(sid).mission.at, { stageIndex: 2, phase: 'review', back: false, working: [a.id], finished: [], wait: null });
   const { h2, snap } = await crash(h1, sid);
   await stays(h2, sid, snap);
@@ -344,9 +358,10 @@ test('7. 되돌림 중 끊김 → 되돌림으로 이어 간다: 걸린 기준 �
   const a = await mk('되끊정리', '정리');
   const b = await mk('되끊분석', '분석');
   const tm = await mkTeam('되끊팀', [{ label: '정리', agentIds: [a.id] }, { label: '분석', agentIds: [b.id] }]);
+  const base = t.fakeLog().length;
   const h1 = await reopen();
   const sid = await goal(h1, tm.id, 'REVIEWFAIL', { request: 'SLOW 정리해 줘' });
-  await t.waitFor(() => h1.S(sid).mission.at?.back === true && running(h1, sid, b.id, 1, 2) && h1.S(sid).mission.at.working.length === 1, 40000, '되돌림 중');
+  await t.waitFor(() => h1.S(sid).mission.at?.back === true && running(h1, sid, b.id, 1, 2) && h1.S(sid).mission.at.working.length === 1 && logged(base, '[지난 검수에서 걸린 것 — 참고 자료]'), 40000, '되돌림 중');
   assert.deepEqual(h1.S(sid).mission.at, { stageIndex: 1, phase: 'work', back: true, working: [b.id], finished: [], wait: null });
   assert.ok(h1.S(sid).providerSessions[b.id], '분석 담당은 첫 차례의 대화가 있다');
   const { h2, snap } = await crash(h1, sid);
@@ -376,15 +391,16 @@ test('8. 이어서 두 번: 다시 끊기면 또 이어 간다. 호출 수가 �
   const b = await mk('두번분석', '분석');
   const c = await mk('두번빌드', '빌드');
   const tm = await mkTeam('두번팀', [{ label: '정리', agentIds: [a.id] }, { label: '분석', agentIds: [b.id] }, { label: '빌드', agentIds: [c.id] }]);
+  const base = t.fakeLog().length;
   const h1 = await reopen();
   const sid = await goal(h1, tm.id, '', { request: 'SLOW 정리해 줘' });
-  await t.waitFor(() => running(h1, sid, b.id, 1) && h1.S(sid).mission.at.working.length === 1, 30000, '분석 중');
+  await t.waitFor(() => running(h1, sid, b.id, 1) && h1.S(sid).mission.at.working.length === 1 && logged(base, '"분석"를 네가 맡았어'), 30000, '분석 중');
   const one = await crash(h1, sid);
   const h2 = one.h2;
   const from = t.fakeLog().length;
   assert.equal((await h2.resume(sid, one.snap.mission.id)).status, 200);
   // 다시 켠 앱에서 빌드 단계가 도는 중에 또 끊긴다
-  await t.waitFor(() => running(h2, sid, c.id, 2) && h2.S(sid).mission.at.working.length === 1, 30000, '빌드 중');
+  await t.waitFor(() => running(h2, sid, c.id, 2) && h2.S(sid).mission.at.working.length === 1 && logged(from, '"빌드"를 네가 맡았어'), 30000, '빌드 중');
   const two = await crash(h2, sid);
   const h3 = two.h2;
   await stays(h3, sid, two.snap);
@@ -395,7 +411,8 @@ test('8. 이어서 두 번: 다시 끊기면 또 이어 간다. 호출 수가 �
   await done(h3, sid);
   const m = h3.S(sid).mission;
   assert.equal(m.status, 'done');
-  assert.equal(two.snap.mission.calls.used, one.snap.mission.calls.used + calls(from).length - calls(mid).length, '두 번째 끊김까지 센 호출 수가 디스크에 있다');
+  assert.equal(calls(from).length - calls(mid).length, 2, '다시 켠 앱에서는 분석(끝까지)과 빌드(끊김)만 떴다');
+  assert.equal(two.snap.mission.calls.used, one.snap.mission.calls.used + 2, '두 번째 끊김까지 센 호출 수가 디스크에 있다');
   assert.equal(m.calls.used, two.snap.mission.calls.used + calls(mid).length, '호출 수가 두 번의 이어서를 지나 이어진다');
   const cs = calls(mid);
   assert.equal(cs.length, 2, '빌드와 기준 판정');
@@ -413,12 +430,13 @@ test('9. 병렬 단계에서 한 명만 끊김: 이미 끝낸 사람은 다시 �
   const b = await mk('병렬느림', '조사', { provider: 'codex', model: 'gpt-6.1-sol' }); // 가짜 Codex: 프롬프트 어디든 SLOW 가 있으면 1.5초
   const c = await mk('병렬다음', '분석');
   const tm = await mkTeam('병렬팀', [{ label: '모으기', agentIds: [a.id, b.id] }, { label: '정리', agentIds: [c.id] }]);
+  const base = t.fakeLog().length;
   const h1 = await reopen();
   const sid = await goal(h1, tm.id, 'SLOW'); // 확정 목표 줄의 SLOW → Codex 만 느리다
   await t.waitFor(() => {
     const s = h1.S(sid);
     const ms = s.messages.filter((m) => m.stageIndex === 0 && m.role === 'agent' && m.runId === s.runs.at(-1).id);
-    return ms.some((m) => m.agentId === a.id && m.status === 'done') && running(h1, sid, b.id, 0) && s.mission.at.finished.length === 1 && s.mission.at.working.length === 1;
+    return ms.some((m) => m.agentId === a.id && m.status === 'done') && running(h1, sid, b.id, 0) && s.mission.at.finished.length === 1 && s.mission.at.working.length === 1 && calls(base).some((x) => x.cli === 'codex');
   }, 30000, '빠른 쪽 끝, 느린 쪽 도는 중');
   const aMsg = h1.S(sid).messages.find((m) => m.agentId === a.id && m.stageIndex === 0 && m.status === 'done');
   assert.deepEqual(h1.S(sid).mission.at, { stageIndex: 0, phase: 'work', back: false, working: [b.id], finished: [aMsg.id], wait: null });
@@ -453,10 +471,11 @@ test('10. 회의 중 끊김: 회의는 1바퀴부터 참석자 전원과 조사 
   const r = await mk('회의조사', '조사'); // 회의 단계 밖의 조사 담당
   const c = await mk('회의빌드', '빌드');
   const tm = await mkTeam('회의팀', [{ label: '회의', agentIds: [a.id, b.id], meeting: { rounds: 2, chairId: a.id } }, { label: '조사', agentIds: [r.id] }, { label: '빌드', agentIds: [c.id] }]);
+  const base = t.fakeLog().length;
   const h1 = await reopen();
   const sid = await goal(h1, tm.id, '', { request: 'SLOW CHECKME 정리해 줘' });
   // 2바퀴 차례 글의 질문을 조사 담당이 찾는 중에 끊긴다
-  await t.waitFor(() => h1.S(sid).messages.some((m) => m.meeting?.phase === 'research' && m.status === 'streaming') && h1.S(sid).mission.at.working.includes(r.id), 40000, '회의 조사 중');
+  await t.waitFor(() => h1.S(sid).messages.some((m) => m.meeting?.phase === 'research' && m.status === 'streaming') && h1.S(sid).mission.at.working.includes(r.id) && logged(base, '회의에서 나온 질문 하나를 도구로 찾아서 답해'), 40000, '회의 조사 중');
   assert.equal(h1.S(sid).mission.at.stageIndex, 0);
   const { h2, snap } = await crash(h1, sid, (x) => { x.providerSessions[r.id] = 'claude-sess-research'; (x.sessionProvider ||= {})[r.id] = 'claude'; });
   assert.ok(snap.providerSessions[a.id] && snap.providerSessions[b.id], '참석자는 회의 차례의 대화가 있었다');
@@ -550,9 +569,10 @@ test('13. 정상으로 끄기(app.close) → 다시 켜기 → 이어서: 끄는
   const a = await mk('정상정리', '정리');
   const b = await mk('정상분석', '분석');
   const tm = await mkTeam('정상팀', [{ label: '정리', agentIds: [a.id] }, { label: '분석', agentIds: [b.id] }]);
+  const base = t.fakeLog().length;
   const h1 = await reopen();
   const sid = await goal(h1, tm.id, '', { request: 'SLOW 정리해 줘' });
-  await t.waitFor(() => running(h1, sid, b.id, 1) && h1.S(sid).mission.at.working.length === 1, 30000, '분석 중');
+  await t.waitFor(() => running(h1, sid, b.id, 1) && h1.S(sid).mission.at.working.length === 1 && logged(base, '"분석"를 네가 맡았어'), 30000, '분석 중');
   // 가장 나쁜 순서: 끄기(stopAll) 뒤 저장소가 닫히기 전에 실행 정리(#missionEnd)가 다 돌고 저장까지 해도 목표는 그대로다
   h1.app.orch.stopAll();
   await t.waitFor(() => h1.idle(sid), 20000, '실행 정리');

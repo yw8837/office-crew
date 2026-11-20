@@ -3,6 +3,7 @@
 // - 사용자가 본 카드와 저장된 초안을 글자까지 대조한다(확인한 값만 지시가 된다)
 // - 진행자 고르기, 내 PC 모델 섞임 검사, 진행 기록 한 줄, 앱이 꺼졌을 때 끊김 표시
 // - 새 눈 검수(결정 0015): 검수자와 기준 판정으로 대신할 단계 고르기, 검수 프롬프트, 판정 블록(oc-review) 읽기, 판정 적기, 되돌림 블록
+// - 끊긴 목표 이어서(결정 0016): 팀이 그대로인지 단계표 대조, 끊긴 자리 읽기, 앞 단계 결과 다시 모으기
 // notes.js 는 store.js 를 부르고 store.js 는 이 파일을 부른다(돌아오는 import). 이 파일은 맨 위에서 notes.js 의 함수를 부르지 않는다
 import { randomBytes } from 'node:crypto';
 import { tr } from './i18n.js';
@@ -313,8 +314,68 @@ export function logLine(m, kind, text, msgId = null, now = Date.now()) {
   return line;
 }
 
+// ── 끊긴 목표 이어서(결정 0016) ──
+// 지금 팀으로 다시 만든 목표 일 실행의 단계표(a)가 끊긴 실행의 단계표(b)와 같은가: 단계 수, 라벨, 담당(순서까지), 승인 관문, 회의 여부, 기준 판정 단계의 자리.
+// 기준 판정 단계의 라벨은 실행을 만들 때의 화면 언어로 붙인 이름이라 보지 않는다
+export function sameStages(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  const ids = (st) => (Array.isArray(st?.agentIds) ? st.agentIds : []).map(String);
+  return a.every((x, k) => {
+    const y = b[k] || {};
+    const review = x.mission === 'review';
+    if (review !== (y.mission === 'review')) return false;
+    if (!review && String(x.label ?? '') !== String(y.label ?? '')) return false;
+    const p = ids(x);
+    const q = ids(y);
+    return p.length === q.length && p.every((id, i) => id === q[i]) && !!x.approve === !!y.approve && !!x.meeting === !!y.meeting;
+  });
+}
+
+// 끊긴 자리(mission.at)를 지금 단계표(stages)에 맞춰 읽는다. 맞지 않으면 null.
+// → { stageIndex, phase: 'work'|'review', back(되돌림 중), working(그 단계에서 일하던 에이전트. 대기면 빈 목록), wait: null | { reason: 'cap' } | { reason: 'mission', kind: 'verdict'|'notes' } }.
+// work 는 기준 판정 단계 앞의 단계, review 는 기준 판정 단계(검수자가 없으면 마지막 일 단계 자리)
+export function resumePoint(at, stages) {
+  if (!at || typeof at !== 'object' || !Array.isArray(stages) || !stages.length) return null;
+  const rv = stages.findIndex((st) => st.mission === 'review');
+  const end = rv >= 0 ? rv : stages.length;
+  const i = at.stageIndex;
+  if (!Number.isInteger(i) || i < 0 || i >= stages.length) return null;
+  const phase = at.phase === 'work' || at.phase === 'review' ? at.phase : null;
+  if (!phase || (phase === 'work' && i >= end) || (phase === 'review' && i !== (rv >= 0 ? rv : end - 1))) return null;
+  const w = at.wait && typeof at.wait === 'object' ? at.wait : null;
+  let wait = null;
+  if (w?.reason === 'cap') wait = { reason: 'cap' };
+  else if (w?.reason === 'mission' && (w.kind === 'verdict' || w.kind === 'notes') && phase === 'review') wait = { reason: 'mission', kind: w.kind };
+  else if (w) return null;
+  const mine = new Set((stages[i].agentIds || []).map(String));
+  const working = wait || !Array.isArray(at.working) ? [] : [...new Set(at.working.map(String))].filter((id) => mine.has(id));
+  return { stageIndex: i, phase, back: phase === 'work' && !!at.back, working, wait };
+}
+
+// 앞 단계 결과를 이 목표의 앞 실행들(runIds)의 메시지에서 다시 모은다: 단계(upto 앞까지)마다, 에이전트마다 가장 최근의 끝난 답.
+// 회의 단계는 결론(또는 되돌림에서 진행자 혼자 고친 답) 중 가장 최근 하나. 검수 답·목표 초안·인수인계 메모는 뺀다.
+// → [[{ agentId, text, msgId }]](단계 번호 순. 못 찾은 단계는 빈 목록)
+export function pastOutputs(messages, runIds, stages, upto) {
+  const runs = runIds instanceof Set ? runIds : new Set(runIds || []);
+  const out = [];
+  for (let k = 0; k < Math.min(upto, (stages || []).length); k++) {
+    const st = stages[k];
+    const mine = (messages || []).filter((m) => m.role === 'agent' && runs.has(m.runId) && m.stageIndex === k && m.status === 'done' && String(m.text || '').trim()
+      && !m.review && !m.goalDraft && !m.handoff);
+    const item = (m) => ({ agentId: String(m.agentId), text: m.text, msgId: m.id });
+    if (st.meeting) {
+      const last = mine.findLast((m) => m.meeting?.phase === 'conclude' || !m.meeting);
+      out.push(last ? [item(last)] : []);
+    } else {
+      out.push((st.agentIds || []).map((id) => mine.findLast((m) => String(m.agentId) === String(id) && !m.meeting)).filter(Boolean).map(item));
+    }
+  }
+  return out;
+}
+
 // 앱이 꺼졌다 켜졌을 때(세션을 디스크에서 읽을 때 store.js #fixStale 이 부른다). 저절로 다시 시작하지 않는다.
 // 목표 차례 중(drafting)이면 초안이 없으니 그 목표는 닫고(cancelled) 알림 표시를 단다. 도는 중(active·waiting)이면 끊김(cut). 카드 대기(draft)는 그대로.
+// 끊긴 자리(at)는 그대로 둔다(이어서 할 때 그 자리부터. 결정 0016).
 // cutNotice: 다시 켤 때 오케스트레이터가 대화에 알림 한 줄을 남기고 지운다. 바꿨으면 true
 export function cutMission(s, now = Date.now()) {
   const m = s?.mission;

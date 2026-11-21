@@ -26,7 +26,7 @@ server/orchestrator.js      실행(run) 엔진: 단계 진행, 병렬, 승인 �
 server/ask.js               에이전트가 사용자에게 묻기: 답 끝의 oc-ask 블록 읽기, 답을 돌려주는 글(결정 0009)
 server/meeting.js           회의 차례: 반대편 고르기, 차례 순서, 진행자 답 끝의 oc-verdict 판정 블록 읽기(결정 0010), 차례 답 끝의 oc-check 질문 블록 읽기와 조사 담당 고르기(결정 0011)
 server/notes.js             역할 노트: 에이전트마다 하는 일·항목·변경 기록 파일, 바깥에서 온 항목의 주입 무늬 거르기, 되돌리기, 시스템 지시에 넣을 항목 고르기(결정 0013)
-server/mission.js           목표 모드: oc-goal 목표 카드 블록 읽기·다듬기, 본 카드와 저장된 초안 대조, 진행자 고르기, 내 PC 모델 섞임 검사, 진행 기록, 끊김 표시(결정 0014).
+server/mission.js           목표 모드: oc-goal 목표 카드 블록 읽기·다듬기, 본 카드와 저장된 초안 대조, 진행자 고르기, 내 PC 모델 섞임 검사, 진행 기록, 끊김 표시(결정 0014). 끊긴 목표 이어서의 단계표 대조·끊긴 자리 읽기·앞 단계 결과 다시 모으기(결정 0016).
                             새 눈 검수: 검수자와 기준 판정으로 대신할 단계 고르기(reviewPlan), 검수 프롬프트, oc-review 판정 블록 읽기, 판정 적기, 되돌림 블록(결정 0015)
 server/usage.js             토큰·비용 집계, 계정 한도
 server/catalog.js           스킬·커넥터·플러그인 목록
@@ -63,6 +63,8 @@ Mission  (세션에 하나. 새 목표가 끝난 목표를 덮어쓴다. 결정 
            phase:'goal'|'work'|'review', request(앞 2,000자), requestMsgId, leadId, goal(200자), criteria:[{ id:'c1', text(300자), status:'open'|'pass'|'fail'|'unknown', evidence(검수자가 씀, 500자) }](7개까지),
            reviewerId|null(검수자. 확인할 때 정한다), dropped:[단계 이름](기준 판정으로 대신해 건너뛴 검수 단계), round(검수 횟수), returns(되돌린 횟수), returnCap(되돌림 상한, 처음 1),
            calls:{ used, cap }(CLI 호출 수와 상한. 목표 차례부터 센다. 상한 기본 40),
+           keep:[팀 단계 번호](확인 때 "남기기"를 고른 검수 단계. 이어서 할 때 같은 단계표를 다시 만든다), cwd(확정 때의 작업 폴더), roles:{ [에이전트 id]: roleKind }(확정 때 팀원의 역할 종류. 이어서 할 때 대조. 결정 0016),
+           at:{ stageIndex, phase:'work'|'review', back(되돌림 중), working:[에이전트 id](CLI 를 띄운 채 일하는 사람. 띄울 때 넣고 앱이 끄지 않은 채 끝나면 뺀다. 회의의 조사 담당·검수자도), finished:[메시지 id](이 단계에서 끝낸 답, 회의는 결론), wait:null|{ reason:'approve' }|{ reason:'error', failed:[{ agentId, error }] }|{ reason:'mission', kind:'verdict'|'notes' }|{ reason:'cap' } }(끊긴 자리. 단계 시작·끝, 되돌림 결정, 다시 하기·거절, 대기 시작, 사람마다의 시작·끝에 고치고 바로 저장. 결정 0016),
            outOfScope:[…](5개·200자), userDecides:[…](5개·200자), notes:[{ id, text, at, used, msgId, files?:[{name,path}] }](도는 중에 온 추가 지시. 50개까지),
            cardMsgId, confirmedAt, editedByUser, cutNotice?('drafting'|'cut': 다시 켤 때 대화에 한 줄 남기고 지운다), log:[{ at, kind, text, msgId?, n?, fail?:'review'|'outside' }](200줄, 넘으면 맨 앞에 "앞 n줄 생략" 한 줄 kind 'skip'·n), createdAt }
          살아 있는 목표 = drafting·draft·active·waiting·cut: 새 목표를 못 만들고, 목표 모드 끄기·팀 바꾸기는 409
@@ -83,7 +85,7 @@ Notes    (notes/<agentId>.json, 지운 에이전트는 <agentId>.removed.json. �
          시스템 지시에는 확정 항목만(내 PC 전용은 내 PC 모델에게만). 크기는 항목 글 + 찍는 출처 주소(바깥 자료만, 120자까지)로 센다.
          합이 2,000자 안이면 전부 최근 순, 넘을 때만 요청과 낱말이 겹치는 순 → helped − harmed → 최근 순으로 채운다.
          user 항목은 "사용자가 정한 것" 아래, agent·web 항목은 무작위 표식 안에 참고로. 항목 글·주소·하는 일의 < > 는 전각(＜ ＞)으로 바꿔 넣는다
-Run      { id, cut?(실행 중에 앱이 꺼졌다는 표시. 다시 켤 때 그 사용자 말을 기억에 넣고 지운다), mission?:'goal'|'work', missionId?(목표 실행: 목표 차례 / 확인한 목표의 일), teamId|null, status:'running'|'paused'|'waiting'|'done'|'error'|'stopped',
+Run      { id, cut?(실행 중에 앱이 꺼졌다는 표시. 다시 켤 때 그 사용자 말을 기억에 넣고 지운다), mission?:'goal'|'work', missionId?(목표 실행: 목표 차례 / 확인한 목표의 일), resumed?(끊긴 목표를 이어서 만든 일 실행. 결정 0016), teamId|null, status:'running'|'paused'|'waiting'|'done'|'error'|'stopped',
            stageIndex, hold?:{ reason:'pause'|'approve'|'error'|'mission'|'cap', stageIndex, at, …(mission: kind 'verdict'|'notes', round, left, notes, more?, reviewer? / cap: used, cap, step) }, stages:[{ label, agentIds, status, mission?:'review'(목표의 기준 판정 단계), note?, meetingNow?:null|{ phase, round, rounds, speakerId?(차례·조사 중인 사람), opposerId?(반대편이 있으면 늘), askedBy?(조사 중일 때 질문한 사람) }(회의 진행 표시. 결정 0010·0011) }], startedAt, endedAt }
 ```
 
@@ -123,7 +125,8 @@ emit(ev):
 - 확인(`confirmMission`): 화면이 보던 카드 전체(`expected`)를 저장된 초안과 글자까지 대조(`sameCard`), 검수 줄(`review: { reviewerId, droppable, drop }`, droppable 은 카드가 보여 준 번호·이름·담당·지시 목록)을 지금 팀으로 다시 계산한 값과 글자까지 대조(다르면 409 + `review`, 없으면 아무것도 안 뺀다). 확정하면 실행 하나(`#missionPlan`: 사용자가 남기지 않은 검수 단계를 빼고, 검수자가 있으면 맨 끝에 기준 판정 단계). 실행을 먼저 넣고 저장한다(도는 목표가 도는 실행 없이 저장되지 않게). 각 단계 지시의 맨 앞에 "확정된 목표와 합격 기준" 블록(`#goalCardPrompt`, < > 는 전각). 그 앞에는 지금처럼 프로젝트 기억·인수인계 메모·놓친 대화, 이어 갈 대화가 없는 에이전트면 `[이전 대화]`가 붙는다. 일 단계는 `#missionRun`·`#missionWork` 가 돌린다(단계 본문은 목표 모드가 아닌 실행과 같은 `#runStage`).
 - 새 눈 검수(`#reviewStage`, 결정 0015): 검수자(`reviewPlan`: 팀의 검수 단계 에이전트 중 진행자가 아닌 첫 사람 → 진행자도 마지막 일 단계 담당도 아닌 첫 팀원 → 없음. 팀 밖에서 고르지 않는다)를 한 번 실행(`#runAgent` 의 `once`)으로 돌린다: 대화 번호·사용량 직전 누적·역할 노트 해시를 읽지도 쓰지도 않고, 프롬프트는 `reviewPrompt` 만(앞 대화·기억 없음), 질문 창·밀린 지시 없음, 기억에 안 넣는다. 답 맨 끝의 ```oc-review 블록을 일회용 값과 기준 id 로 읽고(`parseReview`), 못 읽으면 새 값으로 한 번 다시, 그래도 안 되면 판정 없음(전부 unknown).
 - 판정 뒤(`#missionRun`): 중지 → stopped / 안 쓴 추가 지시 → 묻기(`hold.reason: 'mission'`, kind notes) / 전부 통과 → done / 불합격이 있고 되돌림이 남음 → 마지막 일 단계를 걸린 기준 블록(`returnPrompt`, 무작위 표식)과 함께 다시(그 단계의 직전 결과도 표식 안의 참고로. 이어 가는 대화에 이미 있으면 빼고. 회의면 진행자 혼자 결론을 받아, 승인 단계면 승인을 다시 묻는다. 그 뒤 단계는 다시 안 돌고 다음 검수 자료에서 옛 답을 뺀다) → 다시 검수 / 그 밖 → 묻기(kind verdict: 받아들이기 accepted · 한 번 더 · 그만). "한 번 더"는 되돌림 한 번(`returnCap = returns + 1`). 단계 앞마다 호출 상한(`#capCheck`, `hold.reason: 'cap'`, 20번 더 · 그만). 검수자가 없으면 판정 없이 묻는다("한 번 더" 없음, 그 대기 중 추가 지시는 late). 회의 단계는 인원만 보고 상한을 검사해서 크게 넘을 수 있다. 검수 답·목표 초안은 그 에이전트가 답한 것으로 세지 않는다(놓친 대화·`#historyList`·인수인계 메모 쓸 사람). 기준 판정 중(또는 그 차례의 한도 대기 중)인 에이전트를 골라 보낸 지시와, 일 실행 중 일하지 않는 에이전트에게 보낸 지시는 목표의 추가 지시가 된다.
-- 진행 기록(`logLine`): 목표 초안·확인(검수자·건너뛴 단계)·단계 시작/다시/끝·추가 지시·검수 결과·되돌림·물은 것과 답·상한·끊김·버림·끝. 다시 켜면 `#fixStale` → `cutMission`(초안 쓰던 목표는 닫고, 도는 중·대기는 `cut`). 저절로 다시 돌지 않는다.
+- 진행 기록(`logLine`): 목표 초안·확인(검수자·건너뛴 단계)·단계 시작/다시/끝·추가 지시·검수 결과·되돌림·물은 것과 답·상한·끊김·이어서·버림·끝. 다시 켜면 `#fixStale` → `cutMission`(초안 쓰던 목표는 닫고, 도는 중·대기는 `cut`, 끊긴 자리 `at` 은 그대로). 저절로 다시 돌지 않는다.
+- 이어서(`resumeMission`, 결정 0016): 사용자가 누를 때만. `cut` 이고 도는 실행이 없고 팀 검사(`missionProblem`, 아니면 400)를 지나고 요청 메시지·`at`·`keep`·끊긴 실행 기록이 있어야 한다. 확정 때의 작업 폴더(`cwd`)·역할 종류(`roles`)와, 지금 팀과 `keep` 으로 다시 만든 `#missionPlan` 이 끊긴 실행과 단계 수·기준 판정 자리·라벨·담당(순서)·승인·회의 여부·회의 설정(바퀴 수·진행자·반대편·사용량 상한)·단계 지시·검수자가 같아야 한다(`stageDiff`, 아니면 409 와 무엇이 다른지. 에이전트의 AI·권한은 대조하지 않는다). 새 일 실행(`resumed`) 하나를 끊긴 자리(`resumePoint`)부터 돈다(`#missionRun(ctx, from)`): 일 단계면 그 단계부터(`finished` 의 답은 그대로 쓰고 그 사람은 다시 안 돈다. 회의는 1바퀴부터), 되돌림이면 그 되돌림을 걸린 기준·직전 결과와 함께(되돌림 수는 다시 안 센다), 기준 판정이면 판정부터(같은 회차), 승인·오류 대기면 저장된 답(과 오류 줄)으로 호출 없이 같은 질문부터(`#runStage` 의 resume. 거절·다시 하기는 단계 전체), 판정 뒤 묻기·호출 상한이면 호출 없이 같은 질문. 앞 단계 결과는 이 목표의 일 실행들의 메시지에서 다시 모은다(`pastOutputs`: 단계·에이전트마다 가장 최근의 끝난 답, 회의는 결론 또는 되돌림에서 진행자 혼자 고친 답. 검수 답·목표 초안·인수인계 메모는 뺀다. 못 찾은 단계는 이름을 적고 건너뛴 단계는 세지 않는다). 끊긴 일 단계의 `working` 에이전트(회의면 참석자 전원과 일하던 조사 담당)는 `providerSessions`·`sessionProvider`·`usageBase`·`noteHashes` 를 지우고 새 대화로, 그 단계에서 각자의 첫 호출 프롬프트 맨 앞에만 "[이어서] …" 한 줄(`ctx.resumeAt`). 기준 판정 중 끊긴 검수자는 건드리지 않는다(한 번 실행). 호출 수·되돌림 수·회차·판정·쓴 추가 지시(`liveNotes`)는 저장된 값에서 이어 간다. 실행 기록을 30개로 자를 때 살아 있는 목표의 일 실행은 남긴다. 앱을 정상으로 끌 때(`stopAll`)는 끄는 중 표시(`closing`)로 `#missionEnd` 가 목표 상태를 바꾸지 않는다(다시 켜면 `cut`). 세션을 디스크에서 읽을 때 멈춘 실행의 도는·승인 대기 단계는 `stopped` 로(`#fixStale`, 목표가 아닌 실행도).
 
 ### 이어갈 대화(resume)
 - `providerSessions[agentId]`에 CLI 대화 id, `sessionProvider[agentId]`에 그 대화를 만든 프로바이더를 같이 저장한다. 지금 실행할 프로바이더가 다르면(자동 라우팅·이어받기로 바뀜) 이어하기를 하지 않는다.
@@ -199,6 +202,7 @@ PATCH /api/sessions/:id {goalMode}   목표 모드 켜기·끄기(쓸 수 없으
 POST /api/sessions/:id/mission/confirm {missionId, expected:{goal, criteria, outOfScope, userDecides}, edited?, review?:{reviewerId, droppable:[카드가 보여 준 목록], drop:[팀 단계 번호]}}
                                      본 것과 저장된 초안이 다르면 409 + {draft}, 검수 줄이 지금 계산과 다르면 409 + {review}(결정 0015). 옛 목표·처리한 카드·실행 중·마지막 카드 아님·카드 뒤 사용자 말은 409, 기준 0개·섞인 팀은 400
 POST /api/sessions/:id/mission/cancel {missionId}   카드 대기 목표 닫기,  POST …/mission/discard {missionId}  끊긴 목표 버리기
+POST /api/sessions/:id/mission/resume {missionId}   끊긴 목표를 끊긴 자리부터 이어서(결정 0016). 다른 목표·cut 아님·실행 중·요청 없음·끊긴 자리 없음·끊긴 실행 기록 없음·팀이 바뀜(이유: 무엇이 다른지)은 409, 섞인 팀은 400
 POST /api/sessions/:id/proposals/:mid  영입 제안 카드만(kind 가 hire 가 아니면 409)
 POST /api/sessions/:id/handoff      {agentId?} 인수인계 메모 쓰게 하기(AI 호출 1번, 결정 0008). 쓰는 중이면 409
                                     데이터 폴더의 handoff/<세션>/ 에 불러온 대화 원문(import.jsonl)과 다른 AI에게 건네는 대화 전체 파일(cloud/)을 둔다(server/handoff.js)

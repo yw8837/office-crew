@@ -9,7 +9,7 @@ import { t, getLang, locale, tmap } from '../i18n/index.js';
 import { MemoryBadge } from './memory.js';
 import { DraftChip } from './rolenotes.js';
 import { continueList, findInMessages, hideAsks, hideCheck, hideGoal, hideReview } from '../chat-tools.js';
-import { GoalCard, MissionLog, MissionGate, ReviewTable, discardMission } from './mission.js';
+import { GoalCard, MissionLog, MissionGate, ReviewTable, CutBox } from './mission.js';
 import { researcherOf, meetingView, boardCards } from '../office/meeting.js';
 
 export const sessionAgents = (s) => {
@@ -845,10 +845,7 @@ function Composer({ s, run }) {
 
   return html`<div class="composer-wrap">
     <${AskPanel} s=${s} />
-    ${s.mission?.status === 'cut' && html`<div class="warnbox row" role="note" style="max-width:860px;margin:0 auto 8px">
-      <span>⚠ ${t('앱이 꺼져서 목표가 끊겼어. 저절로 다시 시작하지 않아.')} ${t('버리면 새 요청을 보낼 수 있어.')}</span>
-      <span class="grow"></span><button class="btn sm danger" onClick=${() => discardMission(s.id, s.mission.id)}>${t('버리기')}</button>
-    </div>`}
+    ${s.mission?.status === 'cut' && html`<${CutBox} s=${s} m=${s.mission} compact=${true} />`}
     ${notReady.length > 0 && !active && html`<div class="warnbox" style="max-width:860px;margin:0 auto 8px">
       ⚠ ${notReady.map((a) => `${a.name}(${state.providers.find((p) => p.id === a.provider)?.label})`).join(', ')} — ${t('로그인(또는 API 키)이 필요해 보여.')}
       <a href="#" onClick=${(e) => { e.preventDefault(); state.ui.settingsTab = 'accounts'; import('../state.js').then((m) => m.go('settings')); }}>${t('AI 계정 확인')}</a>

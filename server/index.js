@@ -617,11 +617,12 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     return { ok: true, agent, placed, notPlaced };
   });
   route('POST', '/api/sessions/([\\w-]+)/control', async (req, url, [id]) => orch.control(id, await readJson(req)));
-  // 목표 카드(결정 0014): 확인(본 것과 저장된 초안이 같을 때만. 다르면 409 와 지금 초안) · 그만(카드 대기만) · 끊긴 목표 버리기.
+  // 목표 카드(결정 0014): 확인(본 것과 저장된 초안이 같을 때만. 다르면 409 와 지금 초안) · 그만(카드 대기만) · 끊긴 목표 버리기 · 끊긴 목표 이어서(결정 0016).
   // 본문을 먼저 다 읽은 뒤에는 기다리는 곳이 없어서, 같은 카드를 두 번 눌러도 한 번만 처리된다
   route('POST', '/api/sessions/([\\w-]+)/mission/confirm', async (req, url, [id]) => { const b = await readJson(req); return orch.confirmMission(id, b); });
   route('POST', '/api/sessions/([\\w-]+)/mission/cancel', async (req, url, [id]) => { const b = await readJson(req); return orch.cancelMission(id, b); });
   route('POST', '/api/sessions/([\\w-]+)/mission/discard', async (req, url, [id]) => { const b = await readJson(req); return orch.discardMission(id, b); });
+  route('POST', '/api/sessions/([\\w-]+)/mission/resume', async (req, url, [id]) => { const b = await readJson(req); return orch.resumeMission(id, b); });
   route('POST', '/api/sessions/([\\w-]+)/open-folder', async (req, url, [id]) => {
     const s = store.getSession(id);
     if (!s) throw new HttpError(404, tr('세션 없음'));

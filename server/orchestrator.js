@@ -694,7 +694,7 @@ export class Orchestrator {
       const pp = prepPlan(team, this.store.all('agents'), prep.lead);
       const step = (mission, label, agentIds, meeting = null) => ({ label, agentIds, approve: false, instruction: '', meeting, mission });
       if (prep.research && pp.research) pre.push(step('scan', tr('훑어보기'), [pp.scannerId]), step('questions', tr('조사 질문'), [String(prep.lead)]), step('research', tr('조사'), pp.researchers));
-      if (prep.meeting && pp.meeting) pre.push(step('meeting', tr('회의'), pp.attendees, normMeeting({ chairId: pp.attendees[0], rounds: PREP_ROUNDS }, pp.attendees)));
+      if (prep.meeting && pp.meeting) pre.push(step('meeting', tr('준비 회의'), pp.attendees, normMeeting({ chairId: pp.attendees[0], rounds: PREP_ROUNDS }, pp.attendees)));
     }
     return { teamId: team.id, stages: [...pre, ...stages], prep: pre.length };
   }

@@ -366,7 +366,10 @@ export function MissionLog({ s }) {
       ${m.research?.questions?.length > 0 && (() => {
         const n = m.research.questions.length;
         const miss = m.research.questions.filter((q) => q.status !== 'done').length;
-        const words = m.research.noteMsgId ? t('조사 노트: 질문 {n}개 · 확인 못 함 {m}개', { n, m: miss }) : t('조사 중: 질문 {n}개 중 {d}개 끝', { n, d: m.research.questions.filter((q) => Q_FINAL.includes(q.status)).length });
+        const d = m.research.questions.filter((q) => Q_FINAL.includes(q.status)).length;
+        // 노트가 없으면 아직 조사 중이거나(목표가 도는 중) 조사 중에 멈춘 것(중지·끊김·끝남)
+        const words = m.research.noteMsgId ? t('조사 노트: 질문 {n}개 · 확인 못 함 {m}개', { n, m: miss })
+          : ['active', 'waiting'].includes(m.status) ? t('조사 중: 질문 {n}개 중 {d}개 끝', { n, d }) : t('조사가 멈췄어: 질문 {n}개 중 {d}개 끝', { n, d });
         return m.research.noteMsgId ? html`<button type="button" class="btn ghost sm" style="align-self:flex-start;margin-top:4px" title=${t('그 메시지로 가기')} onClick=${() => jump(m.research.noteMsgId)}>🔎 ${words}</button>`
           : html`<div class="small muted">🔎 ${words}</div>`;
       })()}

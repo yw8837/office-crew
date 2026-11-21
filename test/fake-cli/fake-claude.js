@@ -7,13 +7,14 @@ const args = process.argv.slice(2);
 const out = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const val = (f) => (args.includes(f) ? args[args.indexOf(f) + 1] : null);
-if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ cli: 'claude', args, key: (process.env.ANTHROPIC_API_KEY || '').slice(-4), tok: (process.env.ANTHROPIC_AUTH_TOKEN || '').slice(-4) })}\n`);
+// 기록 줄마다 프로세스 번호(pid)를 적는다: 두 CLI 가 동시에 떠도 차례 글이 어느 프로세스 것인지 가릴 수 있게
+if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ cli: 'claude', pid: process.pid, args, key: (process.env.ANTHROPIC_API_KEY || '').slice(-4), tok: (process.env.ANTHROPIC_AUTH_TOKEN || '').slice(-4) })}\n`);
 // 받은 지침 파일 내용도 남긴다(실행이 끝나면 서버가 지우므로 여기서 읽음)
 const sysFile = val('--append-system-prompt-file');
-if (process.env.FAKE_LOG && sysFile) fs.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ cli: 'claude', system: fs.readFileSync(sysFile, 'utf8') })}\n`);
+if (process.env.FAKE_LOG && sysFile) fs.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ cli: 'claude', pid: process.pid, system: fs.readFileSync(sysFile, 'utf8') })}\n`);
 
 const settingsFile = val('--settings');
-if (process.env.FAKE_LOG && settingsFile) fs.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ cli: 'claude', settings: JSON.parse(fs.readFileSync(settingsFile, 'utf8')) })}\n`);
+if (process.env.FAKE_LOG && settingsFile) fs.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ cli: 'claude', pid: process.pid, settings: JSON.parse(fs.readFileSync(settingsFile, 'utf8')) })}\n`);
 
 // stdin 을 읽기 전에 바로 죽는 CLI 흉내(서버가 EPIPE 로 죽지 않는지 확인용)
 if (process.env.FAKE_EXIT_NOW === '1') process.exit(3);
@@ -45,7 +46,7 @@ function treeUsage(req) {
     now = { ...now };
   }
   const tree = { modelUsage: modelUsageOf(now), total_cost_usd: Object.values(now).reduce((n, v) => n + v[4], 0) };
-  if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ cli: 'claude', result: tree })}\n`);
+  if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ cli: 'claude', pid: process.pid, result: tree })}\n`);
   return tree;
 }
 // 정상 종료: 누적을 저장하고 끝낸다(앱이 프로세스를 끄면 여기를 지나지 않는다)
@@ -67,7 +68,7 @@ async function pump() {
   const content = m.message.content;
   const text = content.find((c) => c.type === 'text')?.text || '';
   const imgs = content.filter((c) => c.type === 'image').length;
-  if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ cli: 'claude', turn, text: text.slice(0, 5000), imgs })}\n`);
+  if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ cli: 'claude', pid: process.pid, turn, text: text.slice(0, 5000), imgs })}\n`);
   out({ type: 'stream_event', event: { type: 'message_start' } });
   if (turn === 1) {
     out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: `tu${turn}`, name: 'WebSearch', input: { query: '검색어' } }] } });

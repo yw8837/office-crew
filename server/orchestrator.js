@@ -1003,6 +1003,20 @@ export class Orchestrator {
     }
   }
 
+  // 조사 대목 안의 일시정지 자리: 일시정지를 눌렀으면 멈추고 풀릴 때까지 기다린다. 조사 담당 여러 명이 동시에 와도 대기는 하나만 띄우고 같이 기다린다.
+  // 그만이면 false(중지)
+  async #prepPause(ctx, i) {
+    if (ctx.stopped) return false;
+    if (!ctx.pauseRequested && !ctx.prepPausing) return true;
+    ctx.prepPausing ||= this.#hold(ctx, 'paused', { reason: 'pause', stageIndex: i }).then((d) => {
+      ctx.prepPausing = null;
+      if (d.action === 'stop') ctx.stopped = true;
+      return d;
+    });
+    await ctx.prepPausing;
+    return !ctx.stopped;
+  }
+
   // 준비 대목 하나를 시작한다: 단계 표시, 진행 기록 한 줄, 끊긴 자리
   #prepBegin(ctx, i, text) {
     const st = ctx.run.stages[i];
@@ -1127,7 +1141,7 @@ export class Orchestrator {
     }
     await Promise.all([...byAgent].map(async ([id, list]) => {
       for (const q of list) {
-        if (ctx.stopped) return;
+        if (ctx.stopped || !(await this.#prepPause(ctx, i))) return; // 질문을 시작하기 전마다 일시정지·중지를 본다
         q.status = 'running'; // 이대로 끊기면 이어서 할 때 이 질문부터 다시
         this.store.saveSessionNow(s);
         const { r, msg } = await this.#prepOnce(ctx, i, id, researchPrompt({ ...args, question: q.text, n: qs.indexOf(q) + 1, total: qs.length }), { kind: 'research', qid: q.id });

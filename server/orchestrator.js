@@ -1048,7 +1048,7 @@ export class Orchestrator {
     return { r, msg };
   }
 
-  // 훑어보기(설계 G4): 조사 담당 첫 사람이 넓고 싸게 한 번. 실패·빈 답·건너뛰기여도 멈추지 않고 훑어본 글 없이 조사 질문을 뽑는다
+  // 훑어보기(결정 0017): 조사 담당 첫 사람이 넓고 싸게 한 번. 실패·빈 답·건너뛰기여도 멈추지 않고 훑어본 글 없이 조사 질문을 뽑는다
   async #scanStage(ctx, i) {
     const m = ctx.mission;
     const st = ctx.run.stages[i];
@@ -1068,8 +1068,8 @@ export class Orchestrator {
     this.emitMission(ctx.s);
   }
 
-  // 조사 질문(설계 5-2의 1번): 진행자가 훑어본 글(참고 자료)을 보고 질문 2~6개를 oc-research 블록으로. 못 읽으면 같은 실행에서 한 번 다시(새 메시지),
-  // 그래도 안 되거나 오류·건너뛰기면 질문 하나("이 목표를 이루려면 먼저 알아야 할 사실")로 가고 알림(설계 11-1의 5번). 질문은 조사 담당에게 돌아가며 나눈다
+  // 조사 질문(결정 0017): 진행자가 훑어본 글(참고 자료)을 보고 질문 2~6개를 oc-research 블록으로. 못 읽으면 같은 실행에서 한 번 다시(새 메시지),
+  // 그래도 안 되거나 오류·건너뛰기면 질문 하나("이 목표를 이루려면 먼저 알아야 할 사실")로 가고 알림(형식이 깨지면 안전한 쪽으로, 결정 0017). 질문은 조사 담당에게 돌아가며 나눈다
   async #questionsStage(ctx, i) {
     const { s, run } = ctx;
     const m = ctx.mission;
@@ -1116,7 +1116,7 @@ export class Orchestrator {
     this.emitMission(s);
   }
 
-  // 조사(설계 5-2의 1번, G5): 질문마다 조사 담당이 한 번 실행으로 찾는다(질문 하나 = 호출 1번). 사람끼리는 동시에, 한 사람이 여러 질문을 맡으면 그 사람 것은 차례로.
+  // 조사(결정 0017): 질문마다 조사 담당이 한 번 실행으로 찾는다(질문 하나 = 호출 1번). 사람끼리는 동시에, 한 사람이 여러 질문을 맡으면 그 사람 것은 차례로.
   // 한 갈래가 실패·중지·빈 답이어도 나머지는 계속하고 그 갈래는 "확인 못 함"이다. 이어서 할 때는 끝난 질문은 두고 안 끝난 질문만 다시. 다 끝나면 조사 노트 카드를 남긴다
   async #researchStage(ctx, i) {
     const { s, run } = ctx;
@@ -1161,7 +1161,7 @@ export class Orchestrator {
     this.#emitRun(ctx);
   }
 
-  // 조사 노트 카드(설계 G5·G8): 코드가 묶은 카드 메시지 하나. 머리에 "질문 n개 중 m개 확인 못 함", 질문마다 답의 앞 NOTE_SHOW 자와 그 답 메시지(전체 보기).
+  // 조사 노트 카드(결정 0017): 코드가 묶은 카드 메시지 하나. 머리에 "질문 n개 중 m개 확인 못 함", 질문마다 답의 앞 NOTE_SHOW 자와 그 답 메시지(전체 보기).
   // 에이전트에게 넘기는 대화·기억에는 싣지 않는다(글이 비어 있고 role 이 다르다)
   #researchCard(ctx) {
     const { s } = ctx;
@@ -1186,7 +1186,7 @@ export class Orchestrator {
     this.emitMission(s);
   }
 
-  // 일하기 전 회의(설계 5-3): 진행자 + 참석자가 조사 노트를 놓고 지금 회의 엔진대로(의견 → 차례 → 판정 → 결론), 새 대화로(한 번 실행).
+  // 일하기 전 회의(결정 0017, 회의 엔진은 0010·0011): 진행자 + 참석자가 조사 노트를 놓고 지금 회의 엔진대로(의견 → 차례 → 판정 → 결론), 새 대화로(한 번 실행).
   // 시작 전에 회의 호출 수 식만큼 남았는지 본다. 오류면 지금처럼 다시·건너뛰기·중지를 묻는다. 결론은 일 단계에 참고 자료로 간다
   async #prepMeeting(ctx, i) {
     const { s, run } = ctx;
@@ -1430,7 +1430,7 @@ export class Orchestrator {
     const progress = (now) => { st.meetingNow = opposer ? { ...now, opposerId: opposer } : now; this.#emitRun(ctx); };
     const said = []; // 이번 회의에서 나온 글 [{ agent, text, round, phase, question? }](조사 결과는 phase 'research')
     let checks = 0; // 이번 회의에서 조사하러 간 수
-    // 목표 실행(설계 R6, 결정 0017): 남은 호출이 상한의 4분의 1 아래면 회의 중 조사를 끈다(부가 일부터 멈춘다). 진행 기록에는 회의마다 한 줄
+    // 목표 실행(결정 0017): 남은 호출이 상한의 4분의 1 아래면 회의 중 조사를 끈다(부가 일부터 멈춘다). 진행 기록에는 회의마다 한 줄
     const mission = ctx.missionTurn === 'work' && ctx.mission?.calls ? ctx.mission : null;
     let lowSaid = false;
     const low = () => {

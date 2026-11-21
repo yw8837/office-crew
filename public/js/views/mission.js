@@ -38,7 +38,7 @@ function prepEstimate(pp, on) {
 // 조사 한 갈래가 끝나지 못한 이유(칩)
 const missChip = (status) => ({ empty: t('빈 답'), failed: t('오류'), skipped: t('건너뜀') }[status] || t('끝나지 않음'));
 
-// 조사 노트 카드(설계 G5·G8): 코드가 묶은 카드. 머리에 확인 못 한 수, 질문마다 답의 앞부분과 그 답으로 가는 "전체 보기". 모두 에이전트가 쓴 글이다
+// 조사 노트 카드(결정 0017): 코드가 묶은 카드. 머리에 확인 못 한 수, 질문마다 답의 앞부분과 그 답으로 가는 "전체 보기". 모두 에이전트가 쓴 글이다
 export function ResearchCard({ m }) {
   const qs = m.questions || [];
   return html`<div class="msg proposal"><div class="hire goal-card" role="group" aria-label=${t('조사 노트')}>

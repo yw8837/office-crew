@@ -1230,7 +1230,9 @@ export class Orchestrator {
     }
     const st = run.stages[i];
     const ids = back && st.meeting ? [st.agentIds.includes(String(m.leadId)) ? String(m.leadId) : st.agentIds[0]] : null;
-    if (!resume?.wait && !(await this.#capCheck(ctx, i, (resume?.ids || ids || st.agentIds).length, 'work', back))) return;
+    // 호출 상한은 그 단계가 쓸 호출 수로 본다: 보통 단계는 인원, 회의를 여는 단계는 회의 호출 수 식(결정 0017. 준비 회의와 같다). 이어서 하는 첫 바퀴는 다시 돌릴 사람 수
+    const need = resume?.ids ? resume.ids.length : st.meeting && !ids ? meetingCalls(st.agentIds.length, st.meeting.rounds) : (ids || st.agentIds).length;
+    if (!resume?.wait && !(await this.#capCheck(ctx, i, need, 'work', back))) return;
     m.phase = 'work';
     if (!resume?.wait) this.#missionStage(ctx, i, back ? 'again' : 'start');
     // 일하는 사람은 CLI 를 띄울 때 넣고 끝나면 뺀다(#atWorking). 이어서 그대로 쓰는 답은 처음부터 끝낸 답으로
@@ -1435,7 +1437,7 @@ export class Orchestrator {
       if (!mission || (mission.calls.cap - mission.calls.used) * 4 >= mission.calls.cap) return false;
       if (!lowSaid) {
         lowSaid = true;
-        logLine(mission, 'note', tr('남은 호출이 상한의 4분의 1 아래라서 "{label}" 회의에서는 회의 중 조사를 껐어(호출 {used} / {cap}).', { label: st.label, used: mission.calls.used, cap: mission.calls.cap }));
+        logLine(mission, 'note', tr('남은 호출이 상한의 4분의 1 아래라서 "{label}" 단계에서는 회의 중 조사를 껐어(호출 {used} / {cap}).', { label: st.label, used: mission.calls.used, cap: mission.calls.cap }));
         this.emitMission(s);
       }
       return true;

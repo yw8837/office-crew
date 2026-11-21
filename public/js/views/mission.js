@@ -313,7 +313,7 @@ export function MissionGate({ s, run }) {
     return html`<div class="ask-panel mission-gate" role="group" aria-label=${t('호출 상한')}>
       <div class="ask-head"><span class="ask-who">🔢 ${t('목표의 호출 상한')}</span></div>
       <div class="ask-question">${t('호출 {used}번에 닿았어(상한 {cap}번). 더 할까?', { used: hold.used, cap: hold.cap })}</div>
-      <div class="small muted">${t('다음 단계를 시작하기 전에 멈췄어. 단계 안의 다시 시도·이어받기는 상한을 넘을 수 있고, 회의 단계는 인원만 보고 시작해서 바퀴 수만큼 더 넘을 수 있어.')}</div>
+      <div class="small muted">${t('다음 단계를 시작하기 전에 멈췄어. 회의 단계는 회의 호출 수(의견·차례·판정·결론)를 보고 시작해. 단계 안의 다시 시도·이어받기와 회의 중 조사는 상한을 넘을 수 있어.')}</div>
       <div class="ask-rows">${row(1, t('{n}번 더', { n: hold.step }), t('상한을 늘리고 이어서 해.'), 'more')}</div>
       <div class="ask-foot"><span class="grow"></span><button type="button" class="btn sm danger" disabled=${busy} onClick=${() => ctl('stop')}>${t('그만')}</button></div>
     </div>`;

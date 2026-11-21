@@ -1884,7 +1884,7 @@ export default {
   "회의: {names}이(가) 무엇을 해야 목표를 채우는지 정해(진행자 {chair}).": "Meeting: {names} decide what it takes to meet the goal (chair {chair}).",
   "회의 끝: 결론이 나왔어. 일 단계에 참고 자료로 넘겨.": "Meeting done: there is a conclusion. It goes to the work stages as reference.",
   "회의가 결론 없이 끝났어. 결론 없이 일해.": "The meeting ended without a conclusion. Working without one.",
-  "남은 호출이 상한의 4분의 1 아래라서 \"{label}\" 회의에서는 회의 중 조사를 껐어(호출 {used} / {cap}).": "Fewer than a quarter of the call limit is left, so research during the \"{label}\" meeting is off (calls {used} / {cap}).",
+  "남은 호출이 상한의 4분의 1 아래라서 \"{label}\" 단계에서는 회의 중 조사를 껐어(호출 {used} / {cap}).": "Fewer than a quarter of the call limit is left, so research during the meeting in the \"{label}\" stage is off (calls {used} / {cap}).",
   "확인 못 함: 남은 호출이 적어서 회의 중 조사를 껐어.": "Not checked: few calls are left, so research during the meeting is off.",
   "[회의 안건]": "[Meeting agenda]",
   "아래 조사 노트를 근거로, 이 목표와 합격 기준을 채우려면 무엇을 어떻게 해야 하는지 정해. 다음 단계 담당들은 이 회의의 결론을 참고 자료로 받아서 일해.": "Using the research notes below as evidence, decide what has to be done, and how, to meet this goal and its acceptance criteria. The next stages' agents work with this meeting's conclusion as reference.",

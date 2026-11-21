@@ -316,15 +316,17 @@ export function prevPrompt(items, mark = randomBytes(4).toString('hex')) {
 
 // ── 일하기 전 조사와 회의(결정 0017) ──
 // 누가: 조사 담당은 팀의 조사 역할(roleKind = research) 전원(팀에 적힌 순서. 훑어보기는 그 첫 사람), 회의 참석자는 진행자 + 만들기·검수 역할이 아닌 팀원(팀에 적힌 순서, 진행자 포함 최대 MEET_PEOPLE명).
-// 팀 밖에서는 고르지 않는다(결정 0007). → { researchers, scannerId, attendees(진행자가 팀에 있으면 맨 앞), research: 조사할 수 있나, meeting: 회의할 수 있나(참석자 둘 이상) }
+// 팀 밖에서는 고르지 않는다(결정 0007). 조사 질문을 쓰고 회의를 이끄는 진행자가 지금 팀에 없으면 둘 다 못 한다(카드를 본 뒤 진행자가 팀에서 빠진 경우).
+// → { researchers, scannerId, attendees(진행자가 맨 앞), leadIn: 진행자가 팀에 있나, research: 조사할 수 있나, meeting: 회의할 수 있나(참석자 둘 이상) }
 export function prepPlan(team, agents, leadId = null) {
   const seen = new Set();
   const people = teamStages(team, agents).flatMap((st) => st.agents).filter((a) => !seen.has(String(a.id)) && seen.add(String(a.id)));
   const researchers = people.filter((a) => roleKind(a.role) === 'research').map((a) => String(a.id));
   const lead = leadId == null ? '' : String(leadId);
+  const leadIn = !!lead && seen.has(lead);
   const others = people.filter((a) => String(a.id) !== lead && !['build', 'review'].includes(roleKind(a.role))).map((a) => String(a.id));
-  const attendees = (lead && seen.has(lead) ? [lead, ...others] : others).slice(0, MEET_PEOPLE);
-  return { researchers, scannerId: researchers[0] || null, attendees, research: researchers.length > 0, meeting: attendees.length >= 2 };
+  const attendees = (leadIn ? [lead, ...others] : others).slice(0, MEET_PEOPLE);
+  return { researchers, scannerId: researchers[0] || null, attendees, leadIn, research: leadIn && researchers.length > 0, meeting: leadIn && attendees.length >= 2 };
 }
 
 // 회의 한 번의 호출 수(지금 회의 엔진 그대로, 회의 중 조사는 빼고): 1바퀴 의견 p + 2바퀴부터 진행자를 뺀 차례 (p-1)씩 + 마지막 바퀴를 뺀 판정 + 결론 1.
@@ -335,25 +337,29 @@ export function meetingCalls(p, rounds = PREP_ROUNDS) {
   return p + (r - 1) * (p - 1) + Math.max(0, r - 2) + 1;
 }
 
-// 목표 카드에 싣는 "조사·회의 먼저" 줄(화면이 그대로 보여 주고, 확인할 때 고른 값과 보여 주던 담당·참석자를 같이 보낸다).
-// direct: 진행자가 작은 목표라 바로 실행을 권했다(그러면 기본이 꺼짐). 할 수 없는 대목은 can: false 로 잠근다(이유는 화면이 적는다).
-// 어림값: 조사는 훑어보기 1 + 질문 뽑기 1 + 질문마다 1(2~6개), 회의는 meetingCalls + 회의 중 조사 최대 CHECK_MAX(진행자가 아닌 조사 담당이 있을 때)
+// 목표 카드에 싣는 "조사·회의 먼저" 줄(화면이 그대로 보여 주고, 확인할 때 고른 값과 보여 주던 진행자·담당·참석자를 같이 보낸다).
+// direct: 진행자가 작은 목표라 바로 실행을 권했다(그러면 기본이 꺼짐). 할 수 없는 대목은 can: false 로 잠근다(이유는 화면이 적는다. 진행자가 팀에 없으면 lead.inTeam: false).
+// 어림값: 조사는 훑어보기 1 + 질문 뽑기 1 + 질문마다 1(질문을 못 읽으면 하나로 대신하니 1~6개), 회의는 meetingCalls + 회의 중 조사 최대 CHECK_MAX(진행자가 아닌 조사 담당이 있을 때).
+// 블록을 다시 요청하거나 빈 답을 다시 요청하면 그만큼 더 든다(화면이 그렇게 적는다)
 export function prepCard(team, agents, leadId = null, direct = false) {
   const pp = prepPlan(team, agents, leadId);
   const byId = new Map((agents || []).map((a) => [String(a.id), a]));
   const who = (ids) => ids.map((id) => ({ id, name: byId.get(id)?.name || id }));
   const chair = pp.attendees[0] || '';
+  const lead = leadId == null ? '' : String(leadId);
   return {
     direct: !!direct,
-    research: { can: pp.research, on: pp.research && !direct, who: who(pp.researchers), min: 2 + Q_MIN, max: 2 + Q_COUNT },
+    lead: { id: lead, name: byId.get(lead)?.name || lead, inTeam: pp.leadIn },
+    research: { can: pp.research, on: pp.research && !direct, who: who(pp.researchers), min: 2 + 1, max: 2 + Q_COUNT },
     meeting: { can: pp.meeting, on: pp.meeting && !direct, who: who(pp.attendees), rounds: PREP_ROUNDS, calls: meetingCalls(pp.attendees.length), checks: pp.researchers.some((id) => id !== chair) ? CHECK_MAX : 0 },
   };
 }
 
-// 확인 요청의 prep(화면이 보여 주던 값: 고른 체크와 담당·참석자 id)이 지금 팀으로 할 수 있는가. 목록을 실어 보냈으면 지금 목록과 순서까지 같아야 한다
+// 확인 요청의 prep(화면이 보여 주던 값: 고른 체크와 진행자·담당·참석자 id)이 지금 팀으로 할 수 있는가. 진행자·목록을 실어 보냈으면 지금 값과 (순서까지) 같아야 한다
 export function prepFits(want, card) {
   const ids = (x) => (x?.who || []).map((w) => String(w.id));
   const same = (a, b) => a === undefined || (Array.isArray(a) && a.length === b.length && a.every((x, i) => String(x) === b[i]));
+  if ((want.research || want.meeting) && want.lead !== undefined && String(want.lead ?? '') !== String(card.lead?.id ?? '')) return false;
   if (want.research && (!card.research.can || !same(want.researchers, ids(card.research)))) return false;
   if (want.meeting && (!card.meeting.can || !same(want.attendees, ids(card.meeting)))) return false;
   return true;

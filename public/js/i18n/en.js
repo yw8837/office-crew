@@ -1893,4 +1893,11 @@ export default {
   "지금은 새 대화로 도는 차례(조사·회의)라 이 지시는 바로 넣지 않고 추가 지시로 받았어: {text}": "This turn runs in a new conversation (research or meeting), so this instruction was not sent right away; it was taken as an extra instruction: {text}",
   "이 목표와 합격 기준을 채우려면 무엇을 어떻게 해야 하는지 정해(이번에는 조사 없이 회의만 해). 다음 단계 담당들은 이 회의의 결론을 참고 자료로 받아서 일해.": "Decide what has to be done, and how, to meet this goal and its acceptance criteria (this time it's a meeting without research). The next stages' agents work with this meeting's conclusion as reference.",
   "무엇을 해야 목표를 채우는지 회의해(참석자 {names}, 새 대화로).": "Meet to decide what it takes to meet the goal (participants {names}, in a new conversation).",
+  "블록이나 빈 답을 다시 요청하거나 다시 시도하면 더 들어.": "Asking again for a block or an empty answer, or retrying, costs more.",
+  "회의는 1바퀴부터 다시 해. 회의 차례는 늘 새 대화라 참석자의 저장된 대화는 그대로 둬.": "The meeting starts again from round 1. Meeting turns always run in a new conversation, so the participants' saved conversations are kept.",
+  "진행자({name})가 지금 팀에 없어서 조사·회의는 못 해.": "The chair ({name}) is no longer in the team, so research and the meeting aren't possible.",
+  "다음 단계를 시작하기 전에 멈췄어. 회의 단계는 회의 호출 수(의견·차례·판정·결론)를 보고 시작해. 단계 안의 다시 시도·이어받기와 회의 중 조사는 상한을 넘을 수 있어.": "Stopped before starting the next stage. A meeting stage starts only if its calls (opinions, turns, verdicts, conclusion) fit. Retries and takeovers inside a stage, and research during a meeting, can go over the cap.",
+  "조사가 멈췄어: 질문 {n}개 중 {d}개 끝": "Research stopped: {d} of {n} questions done",
+  "회의 단계 \"{label}\"는 1바퀴부터 다시 해. 회의 차례는 늘 새 대화라 참석자의 저장된 대화는 그대로 둬.": "The meeting stage \"{label}\" starts again from round 1. Meeting turns always run in a new conversation, so the participants' saved conversations are kept.",
+  "준비 회의": "Pre-work meeting",
 };

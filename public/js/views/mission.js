@@ -32,7 +32,8 @@ function prepEstimate(pp, on) {
     parts.push(t('회의 약 {n}번(참석자 {p}명 · {r}바퀴)', { n: pp.meeting.calls, p: pp.meeting.who.length, r: pp.meeting.rounds }));
     if (pp.meeting.checks) parts.push(t('회의 중 조사로 최대 {n}번 더', { n: pp.meeting.checks }));
   }
-  return `${t('어림값(일하기 전 대목만)')}: ${parts.join(' · ')}`;
+  // 질문 블록·빈 답을 다시 요청하거나, 다시 시도·이어받기를 하면 그만큼 더 든다
+  return `${t('어림값(일하기 전 대목만)')}: ${parts.join(' · ')}. ${t('블록이나 빈 답을 다시 요청하거나 다시 시도하면 더 들어.')}`;
 }
 // 조사 한 갈래가 끝나지 못한 이유(칩)
 const missChip = (status) => ({ empty: t('빈 답'), failed: t('오류'), skipped: t('건너뜀') }[status] || t('끝나지 않음'));
@@ -217,7 +218,8 @@ export function GoalCard({ m }) {
   // 조사·회의 먼저(결정 0017): 고른 체크와 보여 주던 조사 담당·참석자를 같이 보낸다(서버가 지금 팀으로 할 수 있는지 대조한다). 옛 카드(이 칸 없음)는 보내지 않는다(바로 일한다)
   const pp = prepShown || m.prep || null;
   const on = pp ? prepOn || prepOf(pp) : null;
-  const prep = pp ? { research: !!on.research && pp.research.can, meeting: !!on.meeting && pp.meeting.can, researchers: pp.research.who.map((w) => w.id), attendees: pp.meeting.who.map((w) => w.id) } : undefined;
+  const prep = pp ? { research: !!on.research && pp.research.can, meeting: !!on.meeting && pp.meeting.can, ...(pp.lead ? { lead: pp.lead.id } : {}), researchers: pp.research.who.map((w) => w.id), attendees: pp.meeting.who.map((w) => w.id) } : undefined;
+  const noLead = !!pp?.lead && !pp.lead.inTeam; // 카드를 본 뒤 진행자가 팀에서 빠졌다(조사 질문·회의를 맡을 사람이 없다)
   const start = () => send('confirm', { missionId: m.missionId, expected: v, review, prep });
   const edited = edit && { goal: edit.goal.trim(), criteria: lines(edit.criteria), outOfScope: lines(edit.outOfScope), userDecides: lines(edit.userDecides) };
   const canEdited = !!edited && !!edited.goal && edited.criteria.length > 0;
@@ -229,11 +231,11 @@ export function GoalCard({ m }) {
     ${pp.direct && html`<div class="small">💡 ${t('진행자가 작은 목표라 조사·회의 없이 바로 일하기를 권했어.')}</div>`}
     <label class="goal-keep small">
       <input type="checkbox" checked=${prep.research} disabled=${busy || !pp.research.can} onChange=${(e) => setPrepOn({ ...on, research: e.target.checked })} />
-      <span><b>${t('조사')}</b> — ${pp.research.can ? t('훑어보고, 조사 질문을 뽑아, 질문마다 찾아 와({names}).', { names: names(pp.research.who) }) : t('팀에 조사 역할이 없어서 조사는 못 해.')}</span>
+      <span><b>${t('조사')}</b> — ${pp.research.can ? t('훑어보고, 조사 질문을 뽑아, 질문마다 찾아 와({names}).', { names: names(pp.research.who) }) : noLead ? t('진행자({name})가 지금 팀에 없어서 조사·회의는 못 해.', { name: pp.lead.name }) : t('팀에 조사 역할이 없어서 조사는 못 해.')}</span>
     </label>
     <label class="goal-keep small">
       <input type="checkbox" checked=${prep.meeting} disabled=${busy || !pp.meeting.can} onChange=${(e) => setPrepOn({ ...on, meeting: e.target.checked })} />
-      <span><b>${t('회의')}</b> — ${!pp.meeting.can ? t('회의에 들 사람이 둘이 안 돼서 회의는 못 해(진행자와, 만들기·검수가 아닌 팀원이 들어가).')
+      <span><b>${t('회의')}</b> — ${!pp.meeting.can ? (noLead ? t('진행자({name})가 지금 팀에 없어서 조사·회의는 못 해.', { name: pp.lead.name }) : t('회의에 들 사람이 둘이 안 돼서 회의는 못 해(진행자와, 만들기·검수가 아닌 팀원이 들어가).'))
         : prep.research ? t('조사 노트를 놓고 무엇을 할지 회의해(참석자 {names}, 새 대화로).', { names: names(pp.meeting.who) }) : t('무엇을 해야 목표를 채우는지 회의해(참석자 {names}, 새 대화로).', { names: names(pp.meeting.who) })}</span>
     </label>
     ${(prep.research || prep.meeting) && html`<div class="small muted">${prepEstimate(pp, prep)}</div>`}

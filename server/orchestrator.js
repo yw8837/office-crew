@@ -386,12 +386,12 @@ export class Orchestrator {
     if (!final.criteria.length) throw fail(400, tr('합격 기준이 하나도 없어. "고쳐서 시작"으로 기준을 적어 줘.'));
     const why = this.missionProblem(s);
     if (why) throw fail(400, why);
-    // 조사·회의 먼저(결정 0017): 화면이 보여 주던 체크(와 담당·참석자)가 지금 팀으로 할 수 있는 조합이어야 한다. 아니면 409 와 지금 값.
+    // 조사·회의 먼저(결정 0017): 화면이 보여 주던 체크(와 진행자·담당·참석자)가 지금 팀으로 할 수 있는 조합이어야 한다(진행자가 팀에서 빠졌으면 못 한다). 아니면 409 와 지금 값.
     // prep 이 없는 요청(옛 화면)은 조사·회의 없이 바로 일한다
     const prep = { research: false, meeting: false, direct: !!card.prep?.direct };
     if (body.prep !== undefined && body.prep !== null) {
       const p = typeof body.prep === 'object' && !Array.isArray(body.prep) ? body.prep : {};
-      const want = { research: p.research === true, meeting: p.meeting === true, researchers: p.researchers, attendees: p.attendees };
+      const want = { research: p.research === true, meeting: p.meeting === true, lead: p.lead, researchers: p.researchers, attendees: p.attendees };
       const nowPrep = prepCard(team, agents, m.leadId, prep.direct);
       if (!prepFits(want, nowPrep)) throw fail(409, tr('조사·회의를 지금 팀으로는 화면에 보이던 대로 할 수 없어. 지금 값을 다시 보여 줄게.'), { prep: nowPrep });
       Object.assign(prep, { research: want.research, meeting: want.meeting });

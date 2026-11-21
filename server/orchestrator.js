@@ -36,6 +36,9 @@ const notesHash = (block) => createHash('sha256').update(block).digest('hex').sl
 const NO_NOTES = notesHash(''); // 기록이 없는 대화(이 기능 전에 시작한 대화 등)는 노트를 받은 적이 없다고 본다
 // < > 를 전각(＜ ＞)으로: 목표 실행의 확정 블록과 추가 지시가 지시를 감싼 태그(<역할 지침> 등)를 닫거나 흉내 내지 못하게(#roleNotes 와 같은 방식. 결정 0014)
 const wide = (s) => String(s ?? '').replace(/</g, '＜').replace(/>/g, '＞');
+// 에이전트에게 넘기는 대화(이전 대화·놓친 대화·고른 부분·대화 전체 파일·API 대화 배열)에 싣지 않는 답(결정 0017): 일하기 전 조사·회의의 답(prep)과 목표 실행의 회의 차례(한 번 실행).
+// 둘 다 밖에서 읽은 글이 섞일 수 있고, 조사 노트·회의 결론·[이전 단계 결과]로 무작위 표식 안에 따로 간다
+const notTalk = (m) => !!m.prep || (!!m.once && !!m.meeting);
 
 // 회의 단계 설정 정리: 참석자가 둘 이상일 때만 회의다. 바퀴 1~3(기본 2), 진행자는 참석자 중 한 명(기본 첫 번째),
 // 사용량 상한은 토큰(기본 1,000,000, 0 = 없음). 값이 없거나 숫자가 아니면 기본값을 쓴다.
@@ -2189,7 +2192,7 @@ export class Orchestrator {
     const n = Math.max(0, Number(this.store.settings.historyTurns) || 0) * 2;
     // 지금 작성 중인 답(이어받기 때의 앞부분)은 빼고(이어받기 지시에 따로 들어감)
     const list = s.messages.filter((m) => m !== currentMsg && m.id !== s.runs.at(-1)?.userMessageId && m.status !== 'queued' && m.status !== 'streaming'
-      && (m.role === 'user' || (m.role === 'agent' && m.agentId === agentId && !m.review)) && m.text && !m.hire && !m.handoffAsk && !m.missionNote && !m.goalDraft
+      && (m.role === 'user' || (m.role === 'agent' && m.agentId === agentId && !m.review)) && m.text && !m.hire && !m.handoffAsk && !m.missionNote && !m.goalDraft && !notTalk(m)
       && (!localOnly(m) || receiver === 'local'));
     return n ? list.slice(-n) : []; // 0이면 넣지 않는다(slice(-0)은 전부를 돌려준다)
   }
@@ -2201,7 +2204,7 @@ export class Orchestrator {
   #withHistory(prompt, s, currentMsg, receiver = currentMsg?.provider, reserve = 0, ask = null) {
     const n = Math.max(0, Number(this.store.settings.historyTurns) || 0) * 2;
     const list = s.messages.filter((m) => m !== currentMsg && m.id !== s.runs.at(-1)?.userMessageId && m.status !== 'queued'
-      && (m.role === 'user' || (m.role === 'agent' && (!currentMsg || m.runId !== currentMsg.runId))) && m.text && !m.hire && !m.handoffAsk && !m.handoff && !m.missionNote && !m.goalDraft
+      && (m.role === 'user' || (m.role === 'agent' && (!currentMsg || m.runId !== currentMsg.runId))) && m.text && !m.hire && !m.handoffAsk && !m.handoff && !m.missionNote && !m.goalDraft && !notTalk(m)
       && (!localOnly(m) || receiver === 'local')).slice(n ? -n : s.messages.length); // 0이면 넣지 않는다
     let total = list.reduce((sum, m) => sum + Math.min(m.text.length, 2000), 0);
     while (reserve > 0 && list.length > 1 && total > n * 2000 - reserve) total -= Math.min(list.shift().text.length, 2000);
@@ -2246,7 +2249,7 @@ export class Orchestrator {
     // 같은 실행에서 다시 돌 때(승인 거절·재시도·회의 다음 차례): 글은 그대로 쓰되, 실행마다 새로 만드는 '여는 폴더' 목록에는 다시 넣는다
     if (cache.has(key)) { open(cache.get(key).w); return cache.get(key).text; }
     const older = s.importedFrom && !s.importedFrom.cleared ? readImported(this.dirs.handoff, s.id) : null; // 대화를 비웠으면 불러온 대화도 건네지 않는다
-    const live = s.messages.filter((m) => m.text && (m.role === 'user' || m.role === 'agent') && !m.hire && !m.handoffAsk && !m.missionNote && !m.goalDraft
+    const live = s.messages.filter((m) => m.text && (m.role === 'user' || m.role === 'agent') && !m.hire && !m.handoffAsk && !m.missionNote && !m.goalDraft && !notTalk(m)
       && m.status !== 'queued' && m.status !== 'streaming' && m.runId !== run.id && m.id !== run.userMessageId
       && !(older && m.imported) && (!localOnly(m) || forLocal));
     const from = s.importedFrom?.source === 'claude' ? 'Claude Code' : 'Codex CLI';
@@ -2355,7 +2358,7 @@ export class Orchestrator {
     const note = ctx.noteGiven?.has(agent.id) ? '' : this.#handoffNote(ctx, agent, agent.provider, last); // 지난 답 뒤에 쓰인 인수인계 메모는 통째로 준다
     if (!n || last < 0) return `${note}${prompt}`;
     const missed = s.messages.slice(last + 1).filter((m) => m.text && m.runId !== run.id && m.id !== run.userMessageId && m.status !== 'queued'
-      && (m.role === 'user' || (m.role === 'agent' && (m.agentId !== agent.id || m.review || m.once))) && !m.hire && !m.handoffAsk && !m.handoff && !m.missionNote && !m.goalDraft
+      && (m.role === 'user' || (m.role === 'agent' && (m.agentId !== agent.id || m.review || m.once))) && !m.hire && !m.handoffAsk && !m.handoff && !m.missionNote && !m.goalDraft && !notTalk(m)
       && (!localOnly(m) || agent.provider === 'local')).slice(-n);
     if (!missed.length) return `${note}${prompt}`;
     const who = (m) => (m.role === 'user' ? tr('사용자') : (this.store.get('agents', m.agentId)?.name || 'AI'));
@@ -2474,11 +2477,13 @@ export class Orchestrator {
       if (!mem.stats().chunks) return none;
       const n = Math.max(0, Number(this.store.settings.historyTurns) || 0) * 2;
       const recent = new Set(s.messages.slice(-Math.max(n, 2)).map((m) => m.id));
+      const oneOff = new Set(resumed ? s.messages.filter((m) => m.once && m.agentId === agent.id).map((m) => m.id) : []);
       const budget = Math.min(8000, Math.max(300, Number(this.store.settings.memoryBudget) || 2000));
       const r = await mem.search(userMsg.text, {
         budget,
+        // 이어 가는 대화면 이 에이전트가 이 세션에서 한 말은 CLI 가 기억하니 뺀다. 한 번 실행으로 돈 답(목표 실행의 회의 차례 등, 결정 0017)은 그 대화에 없으니 빼지 않는다
         exclude: (c) => c.messageId === userMsg.id || c.messageId === msg.id || recent.has(c.messageId)
-          || (resumed && c.sessionId === s.id && (c.agentId === agent.id
+          || (resumed && c.sessionId === s.id && ((c.agentId === agent.id && !oneOff.has(c.messageId))
             || (String(c.messageId).startsWith('imp-') && agent.id === (s.importedFrom?.agentId || Object.keys(s.sessionProvider || {})[0]))))
           || (c.provider === 'local' && agent.provider !== 'local'),
       });

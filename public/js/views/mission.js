@@ -100,7 +100,7 @@ export function resumeFrom(s, m) {
   if (prep) return t('"{label}" 단계부터 다시 해.', { label });
   if (at.phase === 'review') return st?.mission === 'review' ? t('"{label}" 단계부터 다시 해.', { label }) : t('검수할 다른 팀원이 없어서 판정 없이 바로 물어.'); // 기준 판정은 늘 새 대화(바꿀 것 없음)
   const head = at.back ? t('"{label}" 단계의 되돌림(걸린 기준 고치기)부터 다시 해.', { label }) : t('"{label}" 단계부터 다시 해.', { label });
-  if (st?.meeting && !at.back) return `${head} ${t('회의는 1바퀴부터 다시 하고, 참석자 전원이 새 대화로 시작해.')}`;
+  if (st?.meeting && !at.back) return `${head} ${t('회의는 1바퀴부터 다시 해. 회의 차례는 늘 새 대화라 참석자의 저장된 대화는 그대로 둬.')}`;
   const names = (at.working || []).map((id) => agentById(id)?.name || id);
   const parts = [head];
   if (at.finished?.length) parts.push(t('이미 끝낸 담당의 답은 그대로 써.'));

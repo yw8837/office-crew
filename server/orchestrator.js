@@ -521,7 +521,7 @@ export class Orchestrator {
     const doneMsgs = at.finished.map((id) => s.messages.find((x) => x.id === id && x.role === 'agent' && x.status === 'done' && x.stageIndex === at.stageIndex && runIds.has(x.runId))).filter(Boolean);
     const doneIds = new Set(doneMsgs.map((x) => String(x.agentId)));
     const kept = doneMsgs.map((x) => ({ agent: this.store.get('agents', x.agentId), text: x.text, msgId: x.id }));
-    const meetingRedo = at.phase === 'work' && !at.back && !at.wait && !!st.meeting; // 회의는 1바퀴부터 다시(참석자 전원이 새 대화로)
+    const meetingRedo = at.phase === 'work' && !at.back && !at.wait && !!st.meeting; // 회의는 1바퀴부터 다시(회의 차례는 늘 새 대화라 저장된 대화는 그대로 둔다)
     let stage = null;
     if (at.wait?.reason === 'approve') stage = { wait: 'approve', keep: kept };
     else if (at.wait?.reason === 'error') stage = { wait: 'error', keep: kept, failed: at.wait.failed.map((f) => ({ agent: this.store.get('agents', f.agentId) || { id: f.agentId, name: f.agentId }, error: f.error })) };
@@ -532,9 +532,10 @@ export class Orchestrator {
     // 다시 돌지 않는 단계의 표시: 끊긴 실행에서 끝났거나 건너뛴 그대로, 아니면 결과를 찾았는지로(준비 대목은 끝난 것으로). 판정 뒤 묻기에서 끊겼으면 기준 판정 단계도
     const keepStatus = (k) => (['done', 'skipped'].includes(cutRun.stages[k]?.status) ? cutRun.stages[k].status : isPrep(plan.stages[k]) || outputs[k]?.length ? 'done' : 'skipped');
     const statuses = plan.stages.map((x, k) => (k < upto ? keepStatus(k) : k === rv && at.wait?.reason === 'mission' ? (cutRun.stages[k]?.status === 'skipped' ? 'skipped' : 'done') : 'pending'));
-    // CLI 를 띄운 채 끊긴 에이전트(회의 단계면 참석자 전원과 조사 담당)는 저장된 CLI 대화를 버리고 새 대화로 시작한다(새 대화라 앞 대화는 [이전 대화]로 다시 받는다).
-    // 대기에서 끊겼으면 일하던 사람이 없다. 기준 판정과 준비 대목은 원래 대화를 읽지도 쓰지도 않는 한 번 실행이라 건드리지 않는다
-    const fresh = at.phase !== 'work' || at.wait ? [] : meetingRedo ? [...new Set([...st.agentIds.map(String), ...at.working])] : at.working.filter((id) => !doneIds.has(id));
+    // CLI 를 띄운 채 끊긴 에이전트는 저장된 CLI 대화를 버리고 새 대화로 시작한다(새 대화라 앞 대화는 [이전 대화]로 다시 받는다).
+    // 대기에서 끊겼으면 일하던 사람이 없다. 기준 판정·준비 대목·목표 실행의 회의 차례(회의 중 조사 포함)는 원래 대화를 읽지도 쓰지도 않는 한 번 실행이라 건드리지 않는다(결정 0017).
+    // 그래서 끊긴 회의 단계는 1바퀴부터 다시 할 뿐, 참석자·조사 담당의 저장된 대화는 그대로 두고 "[이어서]" 줄도 붙이지 않는다(회의 발언에는 작업 폴더를 확인하라는 말이 맞지 않는다)
+    const fresh = at.phase !== 'work' || at.wait || meetingRedo ? [] : at.working.filter((id) => !doneIds.has(id));
     for (const id of fresh) for (const k of ['providerSessions', 'sessionProvider', 'usageBase', 'noteHashes']) if (s[k]) delete s[k][id];
     const label = st.label;
     m.status = 'active';
@@ -545,7 +546,7 @@ export class Orchestrator {
       : at.phase === 'research' ? tr('이어서: 조사에서 끝나지 않은 질문 {n}개만 다시 해(끝난 질문은 그대로 써).', { n: open })
         : at.phase === 'meeting' ? tr('이어서: 일하기 전 회의를 1바퀴부터 다시 해.')
           : at.back ? tr('이어서: "{label}" 단계의 되돌림부터.', { label }) : tr('이어서: "{label}" 단계부터.', { label }), m.cardMsgId);
-    if (meetingRedo) logLine(m, 'resume', tr('회의 단계 "{label}"는 1바퀴부터 다시 하고, 참석자({names})는 새 대화로 시작해.', { label, names: fresh.map(name).join(', ') }));
+    if (meetingRedo) logLine(m, 'resume', tr('회의 단계 "{label}"는 1바퀴부터 다시 해. 회의 차례는 늘 새 대화라 참석자의 저장된 대화는 그대로 둬.', { label }));
     else if (fresh.length) logLine(m, 'resume', tr('끊긴 단계 담당({names})은 새 대화로 시작해.', { names: fresh.map(name).join(', ') }));
     if (stage?.ids) logLine(m, 'resume', tr('"{label}" 단계에서 이미 끝낸 {names}의 답은 다시 돌지 않고 그대로 써.', { label, names: [...doneIds].map(name).join(', ') }));
     // 정상으로 건너뛴 단계는 못 찾은 것으로 세지 않는다. 준비 대목은 모으는 단계가 아니다(조사 노트·회의 결론은 목표에 적어 둔 메시지에서 다시 만든다)

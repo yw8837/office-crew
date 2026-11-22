@@ -641,9 +641,7 @@ function Welcome({ s }) {
 // 일 카드 단계(결정 0018)에 마우스를 올리면 그 단계의 카드 제목(그 목표의 카드일 때만)
 const cardTitles = (s, run, st) => {
   if (st.mission !== 'cards' || !st.cardIds?.length || s.mission?.id !== run.missionId) return '';
-  return `
-${st.cardIds.map((id) => { const c = (s.mission.cards || []).find((x) => x.id === id); return c ? `${id} · ${c.title}` : id; }).join('
-')}`;
+  return '\n' + st.cardIds.map((id) => { const c = (s.mission.cards || []).find((x) => x.id === id); return c ? `${id} · ${c.title}` : id; }).join('\n');
 };
 
 // 목표의 판정 뒤 묻기·호출 상한으로 기다리는 단계면 단계 띠에 보일 표시(아니면 ''). 끝난 판정 단계가 ✓ 로 보여 다 끝난 것처럼 읽히지 않게(결정 0015)

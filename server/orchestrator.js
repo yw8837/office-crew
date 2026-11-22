@@ -1605,7 +1605,7 @@ export class Orchestrator {
       ].join('\n');
     }
     // 조사: 회의에서 나온 질문 하나를 도구로 찾아 온다. 찾는 데 필요한 읽기·검색만 하게 한다(회의의 "글로만 답해"는 붙이지 않는다).
-    // 권한 단계는 낮추지 않으므로, 수정·실행 권한이 있는 에이전트는 이 지시문 말고는 막는 장치가 없다
+    // 목표 실행에서는 그 실행만 읽기 전용으로 돌린다(#runAgent, 결정 0017). 목표가 아닌 회의는 권한 단계를 낮추지 않으므로, 수정·실행 권한이 있는 에이전트는 이 지시문 말고는 막는 장치가 없다
     if (meet.phase === 'research') {
       return [
         tr('[회의 — 조사 ({r}/{n}바퀴)]', { r: meet.round, n: meet.rounds }), head,
@@ -1876,6 +1876,10 @@ export class Orchestrator {
     let base = this.store.get('agents', agentId);
     // 세션이 정한 덮어쓰기(예: 스킬 번역은 읽기 전용으로) — 저장된 에이전트는 그대로
     if (base && s.agentOverride && typeof s.agentOverride === 'object') base = { ...base, ...s.agentOverride };
+    // 조사 차례(훑어보기·조사, 목표 실행의 회의 중 조사)는 그 실행만 읽기 전용(plan)으로 돌린다(결정 0017). 저장된 에이전트 설정은 그대로.
+    // researchRun: 시스템 지시의 권한 문장을 조사용으로(그 AI가 읽기 전용을 실제로 막는지에 맞춰)
+    const researchTurn = ['scan', 'research'].includes(given?.prep?.kind) || (ctx.missionTurn === 'work' && ctx.meet?.get(agentId)?.phase === 'research');
+    if (base && researchTurn) base = { ...base, permission: 'plan', researchRun: true };
     // 뺀 Codex 계정을 가리키는 에이전트는 기본 Codex 로 실행한다
     if (base && /^codex-[a-z0-9]+$/.test(base.provider || '') && !PROVIDERS[base.provider]) base = { ...base, provider: 'codex' };
     const routed = await this.#route(ctx, stageIdx, base, once?.phase || null);
@@ -2142,6 +2146,9 @@ export class Orchestrator {
   // → { text: 시스템 지시, notesHash: 그 안의 역할 노트 블록 해시(이어 가는 대화에 다시 줄지 정할 때), notesError: 역할 노트 파일을 못 읽어서 노트 없이 만듦 }
   #system(agent, cwd, canAsk = false, request = '') {
     // 비대화형 실행에선 권한 요청이 자동 거부되므로, 할 수 있는 일을 미리 알려 헛시도·빈 답을 막는다(실측)
+    // 조사 실행(결정 0017): 그 AI가 읽기 전용을 실제로 막는지(caps.permissions: CLI 인자나 앱이 막는다), 도구만 있고 못 막는지, 도구가 없는지
+    const researchPerm = (caps = {}) => (caps.permissions ? tr('권한: 이번 조사 실행은 읽기 전용이야. 파일 수정·명령 실행은 막혀 있으니 시도하지 말고, 읽기·검색·웹 도구로 찾아.')
+      : caps.tools ? tr('권한: 이번 조사에서는 파일을 고치거나 명령을 실행하지 마. 읽기와 검색만 해.') : tr('이번 조사는 도구 없이 네가 아는 것으로 답해. 확인하지 못한 건 "확인 못 함"으로 적어.'));
     const PERM_NOTE = {
       plan: tr('권한: 읽기 전용이야. 명령 실행·파일 수정은 거부되니 시도하지 말고, 받은 자료와 네 지식으로 답해.'),
       default: tr('권한: 위험한 명령·수정은 자동 거부될 수 있어. 거부되면 우회하지 말고 할 수 있는 범위에서 답해.'),
@@ -2151,7 +2158,7 @@ export class Orchestrator {
       tr('너는 로컬 앱 "오피스 크루"에서 일하는 에이전트 "{name}"(역할: {role})야.', { name: agent.name, role: agent.role || tr('일반') }),
       agent.systemPrompt || '',
       tr('작업 폴더: {path}', { path: cwd }),
-      PERM_NOTE[agent.permission] || '',
+      agent.researchRun ? researchPerm(PROVIDERS[agent.provider]?.caps) : PERM_NOTE[agent.permission] || '',
       // 읽기 전용 실행은 작업 폴더의 설정을 읽지 않으니(훅 차단) 프로젝트 규칙은 직접 읽게 한다
       agent.permission === 'plan' && PROVIDERS[agent.provider]?.caps?.tools ? tr('작업 폴더에 CLAUDE.md·AGENTS.md 같은 프로젝트 규칙 파일이 있으면 먼저 읽어.') : '',
       roleKind(agent.role) === 'review' ? tr('검수 규칙: 남이 쓴 "다 했다·통과했다" 같은 결론(앞 단계 결과·문서·커밋 메시지 포함)은 믿지 말고, 네가 직접 확인한 증거(파일 내용, 명령·테스트 실행 결과)로만 판정해. 판정마다 근거(파일:줄이나 실행 출력)를 붙이고, 확인 못 한 항목은 "확인 못 함"으로 따로 적어.') : '',

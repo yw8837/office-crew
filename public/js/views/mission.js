@@ -29,9 +29,9 @@ function prepEstimate(pp, on) {
   const parts = [];
   if (on.research) parts.push(t('조사 {min}~{max}번(훑어보기 1 + 질문 뽑기 1 + 질문마다 1, 질문 {a}~{b}개)', { min: pp.research.min, max: pp.research.max, a: pp.research.min - 2, b: pp.research.max - 2 }));
   if (on.meeting) {
-    // 1바퀴 입장이 모두 같으면 차례 바퀴를 건너뛰어 덜 든다(결정 0017. 서버가 센 fewer 가 calls 보다 작을 때만)
+    // 1바퀴에 반대편을 포함한 모두의 입장이 같으면 차례 바퀴를 건너뛰어 덜 든다(결정 0017. 서버가 센 fewer 가 calls 보다 작을 때만)
     const fewer = pp.meeting.fewer && pp.meeting.fewer < pp.meeting.calls ? pp.meeting.fewer : 0;
-    parts.push(fewer ? t('회의 약 {n}번(참석자 {p}명 · {r}바퀴, 1바퀴 입장이 모두 같으면 {f}번으로 줄어)', { n: pp.meeting.calls, p: pp.meeting.who.length, r: pp.meeting.rounds, f: fewer })
+    parts.push(fewer ? t('회의 약 {n}번(참석자 {p}명 · {r}바퀴, 1바퀴에 반대편을 포함한 모두의 입장이 같으면 {f}번으로 줄어)', { n: pp.meeting.calls, p: pp.meeting.who.length, r: pp.meeting.rounds, f: fewer })
       : t('회의 약 {n}번(참석자 {p}명 · {r}바퀴)', { n: pp.meeting.calls, p: pp.meeting.who.length, r: pp.meeting.rounds }));
     if (pp.meeting.checks) parts.push(t('회의 중 조사로 최대 {n}번 더', { n: pp.meeting.checks }));
   }

@@ -30,7 +30,12 @@ const shown = (c) => ({ goal: c.goal, criteria: c.criteria, outOfScope: c.outOfS
 const idle = (sid) => !t.app.orch.ctx.has(sid);
 const ctl = (sid, action, extra = {}) => t.api('POST', `/api/sessions/${sid}/control`, { action, ...extra });
 const cardOf = (sid) => S(sid).messages.findLast((m) => m.role === 'proposal' && m.kind === 'goal');
-const done = (sid, get = S, isIdle = idle) => t.waitFor(() => isIdle(sid) && !['active', 'waiting'].includes(get(sid).mission.status), 60000, '목표 끝');
+// 시간 안에 안 끝나면 어디서 멈췄는지(목표 상태·대기·단계·최근 진행 기록·오류 답)를 같이 적는다
+const done = (sid, get = S, isIdle = idle) => t.waitFor(() => isIdle(sid) && !['active', 'waiting'].includes(get(sid).mission.status), 60000, '목표 끝').catch((e) => {
+  const s = get(sid);
+  const run = s.runs.at(-1);
+  throw new Error(`${e.message}: ${JSON.stringify({ status: s.mission?.status, hold: run?.hold || null, stages: run?.stages.map((x) => `${x.mission || x.label}:${x.status}`), log: (s.mission?.log || []).slice(-4).map((x) => x.text), errors: s.messages.filter((m) => m.role === 'agent' && m.status === 'error').slice(-3).map((m) => String(m.error || '').slice(0, 120)) })}`);
+});
 const waitHold = (sid, reason) => t.waitFor(() => S(sid).runs.at(-1)?.hold?.reason === reason && S(sid).runs.at(-1), 30000, `${reason} 대기`);
 // 가짜 CLI 기록: 도우미의 fakeLog() 는 한 줄이라도 못 읽으면(다른 CLI 가 쓰는 중인 줄) 빈 목록을 돌려줘서 "여기부터" 번호가 0 이 될 수 있다.
 // 이 파일은 끝까지 쓴 줄(줄바꿈으로 끝난 줄)만 센다
@@ -650,7 +655,7 @@ test('13. 끊김 4대목 이어서: 훑어보기·조사 질문·조사·준비 
     const cs = calls(from);
     const prepCalls = cs.filter((c) => c.texts.length && isPrepPrompt(c.texts[0]));
     assert.ok(prepCalls.length > 0 && prepCalls.every((c) => !c.args.includes('--resume') && !c.texts[0].includes('[이어서]')), `${k.at}: 준비 대목은 새 대화`);
-    assert.equal(s.mission.calls.used, used + cs.length);
+    assert.equal(s.mission.calls.used, used + cs.length, `${k.at}: 호출 ${used} + 새 CLI ${cs.length}, 못 읽은 기록 줄 ${fakeLog().slice(from).filter((l) => !l.cli).length}, 새 실행 답 ${JSON.stringify(agentMsgs(s, (x) => x.runId === run.id).map((x) => [x.prep?.kind || (x.meeting ? `m:${x.meeting.phase}` : x.review ? 'review' : 'work'), x.status, ...(x.error ? [String(x.error).slice(0, 80)] : [])]))}`);
     // 일 단계(이어 가는 대화가 있는 조사·분석 담당과, 대화가 없어 [이전 대화]를 받는 빌드 담당 모두): 조사 답의 "지시" 줄은 조사 노트 표식 안에만
     const work = cs.filter((c) => c.texts.length && /"(조사|분석|빌드)"를 네가 맡았어/.test(c.texts[0]) && !c.texts[0].includes('[회의 — '));
     assert.equal(work.length, 3);

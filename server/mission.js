@@ -329,12 +329,25 @@ export function prepPlan(team, agents, leadId = null) {
   return { researchers, scannerId: researchers[0] || null, attendees, leadIn, research: leadIn && researchers.length > 0, meeting: leadIn && attendees.length >= 2 };
 }
 
-// 회의 한 번의 호출 수(지금 회의 엔진 그대로, 회의 중 조사는 빼고): 1바퀴 의견 p + 2바퀴부터 진행자를 뺀 차례 (p-1)씩 + 마지막 바퀴를 뺀 판정 + 결론 1.
-// 합의로 일찍 끝나면 이보다 적다. 참석자가 둘 미만이면 회의가 아니라 0
+// 목표 실행의 회의에서 1바퀴 의견 뒤에 진행자가 판정을 한 번 하는가(입장이 모두 같으면 차례 바퀴를 건너뛰려고, 결정 0017).
+// 건너뛸 차례 바퀴(차례와 그 사이 판정)가 판정 한 번보다 많이 들 때만 한다: 참석자 둘·2바퀴 회의는 차례가 한 번뿐이라 하지 않는다
+export function firstJudge(p, rounds = PREP_ROUNDS) {
+  const r = Math.max(1, Math.round(rounds) || 1);
+  return p >= 2 && r >= 2 && (r - 1) * (p - 1) + Math.max(0, r - 2) > 1;
+}
+
+// 목표 실행의 회의 한 번의 호출 수(회의 중 조사는 빼고): 1바퀴 의견 p + (firstJudge 면) 1바퀴 뒤 판정 1 + 2바퀴부터 진행자를 뺀 차례 (p-1)씩
+// + 마지막 바퀴를 뺀 판정 + 결론 1. 합의로 일찍 끝나면 이보다 적다. 참석자가 둘 미만이면 회의가 아니라 0
 export function meetingCalls(p, rounds = PREP_ROUNDS) {
   if (!(p >= 2)) return 0;
   const r = Math.max(1, Math.round(rounds) || 1);
-  return p + (r - 1) * (p - 1) + Math.max(0, r - 2) + 1;
+  return p + (firstJudge(p, r) ? 1 : 0) + (r - 1) * (p - 1) + Math.max(0, r - 2) + 1;
+}
+
+// 1바퀴 입장이 모두 같아 차례 바퀴를 건너뛰면 드는 호출 수(의견 p + 판정 1 + 결론 1). 건너뛸 수 없는 회의는 meetingCalls 와 같다
+export function meetingCallsMin(p, rounds = PREP_ROUNDS) {
+  if (!(p >= 2)) return 0;
+  return firstJudge(p, rounds) ? p + 2 : meetingCalls(p, rounds);
 }
 
 // 목표 카드에 싣는 "조사·회의 먼저" 줄(화면이 그대로 보여 주고, 확인할 때 고른 값과 보여 주던 진행자·담당·참석자를 같이 보낸다).
@@ -351,7 +364,7 @@ export function prepCard(team, agents, leadId = null, direct = false) {
     direct: !!direct,
     lead: { id: lead, name: byId.get(lead)?.name || lead, inTeam: pp.leadIn },
     research: { can: pp.research, on: pp.research && !direct, who: who(pp.researchers), min: 2 + 1, max: 2 + Q_COUNT },
-    meeting: { can: pp.meeting, on: pp.meeting && !direct, who: who(pp.attendees), rounds: PREP_ROUNDS, calls: meetingCalls(pp.attendees.length), checks: pp.researchers.some((id) => id !== chair) ? CHECK_MAX : 0 },
+    meeting: { can: pp.meeting, on: pp.meeting && !direct, who: who(pp.attendees), rounds: PREP_ROUNDS, calls: meetingCalls(pp.attendees.length), fewer: meetingCallsMin(pp.attendees.length), checks: pp.researchers.some((id) => id !== chair) ? CHECK_MAX : 0 },
   };
 }
 

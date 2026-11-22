@@ -181,7 +181,7 @@ function planAnswer(roster) {
       done: k === 0 ? tr('요점 3개가 있다') : tr('결과 파일이 작업 폴더에 있다'),
     };
   });
-  return `${tr('일을 카드로 나눴어(데모).')}\n\n\`\`\`oc-plan\n${JSON.stringify({ cards })}\n\`\`\``;
+  return `${tr('일을 카드로 나눴어(데모).')}\n\n\`\`\`oc-cards\n${JSON.stringify({ cards })}\n\`\`\``;
 }
 const cardTurn = (prompt) => String(prompt).match(new RegExp(`^${esc(tr('[일 카드 {id}]')).replace('\\{id\\}', '(k\\d+)')}$`, 'm'))?.[1] || null;
 

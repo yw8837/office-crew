@@ -596,7 +596,7 @@ export function conclusionPrompt({ name = '', text = '' } = {}, mark = randomByt
 }
 
 // ── 일 카드(결정 0018) ──
-// 진행자가 목표를 일 카드 몇 장으로 나눠 팀원에게 맡기고(답 맨 끝의 ```oc-plan 블록), 코드가 다듬어 번호를 붙이고 단계(물결)로 나눈다.
+// 진행자가 목표를 일 카드 몇 장으로 나눠 팀원에게 맡기고(답 맨 끝의 ```oc-cards 블록), 코드가 다듬어 번호를 붙이고 단계(물결)로 나눈다.
 // 순서는 앞 카드의 결과물이 실제로 필요할 때(needs)만 걸리고, 같은 담당·같은 파일·파일을 안 적은 만들기·글 카드는 코드가 다른 단계로 민다
 export const CARD_COUNT = 6; // 일 카드 최대 장수(넘으면 자른다)
 export const CARD_MIN = 2; // 프롬프트가 부탁하는 최소 장수(한 장만 와도 받는다)
@@ -610,8 +610,8 @@ export const CARD_TRIES = 3; // 카드 하나를 시작하는 횟수 상한(처�
 export const CARD_RATE = 20; // 목표 하나가 한 시간 안에 시작할 수 있는 카드 수(넘으면 묻는다)
 export const HOUR = 3600000;
 export const CARD_KINDS = ['research', 'write', 'build', 'check'];
-const PLAN_OPEN = '```oc-plan';
-const PLAN_LAST = /^```oc-plan[ \t]*\r?\n([\s\S]*?)```\s*$/; // 글의 맨 끝에 있는 블록만 계획이다
+const PLAN_OPEN = '```oc-cards';
+const PLAN_LAST = /^```oc-cards[ \t]*\r?\n([\s\S]*?)```\s*$/; // 글의 맨 끝에 있는 블록만 계획이다
 
 // 계획 다듬기: 제목이 없는 카드는 빼고 CARD_COUNT 장까지, 코드가 적힌 순서대로 k1… 를 붙인다(모델이 id 를 정하지 않는다).
 // needs 는 모델이 적은 순서의 "k숫자"를 가리키고 앞 카드만 받는다(자기·뒤·없는·빠진 카드는 버린다 → 돌고 도는 순서가 생길 수 없다).
@@ -636,7 +636,7 @@ export function cleanPlan(raw) {
   return cards;
 }
 
-// text 의 맨 끝에 있는 oc-plan 블록을 읽는다. 없으면 null(끝이 아닌 곳의 블록도), JSON 이 아니면 { error: 'json' }, 카드가 하나도 없으면 { error: 'shape' },
+// text 의 맨 끝에 있는 oc-cards 블록을 읽는다. 없으면 null(끝이 아닌 곳의 블록도), JSON 이 아니면 { error: 'json' }, 카드가 하나도 없으면 { error: 'shape' },
 // 맞으면 { cards(다듬은 값), from, to }(블록의 자리)
 export function parsePlan(text) {
   const src = String(text || '');
@@ -651,7 +651,7 @@ export function parsePlan(text) {
   if (!cards.length) return { error: 'shape', from, to };
   return { cards, from, to };
 }
-export const planBlock = () => `\`\`\`oc-plan\n${JSON.stringify({ cards: [
+export const planBlock = () => `\`\`\`oc-cards\n${JSON.stringify({ cards: [
   { title: tr('할 일 한 줄'), owner: tr('팀 명단의 이름'), kind: 'research|write|build|check', needs: [], files: [tr('맡을 파일이나 폴더')], not: tr('건드리면 안 되는 것'), done: tr('끝났다고 볼 기준') },
   { title: tr('할 일 한 줄'), owner: tr('팀 명단의 이름'), kind: 'build', needs: ['k1'], files: [tr('맡을 파일이나 폴더')], not: '', done: tr('끝났다고 볼 기준') },
 ] })}\n\`\`\``;
@@ -754,7 +754,7 @@ export function wavesLine(waves) {
 // retry: 'format'(블록을 못 읽음) | 'owner'(명단에 없는 담당 이름, missing)
 export function planPrompt({ roster = [], refs = [], retry = '', missing = [], mark = randomBytes(4).toString('hex'), ...o } = {}) {
   return [
-    retry === 'format' ? tr('[일 계획 다시 쓰기] 앞 답의 끝에서 계획 블록(oc-plan)을 읽지 못했어. 같은 계획을 아래 형식에 맞춰 블록 하나로 다시 써.') : '',
+    retry === 'format' ? tr('[일 계획 다시 쓰기] 앞 답의 끝에서 계획 블록(oc-cards)을 읽지 못했어. 같은 계획을 아래 형식에 맞춰 블록 하나로 다시 써.') : '',
     // 명단에 없던 이름은 진행자(에이전트)가 쓴 글이라 무작위 표식 안에
     retry === 'owner' ? `${tr('[담당 다시 고르기] 앞 계획의 담당 가운데 팀 명단에 없는 이름이 있었어(아래 "이름 {mark}" 표시 사이). 담당은 아래 명단의 이름 그대로 써서 같은 계획을 블록 하나로 다시 써.', { mark })}\n--- ${tr('이름 {mark} 시작', { mark })} ---\n${missing.map(plainName).join('\n')}\n--- ${tr('이름 {mark} 끝', { mark })} ---` : '',
     tr('[일 계획]'),

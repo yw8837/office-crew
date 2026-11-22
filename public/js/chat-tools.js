@@ -75,7 +75,7 @@ export function hideResearch(text, block = null, streaming = false) {
   return streaming ? out.replace(/```oc-research[\s\S]*$/, '') : out;
 }
 
-// 진행자 답 끝의 계획 블록(oc-plan)은 계획 카드로, 일 단계 답 끝의 막힘 블록(oc-blocked)은 "막힘: 이유" 줄로 보여 주니 본문에서는 뺀다(결정 0018, hideGoal 과 같은 방식).
+// 진행자 답 끝의 계획 블록(oc-cards)은 계획 카드로, 일 단계 답 끝의 막힘 블록(oc-blocked)은 "막힘: 이유" 줄로 보여 주니 본문에서는 뺀다(결정 0018, hideGoal 과 같은 방식).
 // 받지 않은 블록(형식이 깨진 것)은 그대로 보인다. 쓰는 중이면 끝의 블록도 감춘다
 const hideBlock = (name) => (text, block = null, streaming = false) => {
   const src = String(text || '');
@@ -83,7 +83,7 @@ const hideBlock = (name) => (text, block = null, streaming = false) => {
   const out = ok ? src.slice(0, block.from) + src.slice(block.to) : src;
   return streaming ? out.replace(new RegExp(`\`\`\`${name}[\\s\\S]*$`), '') : out;
 };
-export const hidePlan = hideBlock('oc-plan');
+export const hidePlan = hideBlock('oc-cards');
 export const hideBlocked = hideBlock('oc-blocked');
 
 // 검수 답 끝의 판정 블록(oc-review)은 기준표로 보여 주니 본문에서는 뺀다(hideGoal 과 같은 방식, 결정 0015).

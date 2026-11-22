@@ -1,4 +1,4 @@
-// 목표 모드 2c(결정 0018): 일 카드. 목표를 확인할 때 "일 카드로 나눠 하기"를 고르면, 진행자가 한 번 실행(읽기 전용)으로 계획(oc-plan)을 쓰고
+// 목표 모드 2c(결정 0018): 일 카드. 목표를 확인할 때 "일 카드로 나눠 하기"를 고르면, 진행자가 한 번 실행(읽기 전용)으로 계획(oc-cards)을 쓰고
 // 코드가 다듬어 번호를 붙이고 단계(물결)로 나눈다. 카드마다 담당이 자기 카드 프롬프트(확정 목표 + 표식 안의 카드 글·기다린 카드의 결과)를 받아 일하고, 기준 판정으로 간다.
 // 같이 바뀐 것(결정 0014·0015 개정): 기준마다 확인 방법(check)·바뀌면 안 되는 것(keep), 막힘 출구(oc-blocked), 판정의 남은 일(extras)·지키기로 한 것을 어김(keepBroken),
 // 근거 없는 불합격은 확인 못 함, 두 번째 되돌림의 "가정 적기", git 이 알려 준 바뀐 파일. 가짜 CLI 만 쓴다(실제 AI 사용량 0).
@@ -139,14 +139,14 @@ test('1. 순수 함수: 계획 다듬기·읽기, 담당 대조, 못 쓰는 팀,
   assert.equal(cleanPlan({ cards: Array.from({ length: 9 }, (_, k) => ({ title: `c${k}` })) }).length, CARD_COUNT);
   assert.equal(cleanPlan({ cards: [{ title: '가'.repeat(300) }] })[0].title.length, TITLE_MAX);
   // 읽기: 맨 끝 블록만
-  const blk = (o) => `계획이야.\n\n\`\`\`oc-plan\n${typeof o === 'string' ? o : JSON.stringify(o)}\n\`\`\``;
+  const blk = (o) => `계획이야.\n\n\`\`\`oc-cards\n${typeof o === 'string' ? o : JSON.stringify(o)}\n\`\`\``;
   assert.equal(parsePlan('없음'), null);
   assert.equal(parsePlan(`${blk({ cards: [{ title: 'a' }] })}\n뒤에 글`), null, '블록 뒤에 글이 있으면 계획이 아니다');
   assert.equal(parsePlan(blk('{망가진')).error, 'json');
   assert.equal(parsePlan(blk({ cards: [] })).error, 'shape');
   const p = parsePlan(blk({ cards: [{ title: 'a', owner: 'x' }] }));
-  assert.deepEqual([p.cards.length, blk({ cards: [{ title: 'a', owner: 'x' }] }).slice(p.from, p.to).startsWith('```oc-plan')], [1, true]);
-  assert.ok(planBlock().startsWith('```oc-plan\n') && planBlock().includes('"needs":["k1"]'));
+  assert.deepEqual([p.cards.length, blk({ cards: [{ title: 'a', owner: 'x' }] }).slice(p.from, p.to).startsWith('```oc-cards')], [1, true]);
+  assert.ok(planBlock().startsWith('```oc-cards\n') && planBlock().includes('"needs":["k1"]'));
   // 명단·담당 대조·대신 맡길 사람: 검수 역할과 검수자는 명단에서 빠진다
   const A = [{ id: 'lead', name: '진행', role: '조사' }, { id: 'b', name: 'Builder', role: '빌드' }, { id: 'w', name: '글쓴이', role: '작성' }, { id: 'v', name: '검수', role: '검수' }];
   const T = (...stages) => ({ stages: stages.map((x) => (Array.isArray(x) ? { agentIds: x } : x)) });
@@ -266,7 +266,7 @@ test('3. 끝까지: 일 카드를 고르면 계획(한 번 실행, 읽기 전용
   assert.ok(m.log.some((x) => x.text === '진행자가 일을 일 카드로 나눠 맡겨(팀 단계표의 단계는 이번 목표에서 돌지 않아).'));
   // 계획 답: 한 번 실행(prep: plan, 기억에 안 넣음), 블록 자리
   const planMsg = s.messages.find((x) => x.prep?.kind === 'plan');
-  assert.ok(planMsg.once && planMsg.planBlock && planMsg.text.slice(planMsg.planBlock.from).startsWith('```oc-plan'));
+  assert.ok(planMsg.once && planMsg.planBlock && planMsg.text.slice(planMsg.planBlock.from).startsWith('```oc-cards'));
   // 프로세스: 계획은 읽기 전용(plan)·--resume 없이. 팀 단계표의 검수 단계(V)는 일하지 않았다(V 는 검수만)
   const cs = calls(from);
   const planCall = cs.find((c) => c.texts.some((p) => /^\[일 계획\]$/m.test(p)));
@@ -319,7 +319,7 @@ test('5. 계획 블록·담당 이름: 깨지면 한 번 다시(PLANBAD), 두 �
   assert.equal(S(bad).mission.status, 'done');
   const pm = S(bad).messages.filter((x) => x.prep?.kind === 'plan');
   assert.deepEqual(pm.map((x) => [!!x.prep.retried, !!x.planBlock]), [[false, false], [true, true]]);
-  assert.ok(pm[0].blocks.some((x) => x.kind === 'notice' && x.text.includes('계획 블록(oc-plan)을 읽지 못해서 한 번 다시')));
+  assert.ok(pm[0].blocks.some((x) => x.kind === 'notice' && x.text.includes('계획 블록(oc-cards)을 읽지 못해서 한 번 다시')));
   assert.ok(prompts(f1).some((p) => p.startsWith('[일 계획 다시 쓰기]')));
   assert.equal(S(bad).mission.cards.length, 2);
   const bad2 = await goal(tm.id, 'PLANBAD2');

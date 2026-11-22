@@ -19,7 +19,7 @@ import { storageReport, cleanup } from './storage.js';
 import { listImportable, readTranscript } from './importer.js';
 import { saveImported, handoffRequest, removeHandoff } from './handoff.js';
 import { ACP_PRESETS } from './providers/acp.js';
-import { resolveCommand } from './providers/util.js';
+import { resolveCommand, fakeOnlyError } from './providers/util.js';
 import { initProcTracker, reapLeftovers, otherAppRunning } from './providers/procs.js';
 import { SessionWatch } from './watch.js';
 import { Board } from './board.js';
@@ -282,6 +282,9 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   route('POST', '/api/providers/([\\w-]+)/login', async (req, url, [id]) => {
     const p = PROVIDERS[id];
     if (!p?.login) throw new HttpError(400, tr('이 프로바이더는 로그인 대신 설정에서 API 키를 넣어줘.'));
+    // 가짜 CLI만 허용된 실행(테스트)에선 로그인 터미널을 열지 않는다(터미널은 셸이 명령을 찾아서 어느 CLI가 뜰지 보장할 수 없다)
+    const blocked = fakeOnlyError(p.login.command, null);
+    if (blocked) throw new HttpError(400, blocked.message);
     const ok = openTerminal(p.login.command, p.login.env);
     return { ok, command: p.login.command, hint: tr(p.login.hint) };
   });

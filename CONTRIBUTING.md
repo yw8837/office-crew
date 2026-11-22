@@ -52,6 +52,8 @@ The tests start the real server against a temporary data folder and put **fake C
 
 Please add or update a test for any behavior change. A bug fix should come with a test that fails without the fix.
 
+To wait for something in a test, use `waitFor(condition, { timeout, what })` from `test/helpers.js` instead of a fixed sleep such as `await sleep(300)`. `test/hygiene.test.js` counts fixed sleeps in `test/*.test.js` and fails when there are more than `fixedSleeps` in `test/hygiene-baseline.json`; when you remove some, lower that number to the new count (the test prints it).
+
 ## Coding style
 
 - **No runtime dependencies.** The server uses Node.js built-ins only (`node:http`, `node:child_process`, `node:fs`, …). The UI uses only the vendored Preact and htm in `public/vendor/`. Please don't add packages to `package.json`. If you think one is unavoidable, open an issue first.
@@ -166,7 +168,7 @@ This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md). Please be k
   npm start -- --home ./.office-crew
   ```
   `--home ./.office-crew`를 붙이면 개발용 데이터가 실제 `~/.office-crew`와 섞이지 않습니다.
-- **테스트:** `npm test`. 가짜 CLI(`test/fake-cli/`)로 실제 어댑터·실행 엔진·HTTP API를 끝까지 검증하므로 AI 사용량을 쓰지 않습니다.
+- **테스트:** `npm test`. 가짜 CLI(`test/fake-cli/`)로 실제 어댑터·실행 엔진·HTTP API를 끝까지 검증하므로 AI 사용량을 쓰지 않습니다. 테스트에서 기다릴 땐 고정 시간 잠자기 대신 `test/helpers.js`의 `waitFor(조건, { timeout, what })`를 써 주세요. 잠자기 개수가 `test/hygiene-baseline.json`의 `fixedSleeps`보다 늘면 `test/hygiene.test.js`가 실패하고, 줄였으면 그 값을 새 개수로 낮춥니다.
 - **코드 스타일:** 런타임 의존성 추가 금지(Node.js 기본 모듈과 `public/vendor/`의 Preact·htm만 사용), ES 모듈, 빌드 과정 없음, 주석은 한국어나 영어 모두 괜찮습니다. 에이전트 출력은 반드시 `public/js/markdown.js`를 거쳐 이스케이프하고, CLI는 `server/providers/util.js`의 `spawnCli`로 셸 없이 실행합니다.
 - **프로바이더 추가:** 위 [Adding a provider adapter](#adding-a-provider-adapter)의 계약과 체크리스트를 따라 주세요.
 - **큰 변경은** 먼저 이슈를 열어 방향을 맞춘 뒤 작업해 주세요.

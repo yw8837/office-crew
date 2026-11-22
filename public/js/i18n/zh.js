@@ -592,6 +592,7 @@ export default {
   '추가 지시 반영: {text}': '已采纳追加指令：{text}',
   '셸 실행에 안전하지 않은 인자: {arg}': '不安全的 Shell 参数：{arg}',
   '{name} 명령을 찾을 수 없어. 설치했는지 확인해줘.': '找不到 {name} 命令。请确认是否已安装。',
+  '가짜 CLI만 허용된 실행(OFFICE_CREW_FAKE_ONLY)이라 진짜 {name} 명령을 띄우지 않았어.': "此次运行只允许假 CLI（OFFICE_CREW_FAKE_ONLY），因此没有启动真正的 {name} 命令。",
   '시간 초과': '超时',
   'Claude Code CLI · 구독 로그인': 'Claude Code CLI · 订阅登录',
   '열린 터미널에서 /login 을 입력해 로그인해줘.': '请在打开的终端中输入 /login 登录。',

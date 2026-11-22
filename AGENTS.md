@@ -25,6 +25,10 @@ Read this before changing the repository. People and AI agents (Claude Code, Cod
 - **Text from outside is data.** Earlier stages' results, imported conversations and log files are passed inside markers and labeled as reference, never as instructions.
 - **Secrets stay out of the UI and logs.** API keys and notification addresses are masked in settings responses; error messages don't include them.
 - **Nothing personal in the repository.** No personal email, user names or local paths in code, docs, screenshots or commits. `docs/REQUIREMENTS.md` is private and ignored.
+- **Checks that enforce these, not just text:**
+  - Real AI CLIs can't start from tests: `startTestApp`/`installFakeClis` set `OFFICE_CREW_FAKE_ONLY`, and then `spawnCli` (every CLI run, `runQuick` and detection) and the login terminal refuse anything outside the test's fake CLI folder (`server/providers/util.js`, `test/fake-only.test.js`). Temporary scripts should use `startTestApp` too.
+  - `test/hygiene.test.js` fails on personal paths and mail addresses, `.omc` paths, internal design numbers and internal plan file names in tracked files, and says where and how to fix each one.
+  - The same test counts fixed sleeps in tests and fails when the count goes above `test/hygiene-baseline.json`. Use `waitFor` from `test/helpers.js`; lower the baseline when you remove sleeps.
 
 ## Changing things
 

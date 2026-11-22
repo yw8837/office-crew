@@ -592,6 +592,7 @@ export default {
   '추가 지시 반영: {text}': 'Applied extra instruction: {text}',
   '셸 실행에 안전하지 않은 인자: {arg}': 'Argument not safe for shell execution: {arg}',
   '{name} 명령을 찾을 수 없어. 설치했는지 확인해줘.': "Can't find the {name} command. Check that it's installed.",
+  '가짜 CLI만 허용된 실행(OFFICE_CREW_FAKE_ONLY)이라 진짜 {name} 명령을 띄우지 않았어.': "This run allows fake CLIs only (OFFICE_CREW_FAKE_ONLY), so the real {name} command wasn't started.",
   '시간 초과': 'Timed out',
   'Claude Code CLI · 구독 로그인': 'Claude Code CLI · subscription login',
   '열린 터미널에서 /login 을 입력해 로그인해줘.': 'Type /login in the terminal that opened to log in.',

@@ -5,7 +5,7 @@ import { makeHandle } from './util.js';
 import { tr } from '../i18n.js';
 import { roleKind } from '../routing.js';
 import { checkBlock } from '../meeting.js';
-import { goalBlock, reviewBlock, researchBlock } from '../mission.js';
+import { goalBlock, reviewBlock, researchBlock, planBlock } from '../mission.js';
 
 // 역할 키(조사·정리·분석·빌드)는 그대로, 보이는 문구만 설정 언어로.
 // 에이전트의 역할 이름은 첫 실행 때 OS 언어로 저장되므로(Research, 調査 …) 역할 종류로 바꿔서 키를 찾는다
@@ -160,6 +160,31 @@ function prepAnswer({ kind, n }, prompt) {
     `- ${tr('그중 1건은 표본이 작아.')} | https://example.test/demo/q${n}/source-b | ${tr('확인함')}`, `- ${tr('반대 결과를 낸 자료는 찾지 못했어.')} | ${tr('없음')} | ${tr('확인 못 함')}`].join('\n');
 }
 
+// ── 일 카드(결정 0018) ──
+// 계획 대목 프롬프트는 "[일 계획]" 줄이 있고 블록 예시(planBlock())로 끝난다. 그 모양일 때만 계획 차례로 보고, 팀 명단("- 이름 (역할)" 줄)의 사람에게 카드를 나눈다:
+// 첫 사람은 조사 카드(파일 없음), 나머지는 저마다 다른 결과 파일을 맡고, 마지막 카드는 첫 카드를 기다린다(단계가 둘로 나뉘는 걸 보이려고)
+function planTurn(prompt) {
+  const p = String(prompt);
+  if (!p.trimEnd().endsWith(planBlock()) || !p.split('\n').includes(tr('[일 계획]'))) return null;
+  const head = `${tr('[팀 명단 — 담당은 이 이름 그대로]')}\n`;
+  const at = p.indexOf(head);
+  const lines = at < 0 ? [] : p.slice(at + head.length).split('\n\n')[0].split('\n');
+  return lines.map((l) => l.match(/^- (.+) \(([^()]*)\)$/)).filter(Boolean).map((m) => ({ name: m[1], role: m[2] }));
+}
+function planAnswer(roster) {
+  const people = roster.slice(0, 3);
+  const cards = people.map((a, k) => {
+    const kind = k === 0 ? 'research' : roleKind(a.role) === 'build' ? 'build' : 'write';
+    return {
+      title: k === 0 ? tr('자료를 모으고 요점을 정리한다(데모)') : tr('결과 {n}을(를) 만든다(데모)', { n: k }), owner: a.name, kind,
+      needs: k > 0 && k === people.length - 1 ? ['k1'] : [], files: k === 0 ? [] : [tr('데모-결과-{n}.md', { n: k })], not: tr('다른 카드의 파일은 고치지 마'),
+      done: k === 0 ? tr('요점 3개가 있다') : tr('결과 파일이 작업 폴더에 있다'),
+    };
+  });
+  return `${tr('일을 카드로 나눴어(데모).')}\n\n\`\`\`oc-plan\n${JSON.stringify({ cards })}\n\`\`\``;
+}
+const cardTurn = (prompt) => String(prompt).match(new RegExp(`^${esc(tr('[일 카드 {id}]')).replace('\\{id\\}', '(k\\d+)')}$`, 'm'))?.[1] || null;
+
 export default {
   id: 'mock', get label() { return tr('데모'); }, get sub() { return tr('가상 에이전트 · 사용량 0'); }, kind: 'mock', color: '#64748b',
   efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -188,8 +213,10 @@ export default {
       const goal = !phase && isGoalTurn(prompt);
       const review = !phase && !goal ? reviewTurn(prompt) : null;
       const prep = !phase && !goal && !review ? prepTurn(prompt) : null;
-      // 회의 중과 목표 잡기·기준 판정·조사 질문 차례에는 도구를 쓰지 않는다(파일을 고치지 말라는 지시와 같게). 훑어보기·조사는 웹 검색만
-      for (const [name, input, ms] of (phase || goal || review || prep?.kind === 'questions' ? [] : prep ? PLANS().조사.slice(0, 1) : PLANS()[roleKey(agent.role)] || [])) {
+      const plan = !phase && !goal && !review && !prep ? planTurn(prompt) : null;
+      const card = !phase && !goal && !review && !prep && !plan ? cardTurn(prompt) : null;
+      // 회의 중과 목표 잡기·기준 판정·조사 질문·일 계획 차례에는 도구를 쓰지 않는다(파일을 고치지 말라는 지시와 같게). 훑어보기·조사는 웹 검색만
+      for (const [name, input, ms] of (phase || goal || review || plan || prep?.kind === 'questions' ? [] : prep ? PLANS().조사.slice(0, 1) : PLANS()[roleKey(agent.role)] || [])) {
         if (stopped) break;
         const id = `t${++n}`;
         emit({ type: 'tool', id, name, input, status: 'running' });
@@ -199,9 +226,11 @@ export default {
         }
         emit({ type: 'tool', id, name, status: 'done', output: tr('{name} 완료(데모)', { name }) });
       }
-      if ((phase || goal || review || prep?.kind === 'questions') && !stopped) await wait(1200); // 읽고 생각하는 시간
+      if ((phase || goal || review || plan || prep?.kind === 'questions') && !stopped) await wait(1200); // 읽고 생각하는 시간
+      // 일 카드 차례는 역할 답 뒤에 끝의 두 칸(바꾼 파일·다음 카드가 알아야 할 것)을 붙인다
+      const tail = card ? `\n\n${tr('바꾼 파일')}: ${agent.permission === 'plan' ? tr('없음') : resultFile()}\n${tr('다음 카드가 알아야 할 것')}: ${tr('{id} 카드는 데모라 결과 파일 하나만 만들었어.', { id: card })}` : '';
       const body = phase ? meetingAnswer(phase, roleKey(agent.role), isOpposer(prompt), asksCheck(prompt), prompt) : goal ? goalAnswer(prompt) : review ? reviewAnswer(review)
-        : prep ? prepAnswer(prep, prompt) : answer(roleKey(agent.role), agent.name, prompt);
+        : prep ? prepAnswer(prep, prompt) : plan ? planAnswer(plan) : answer(roleKey(agent.role), agent.name, prompt) + tail;
       for (let i = 0; i < body.length && !stopped;) {
         const step = 2 + Math.floor(Math.random() * 5);
         const piece = body.slice(i, i + step);

@@ -175,9 +175,9 @@ export class Store {
   #metaOf(s) {
     const last = s.messages.findLast((m) => m.text); // 글이 없는 것(영입 제안·목표 카드)은 건너뛴다
     // 진행자 답 끝의 목표 카드 블록(```oc-goal 부터), 검수 답 끝의 판정 블록(```oc-review 부터), 조사 질문 블록(```oc-research 부터)은 미리보기에 넣지 않는다
-    // (화면에서는 카드·기준표·질문 목록으로 보인다. 결정 0014·0015·0017)
+    // (화면에서는 카드·기준표·질문 목록으로 보인다. 결정 0014·0015·0017). 일 카드의 계획 블록(oc-plan)과 막힘 블록(oc-blocked)도(결정 0018)
     const text = String(last?.text || '');
-    const at = [text.indexOf('```oc-goal'), text.indexOf('```oc-review'), text.indexOf('```oc-research')].filter((i) => i >= 0);
+    const at = [text.indexOf('```oc-goal'), text.indexOf('```oc-review'), text.indexOf('```oc-research'), text.indexOf('```oc-plan'), text.indexOf('```oc-blocked')].filter((i) => i >= 0);
     const cut = at.length ? Math.min(...at) : -1;
     return {
       id: s.id, title: s.title, teamId: s.teamId, agentId: s.agentId, cwd: s.cwd,

@@ -6,7 +6,7 @@
 
 ## Revision 2026-11-20: fewer research turns when a goal is low on calls
 
-In a goal's work run ([0017](0017-goal-mode-research-and-meeting-first.md)) the research turn runs once in a new conversation like the meeting's other turns, and when fewer than a quarter of the goal's call cap is left, research during the meeting is turned off: a question is answered "not checked" without a call (`check.status: 'low'`), with one line in the goal's progress log.
+In a goal's work run ([0017](0017-goal-mode-research-and-meeting-first.md)) the research turn runs once in a new conversation like the meeting's other turns, with the research agent's permission set to read-only for that call only (since 2026-11-22), and when fewer than a quarter of the goal's call cap is left, research during the meeting is turned off: a question is answered "not checked" without a call (`check.status: 'low'`), with one line in the goal's progress log.
 
 ## Context
 

@@ -6,7 +6,7 @@
 
 ## Revision 2026-11-20: meetings inside a goal run start a new conversation
 
-In a goal's work run ([0017](0017-goal-mode-research-and-meeting-first.md)) every meeting turn, in the pre-work meeting and in a team's own meeting stage, runs once in a new conversation: it gets the agenda, the research note and everything said so far, and doesn't continue or change the participant's session conversation. Meetings outside goal mode work as below.
+In a goal's work run ([0017](0017-goal-mode-research-and-meeting-first.md)) every meeting turn, in the pre-work meeting and in a team's own meeting stage, runs once in a new conversation (since 2026-11-22 the opinion also ends with a position line and the turn rounds can be skipped when everyone agrees after round 1, see 0010): it gets the agenda, the research note and everything said so far, and doesn't continue or change the participant's session conversation. Meetings outside goal mode work as below.
 
 ## Revision 2026-11-11: what the usage limit counts
 

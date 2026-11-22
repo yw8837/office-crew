@@ -1348,6 +1348,7 @@ export default {
   "내 말": "My point",
   "입장": "Position",
   "반대편을 뺀 참석자들의 입장이 같은 안을 가리켜. 반대편이 짚은 약점은 결론의 남은 이견에 적을게.": "The positions of everyone except the opposer point to the same option. I will record the weakness the opposer raised under remaining disagreement in the conclusion.",
+  "1바퀴에 반대편을 포함한 모두의 입장이 같은 안을 가리켜. 차례 바퀴 없이 결론을 낼게.": "Everyone, the opposer included, points to the same option after round one. I will conclude without the turn rounds.",
   "모두 같은 안을 가리켜.": "Everyone points to the same option.",
   "버린 안": "Dropped options",
   "새 부품부터 만드는 안은 시험할 시간이 모자라서 버렸어.": "The option of building new parts first was dropped because there is not enough time to test it.",

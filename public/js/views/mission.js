@@ -51,7 +51,8 @@ export function ResearchCard({ m }) {
       <span class=${`chip${m.suspect ? ' warn' : ''}`}>${t('지시처럼 보이는 줄 {n}개', { n: m.suspect || 0 })}</span> <span class=${`chip${m.unsourced ? ' warn' : ''}`}>${t('출처 없는 줄 {n}개', { n: m.unsourced || 0 })}</span>
       <span class="muted">${t('코드가 센 수')}</span></div>`}
     ${m.fallback && html`<div class="warnbox" role="note">${t('진행자 답에서 조사 질문을 읽지 못해서 질문 하나로 조사했어.')}</div>`}
-    ${m.textOnly?.length && html`<div class="warnbox" role="note">${t('{names}의 조사는 읽기 전용을 막는 장치가 없어서 글 지시로만 묶였어.', { names: m.textOnly.map((x) => `${x.name}(${x.ai})`).join(', ') })}</div>`}
+    ${m.textOnly?.length && html`<div class="warnbox" role="note">${t('읽기 전용을 강제하는 장치가 없는 AI로 조사해서, 글 지시로만 묶였어: {names}', { names: m.textOnly.map((x) => `${x.name}(${x.ai})`).join(', ') })}</div>`}
+    ${m.noTools?.length && html`<div class="small muted" role="note">${t('도구가 없는 AI라 검색 없이 아는 것으로만 조사했어: {names}', { names: m.noTools.map((x) => `${x.name}(${x.ai})`).join(', ') })}</div>`}
     ${qs.map((q) => html`<div class="research-q">
       <div class="small"><b>${q.id}</b> · ${q.text} <span class="muted">— ${agentById(q.agentId)?.name || q.agentId}</span>${q.status !== 'done' ? html` <span class="chip warn">${t('확인 못 함')} · ${missChip(q.status)}</span>` : ''}</div>
       ${q.suspect > 0 && html`<div class="warnbox" role="note">${t('이 답에는 지시처럼 보이는 줄이 {n}개 있어. 일 단계에는 그 줄만 빼고 가.', { n: q.suspect })}</div>`}

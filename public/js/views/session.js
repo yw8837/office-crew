@@ -461,7 +461,7 @@ class Message extends Component {
         ${asker?.check && html`<div class="msg-check"><span class="q">🔎 ${t('{name}의 질문', { name: agentById(asker.agentId)?.name || '?' })}: ${asker.check.question}</span></div>`}
         <div class=${`msg-body md${folded ? ' folded' : ''}`} id=${`body-${m.id}`} onFocusCapture=${folded ? () => { this.props.onToggle?.(); this.setState({ open: true }); } : undefined} dangerouslySetInnerHTML=${{ __html: body.trim() ? renderMarkdown(body) : (streaming && !asks.length ? `<p class="muted">${t('작업 중…')}</p>` : '') }}></div>
         ${m.review && !streaming && html`<${ReviewTable} r=${m.review} />`}
-        ${m.blockedBlock?.reason && !streaming && html`<div class="warnbox" role="note">⛔ ${t('막힘: {reason}', { reason: m.blockedBlock.reason })}</div>`}
+        ${m.blockedBlock?.reason && !streaming && html`<div class="warnbox" role="note">⛔ ${m.blockedBlock.accepted ? t('막힘(받아들여서 이 답은 빼고 진행): {reason}', { reason: m.blockedBlock.reason }) : t('막힘: {reason}', { reason: m.blockedBlock.reason })}</div>`}
         ${m.prep?.questions?.length > 0 && html`<div class="notice">🔎 ${t('조사 질문 {n}개 — 조사 담당이 질문마다 찾아 와.', { n: m.prep.questions.length })}<ol class="prep-qs">${m.prep.questions.map((q) => html`<li>${q}</li>`)}</ol></div>`}
         ${asks.length > 0 && html`<div class="notice">🙋 ${t('아래 질문 창에서 답해 줘.')}</div>`}
         ${chip && html`<div class="msg-check"><span class="q">🔎 ${t('확인 필요: {q}', { q: m.check.question })}</span><span class=${`chip${chip[1]}`}>${chip[0]}</span></div>`}

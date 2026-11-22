@@ -283,6 +283,8 @@ export function reviewPrompt({ goal = '', criteria = [], outOfScope = [], keep =
   const show = (text) => { const c = [...String(text)]; return c.length > REVIEW_SHOW ? `${c.slice(0, REVIEW_SHOW).join('')}\n${tr('…(나머지는 작업 폴더의 결과물에서 직접 확인해)')}` : String(text); };
   const material = works.length
     ? works.map((x, k) => (x.stale ? `### ${k + 1}. ${plain(x.label)} — ${plain(x.name)}\n${tr('(되돌림 뒤에 다시 돌지 않은 단계라 그 옛 답은 넣지 않았어. 작업 폴더에서 직접 확인해)')}`
+      // 막혔다고 한 뒤 사용자가 받아들인 담당·카드(결정 0018): 결과는 비었다고 코드가 알리고, 막힌 이유(에이전트가 쓴 글)는 표식 안의 참고 자료로만
+      : x.blocked !== undefined ? `### ${k + 1}. ${plain(x.label)} — ${plain(x.name)}\n${tr('(이 담당은 기준을 지킬 수 없다고 막혔고 사용자가 받아들여서, 이 결과는 비어 있어. 이 담당이 맡은 일은 하지 않은 것으로 보고 작업 폴더에서 직접 확인해. 막힌 이유는 아래 표식 안의 참고 자료야.)')}\n--- ${tr('결과 {mark} 시작', { mark })} ---\n${tr('막힌 이유')}: ${x.blocked}\n--- ${tr('결과 {mark} 끝', { mark })} ---`
       : `### ${k + 1}. ${plain(x.label)} — ${plain(x.name)}\n--- ${tr('결과 {mark} 시작', { mark })} ---\n${show(x.text)}\n--- ${tr('결과 {mark} 끝', { mark })} ---`)).join('\n\n')
     : tr('(팀이 남긴 답이 없어)');
   return [
@@ -750,10 +752,11 @@ export function wavesLine(waves) {
 
 // 계획 대목 프롬프트(진행자 한 번 실행, 읽기 전용): 확정 목표(지시), 사용자 요청, 팀 명단, 규칙, 조사 노트·회의 결론(무작위 표식 안의 참고 자료, refs: 만든 글), 블록 예시.
 // retry: 'format'(블록을 못 읽음) | 'owner'(명단에 없는 담당 이름, missing)
-export function planPrompt({ roster = [], refs = [], retry = '', missing = [], ...o } = {}) {
+export function planPrompt({ roster = [], refs = [], retry = '', missing = [], mark = randomBytes(4).toString('hex'), ...o } = {}) {
   return [
     retry === 'format' ? tr('[일 계획 다시 쓰기] 앞 답의 끝에서 계획 블록(oc-plan)을 읽지 못했어. 같은 계획을 아래 형식에 맞춰 블록 하나로 다시 써.') : '',
-    retry === 'owner' ? tr('[담당 다시 고르기] 앞 계획의 담당 가운데 팀 명단에 없는 이름이 있었어: {names}. 담당은 아래 명단의 이름 그대로 써서 같은 계획을 블록 하나로 다시 써.', { names: missing.map(plainName).join(', ') }) : '',
+    // 명단에 없던 이름은 진행자(에이전트)가 쓴 글이라 무작위 표식 안에
+    retry === 'owner' ? `${tr('[담당 다시 고르기] 앞 계획의 담당 가운데 팀 명단에 없는 이름이 있었어(아래 "이름 {mark}" 표시 사이). 담당은 아래 명단의 이름 그대로 써서 같은 계획을 블록 하나로 다시 써.', { mark })}\n--- ${tr('이름 {mark} 시작', { mark })} ---\n${missing.map(plainName).join('\n')}\n--- ${tr('이름 {mark} 끝', { mark })} ---` : '',
     tr('[일 계획]'),
     ...prepHead(o),
     tr('너는 이 목표의 진행자야. 확정된 목표와 기준을 채우도록 일을 일 카드 {min}~{max}장으로 나눠서 팀원에게 맡겨. 아직 일하지 말고, 파일은 고치지 마. 사용자에게 질문하지 마.', { min: CARD_MIN, max: CARD_COUNT }),
@@ -780,12 +783,13 @@ const headAt = (lines, heads) => lines.findLastIndex((l) => { const s = l.replac
 const BLOCKED_OPEN = '```oc-blocked';
 const BLOCKED_LAST = /^```oc-blocked[ \t]*\r?\n([\s\S]*?)```\s*$/;
 const noBlocked = (text) => { const s = String(text || ''); const at = s.lastIndexOf(BLOCKED_OPEN); return at >= 0 && BLOCKED_LAST.test(s.slice(at)) ? s.slice(0, at) : s; };
-// 꼬리가 있는가: 두 머리가 다 있고 "바꾼 파일"이 "다음 카드가 알아야 할 것"보다 앞(막힘 블록은 빼고 본다)
+// 꼬리가 있는가: 두 머리가 다 있고 "바꾼 파일"이 "다음 카드가 알아야 할 것"보다 앞이고, 답의 마지막 자리(막힘 블록은 빼고 빈 줄이 아닌 마지막 12줄 안)에 있다.
+// 답 중간에 같은 낱말로 시작하는 줄이 있어도 꼬리로 치지 않는다
 export function hasTail(text) {
   const lines = noBlocked(text).split('\n');
   const a = headAt(lines, TAIL_HEADS());
   const b = headAt(lines, TAIL_NEXT());
-  return a >= 0 && b >= a;
+  return a >= 0 && b >= a && lines.slice(a).filter((l) => l.trim()).length <= 12;
 }
 // 꼬리 글: "바꾼 파일" 줄부터 끝까지(막힘 블록은 빼고) 12줄·TAIL_MAX 자. 없으면 ''
 export function cardTail(text) {
@@ -832,7 +836,26 @@ export function cardPrompt({ card, needs = [], mark = randomBytes(4).toString('h
   ].filter(Boolean).join('\n\n');
 }
 
-// 진행 기록의 일 카드 목록에 보이는 기다림(P7): 기다리는 카드는 "하는 중"으로 세지 않고 무엇을 기다리는지. → 기다리는 앞 카드 id 목록(없으면 차례를 기다림)
+// git status --porcelain -z 출력(경로를 따옴표·이스케이프 없이 NUL 로 끊는다) → 경로 목록. 이름 바꾸기(R·C)는 뒤에 오는 원래 경로를 건너뛰고 새 경로만
+export function porcelainPaths(out) {
+  const parts = String(out || '').split('\0');
+  const files = [];
+  for (let k = 0; k < parts.length; k++) {
+    const e = parts[k];
+    if (e.length < 4) continue;
+    files.push(e.slice(3));
+    if (/^[RC]/.test(e) || /^.[RC]/.test(e)) k++; // 다음 조각은 원래 경로
+  }
+  return files;
+}
+// 테스트로 보이는 파일: 경로 조각이 test·tests·__tests__ 폴더이거나 이름이 *.test.* · *.spec.*(latest.md·inspect.js 는 아니다)
+export const testLike = (p) => {
+  const segs = String(p || '').replace(/\\/g, '/').split('/');
+  const base = segs.at(-1).toLowerCase();
+  return segs.slice(0, -1).some((x) => ['test', 'tests', '__tests__', 'spec', 'specs'].includes(x.toLowerCase())) || /\.(?:test|spec)\.[^.]+$/.test(base);
+};
+
+// 진행 기록의 일 카드 목록에 보이는 기다림: 기다리는 카드는 "하는 중"으로 세지 않고 무엇을 기다리는지. → 기다리는 앞 카드 id 목록(없으면 차례를 기다림)
 export const waitingFor = (card, cards) => (card.needs || []).filter((n) => !['done', 'hole', 'skipped', 'blocked'].includes(cards.find((c) => c.id === n)?.status));
 
 // 진행 기록 한 줄. LOG_MAX 줄을 넘으면 앞을 버리고 맨 앞에 "앞 n줄 생략" 한 줄을 둔다

@@ -5,7 +5,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { newId } from './store.js';
 import { PROVIDERS } from './providers/index.js';
 import { detectHire, draftHire } from './hire.js';
-import { toolCategory } from './providers/util.js';
+import { toolCategory, resolveCommand } from './providers/util.js';
 import { resolveRoute, roleKind, aiKey, baseProvider } from './routing.js';
 import { Cooldown, isQuotaError, nearLimit, avoidUntil, resetTime, resetFromText, availableCatalog, pickFallback, continuationPrompt, handoffFacts } from './failover.js';
 import { nextMidnight, lowerEffort } from './budget.js';
@@ -21,7 +21,7 @@ import { parseGoal, goalBlock, goalWarn, newMission, toCriteria, cardOf, sameCar
   stageDiff, teamRoles, resumePoint, pastOutputs,
   PREP_KINDS, isPrep, prepPlan, prepCard, prepFits, meetingCalls, firstJudge, answerFlags, guardOf, researchGuards, parseResearch, scanPrompt, questionsPrompt, researchPrompt, researchNote, conclusionPrompt, Q_FINAL, NOTE_SHOW, PREP_ROUNDS,
   workCard, cardsProblem, cardRoster, matchOwners, fallbackOwner, parsePlan, planPrompt, planWaves, waveStages, wavesLine, soloCard, cardPrompt, cardTail, hasTail, parseBlocked, blockedRule, tailRule,
-  CARD_TRIES, CARD_RATE, HOUR } from './mission.js';
+  CARD_TRIES, CARD_RATE, HOUR, porcelainPaths, testLike } from './mission.js';
 import { execFile } from 'node:child_process';
 
 const ACTIVE = new Set(['running', 'paused', 'waiting']);
@@ -552,7 +552,7 @@ export class Orchestrator {
     // 일 카드 단계: 한 담당의 답과 끝 두 칸 다시 쓰기 답은 한 결과로 합친다(살아 있을 때와 같게)
     if (st.mission === 'cards') {
       const by = new Map();
-      for (const k of kept) { const id = String(k.agent?.id); if (by.has(id)) by.get(id).text += `\n\n${k.text}`; else by.set(id, { ...k }); }
+      for (const k of kept) { const id = String(k.agent?.id); if (by.has(id)) { const o = by.get(id); o.text += `\n\n${k.text}`; o.tailMsgId = k.msgId; } else by.set(id, { ...k }); }
       kept = [...by.values()];
     }
     const meetingRedo = at.phase === 'work' && !at.back && !at.wait && !!st.meeting; // 회의는 1바퀴부터 다시(회의 차례는 늘 새 대화라 저장된 대화는 그대로 둔다)
@@ -647,13 +647,17 @@ export class Orchestrator {
         logLine(m, 'done', tr('기준 {n}개 중 {n}개 통과. 목표를 끝냈어.', { n: t.total }));
       } else if (end === 'accepted') {
         m.status = 'accepted';
-        logLine(m, 'done', ctx.halt ? tr('막힌 채로 받아들여서 끝냈어. 기준 판정은 하지 않았어.') : tr('받아들여서 끝냈어. 기준 {total}개 중 통과 {pass}개, 남은 {left}개는 판정 그대로 둬.', { total: t.total, pass: t.pass, left: t.total - t.pass }));
+        logLine(m, 'done', tr('받아들여서 끝냈어. 기준 {total}개 중 통과 {pass}개, 남은 {left}개는 판정 그대로 둬.', { total: t.total, pass: t.pass, left: t.total - t.pass }));
       } else {
         m.status = 'stopped';
         logLine(m, 'stop', run.status === 'error' || (run.status === 'done' && !end) ? tr('실행 오류로 목표를 멈췄어.') : tr('중지해서 목표를 멈췄어.'));
       }
       const left = (m.notes || []).filter((n) => !n.used).length;
       if (left) logLine(m, 'note', tr('반영하지 못한 추가 지시가 {n}개 있어.', { n: left }));
+      // 일 카드(결정 0018): 목표가 끝났는데 하는 중·기다림으로 남은 카드는 건너뜀으로(그만·받아들이기 뒤에 칩이 남지 않게)
+      const open = (m.cards || []).filter((c) => c.status === 'running' || c.status === 'waiting');
+      for (const c of open) c.status = 'skipped';
+      if (open.length) logLine(m, 'card', tr('목표가 끝나서 돌지 않은 카드 {ids}는 건너뜀으로 적었어.', { ids: open.map((c) => c.id).join(', ') }));
     }
     this.emitMission(s);
   }
@@ -859,7 +863,7 @@ export class Orchestrator {
   // agentIds: 이 단계의 일부만 돌릴 때(목표의 되돌림에서 회의 대신 한 명. 회의를 열지 않는다). 되돌림에서도 승인 관문은 그대로 묻는다(결정 0015)
   // resume: 끊긴 목표를 이어서 할 때 이 단계의 첫 바퀴만(결정 0016). { ids: 이번에 돌릴 사람, keep: 이미 끝낸 사람의 결과(합친다) } 또는
   // { wait: 'approve'|'error', keep, failed }(돌리지 않고 그 결과로 같은 대기부터 다시 묻는다). 거절·다시 하기로 다시 돌 때는 원래대로 단계 전체
-  async #runStage(ctx, i, feedback = null, { agentIds = null, resume = null } = {}) {
+  async #runStage(ctx, i, feedback = null, { agentIds = null, resume = null, back = false } = {}) {
     const st = ctx.run.stages[i];
     const work = ctx.missionTurn === 'work';
     const notes = work && !isPrep(st); // 일하기 전 회의(결정 0017)는 다시 돌 때도 추가 지시를 넣지 않는다(일 단계부터)
@@ -899,8 +903,9 @@ export class Orchestrator {
         if (d.action === 'retry' && work && st.mission === 'cards') {
           // 일 카드(결정 0018): 오류 난 카드만 다시(끝낸 카드는 그대로). 다시 하기도 카드 시작 수에 들어가 되풀이 상한을 본다
           feedback = d.text || null;
-          const g = await this.#cardGate(ctx, i, failed.map((f) => String(f.agent?.id || '')), false);
+          const g = await this.#cardGate(ctx, i, failed.map((f) => String(f.agent?.id || '')), back);
           if (!g) { ctx.stopped = true; break; }
+          g.commit(); // 오류 다시 하기는 호출 상한을 따로 보지 않는다(단계 안의 다시 시도)
           first = { ids: g.ids, keep: [...results.filter((r) => !failed.includes(r)), ...g.keep] };
           this.#missionStage(ctx, i, 'again');
           this.#missionAt(ctx, { ...ctx.mission.at, stageIndex: i, working: [], wait: null });
@@ -959,13 +964,12 @@ export class Orchestrator {
     const rv = run.stages.findIndex((st) => st.mission === 'review'); // 기준 판정 단계(검수자가 없으면 -1). 계획 뒤에 센다(단계 수가 바뀐다)
     const end = rv >= 0 ? rv : run.stages.length;
     const first = !from || prepFrom || planFrom ? (planI >= 0 ? planI + 1 : P) : from.phase === 'work' && !from.back ? from.stageIndex : end;
-    for (let i = first; i < end && !ctx.stopped && !ctx.halt; i++) await this.#missionWork(ctx, i, false, from && !prepFrom && !planFrom && i === first ? from.stage : null);
+    for (let i = first; i < end && !ctx.stopped; i++) await this.#missionWork(ctx, i, false, from && !prepFrom && !planFrom && i === first ? from.stage : null);
     // done 은 기준이 전부 통과이고 열린 질문이 없고 바뀌면 안 되는 것을 어긴 게 없을 때만
     const close = () => { ctx.missionEnd = allPass(m) && !ctx.asks.size && !m.keepBroken?.length ? 'done' : 'accepted'; };
     let resumeBack = !!from && from.phase === 'work' && from.back;
     let skipCheck = from?.wait?.reason === 'mission' && from.phase === 'review';
-    if (ctx.halt) ctx.missionEnd = 'accepted'; // 막힘(oc-blocked)을 받아들였다: 기준 판정 없이 끝낸다
-    while (!ctx.stopped && !ctx.halt) {
+    while (!ctx.stopped) {
       // 되돌림: 마지막 일 단계를 걸린 기준(표식 안의 참고 자료)과 그 단계의 직전 결과와 함께 다시. 회의면 진행자 한 명, 승인 단계면 승인을 다시 묻는다
       const i = ctx.returnStage >= 0 && ctx.returnStage < end ? ctx.returnStage : end - 1;
       let stage = null; // 이어서: 끊긴 되돌림 단계의 첫 바퀴
@@ -1017,7 +1021,6 @@ export class Orchestrator {
       if (rv >= 0) run.stages[rv].status = 'pending';
       try { await this.#missionWork(ctx, i, true, stage); } finally { ctx.missionReturn = null; ctx.missionPrev = null; ctx.missionAssume = false; }
     }
-    if (ctx.halt && !ctx.stopped) ctx.missionEnd = 'accepted';
     run.status = ctx.stopped ? 'stopped' : 'done';
     for (const st of run.stages) if (st.status === 'pending') st.status = ctx.stopped ? 'stopped' : 'skipped';
   }
@@ -1319,6 +1322,7 @@ export class Orchestrator {
     // 계획에 넣는 참고 자료: 조사 노트와 회의 결론(무작위 표식 안)
     const refs = [ctx.prepData?.questions ? researchNote(ctx.prepData.questions, undefined, { work: true }) : '', ctx.prepData?.conclusion ? conclusionPrompt(ctx.prepData.conclusion) : ''];
     let got = null;
+    let firstPlan = null; // 담당 이름이 안 맞아 다시 요청한 1차 계획(2차 답의 블록이 깨지면 이 계획으로 담당만 대신 맡긴다)
     let retry = '';
     let missing = [];
     let quota = false;
@@ -1335,16 +1339,18 @@ export class Orchestrator {
         got = mo;
         if (!mo.missing.length || n === 1) break;
         this.#notice(s, msg, tr('담당 이름 가운데 팀 명단에 없는 이름이 있어서({names}) 한 번 다시 요청했어.', { names: mo.missing.join(', ') }));
+        firstPlan = mo;
         got = null;
         retry = 'owner';
         missing = mo.missing;
         continue;
       }
-      if (msg) this.#notice(s, msg, n === 0 ? tr('답 끝에서 계획 블록(oc-plan)을 읽지 못해서 한 번 다시 요청했어.') : tr('다시 요청했는데도 계획 블록을 읽지 못했어. 카드 하나로 일할게.'));
+      if (msg) this.#notice(s, msg, n === 0 ? tr('답 끝에서 계획 블록(oc-plan)을 읽지 못해서 한 번 다시 요청했어.') : firstPlan ? tr('다시 요청한 답에서 계획 블록을 읽지 못했어. 앞 계획으로 일하고, 명단에 없는 담당만 다른 팀원에게 맡길게.') : tr('다시 요청했는데도 계획 블록을 읽지 못했어. 카드 하나로 일할게.'));
       retry = 'format';
       missing = [];
     }
     if (ctx.stopped) { st.status = 'stopped'; return; }
+    if (!got && firstPlan) got = firstPlan; // 다시 요청한 답이 깨졌거나 오류면 1차 계획(이름이 안 맞은 카드는 아래에서 대신 맡긴다)
     // 이름이 끝내 안 맞은 카드는 종류에 맞는 팀원에게, 블록을 못 받았으면 카드 하나(만들기 역할의 첫 팀원, 없으면 진행자가 아닌 첫 팀원)
     const reassigned = [];
     const cards = got ? got.cards.map((c) => {
@@ -1382,15 +1388,26 @@ export class Orchestrator {
     this.#missionAt(ctx, { stageIndex: i + 1, phase: 'work' }); // 카드와 바뀐 단계표가 같이 저장된다
   }
 
-  // 카드 단계에서 이번에 돌릴 담당(want)의 카드를 보고: 되풀이 상한(카드 하나 CARD_TRIES 번)에 닿은 카드는 막힘으로 두고 묻는다(받아들이기: 그 카드는 안 돌리고 이전 결과 그대로 /
-  // 한 번 더: 그 카드의 상한 +1 / 그만), 한 시간 안에 시작한 카드가 상한(CARD_RATE)을 넘으면 묻는다(20장 더 / 그만). 돌릴 카드는 시작 수를 센다.
-  // → { ids: 돌릴 담당, keep: 못 돌린 카드의 이전 결과(limited 표시) } 또는 null(그만)
+  // 카드 단계에서 이번에 돌릴 담당(want)의 카드를 보고: 되풀이 상한(카드 하나 CARD_TRIES 번)에 닿은 카드는 막힘으로 두고 묻는다(받아들이기: 그 카드는 이 목표에서 다시 돌리지 않고
+  // 이전 결과 그대로(limited) / 한 번 더: 그 카드의 상한 +1 / 그만). 이미 받아들인 카드(c.limited, 끊겼다 이어서 해도)는 묻지 않고 뺀다.
+  // 한 시간 안에 시작한 카드가 상한(CARD_RATE)을 넘으면 묻는다(20장 더 / 그만).
+  // → { ids: 돌릴 담당, keep: 못 돌린 카드의 이전 결과(limited 표시, 답 메시지 id), commit(): 시작 수 세기 } 또는 null(그만).
+  // 시작 수(카드의 starts 와 시간당 수)는 호출 상한까지 통과한 뒤 commit() 으로 센다
   async #cardGate(ctx, i, want, back = false) {
     const m = ctx.mission;
     const st = ctx.run.stages[i];
     const cardOf = (id) => (m.cards || []).find((c) => (st.cardIds || []).includes(c.id) && c.ownerId === String(id));
     let run = [...new Set((want || []).map(String))].map(cardOf).filter(Boolean);
     const keep = [];
+    const prevOf = (c) => {
+      const p = (ctx.outputs[i] || []).find((r) => String(r.agent?.id) === c.ownerId);
+      const msg = !p && c.msgId ? ctx.s.messages.find((x) => x.id === c.msgId && x.status === 'done') : null;
+      const text = p && !p.error ? p.text || '' : msg?.text || '';
+      return { agent: p?.agent || this.store.get('agents', c.ownerId), text, limited: true, msgId: p?.msgId || msg?.id || c.msgId || null, ...(p?.tailMsgId ? { tailMsgId: p.tailMsgId } : {}), ...(text ? {} : { skipped: true }) };
+    };
+    const held = run.filter((c) => c.limited);
+    for (const c of held) keep.push(prevOf(c));
+    run = run.filter((c) => !c.limited);
     const over = run.filter((c) => c.starts >= c.cap);
     if (over.length) {
       for (const c of over) c.status = 'blocked';
@@ -1407,10 +1424,7 @@ export class Orchestrator {
         logLine(m, 'answer', tr('카드 {ids}를 한 번 더 시작해.', { ids: over.map((c) => c.id).join(', ') }));
       } else {
         run = run.filter((c) => !over.includes(c));
-        for (const c of over) {
-          const p = (ctx.outputs[i] || []).find((r) => String(r.agent?.id) === c.ownerId);
-          keep.push({ agent: p?.agent || this.store.get('agents', c.ownerId), text: p && !p.error ? p.text || '' : '', limited: true, ...(p && !p.error && p.text ? {} : { skipped: true }) });
-        }
+        for (const c of over) { c.limited = true; keep.push(prevOf(c)); }
         logLine(m, 'answer', tr('받아들이기를 골랐어. 카드 {ids}는 다시 돌리지 않아.', { ids: over.map((c) => c.id).join(', ') }));
       }
       this.emitMission(ctx.s);
@@ -1431,10 +1445,13 @@ export class Orchestrator {
       logLine(m, 'answer', tr('한 시간 안에 시작할 카드 상한을 {n}장 늘렸어(이제 {cap}장).', { n: CARD_RATE, cap: m.rate.cap }));
       this.emitMission(ctx.s);
     }
-    const now = Date.now();
-    for (const c of run) { c.starts++; c.status = 'running'; m.rate.starts.push(now); }
     this.emitMission(ctx.s);
-    return { ids: run.map((c) => c.ownerId), keep };
+    const commit = () => {
+      const now = Date.now();
+      for (const c of run) { c.starts++; c.status = 'running'; m.rate.starts.push(now); }
+      this.emitMission(ctx.s);
+    };
+    return { ids: run.map((c) => c.ownerId), keep, commit };
   }
 
   // 뒤 카드에 넘기는 앞 카드 하나(결정 0018): 상태·제목·가장 최근 결과·꼬리. 이번 실행의 결과가 없으면(이어서) 그 카드의 답 메시지에서
@@ -1447,7 +1464,16 @@ export class Orchestrator {
     const msg = c.msgId ? ctx.s.messages.find((x) => x.id === c.msgId) : null;
     const tailMsg = c.tailMsgId ? ctx.s.messages.find((x) => x.id === c.tailMsgId) : null;
     const text = out?.text || [msg?.text, tailMsg?.text].filter(Boolean).join('\n\n');
-    return { id, status: c.status, title: c.title, text, tail: c.tail || '' };
+    // 막혀서 뺀 카드(구멍, 사유 막힘)는 뒤 카드에 결과가 없다고만 알린다
+    return { id, status: c.by === 'blocked' ? 'blocked' : c.status, title: c.title, text, tail: c.tail || '' };
+  }
+
+  // 되돌림이 다시 돌리는 마지막 카드 단계에 만들기·글 카드가 하나도 없는가(조사·확인 카드만)
+  #noFixer(ctx) {
+    const m = ctx.mission;
+    if (m?.work !== 'cards' || !m.cards?.length) return false;
+    const last = ctx.run.stages.findLast((st) => st.mission === 'cards' && st.cardIds?.length);
+    return !!last && last.cardIds.every((id) => ['research', 'check'].includes(m.cards.find((c) => c.id === id)?.kind));
   }
 
   // 판정 질문 창에 같이 보이는 아직 통과하지 못한 기준
@@ -1456,7 +1482,8 @@ export class Orchestrator {
   }
 
   // 카드 단계 결과 정리: 카드마다 상태(끝·막힘·구멍·건너뜀)와 답 메시지. 끝의 두 칸(바꾼 파일·다음 카드가 알아야 할 것)이 없으면 한 번 다시 요청하고,
-  // 그래도 없으면 "구멍"(통과로 세지 않는다. 결과는 뒤 카드와 검수에 그대로 간다)
+  // 그래도 없으면 "구멍"(통과로 세지 않는다. 결과는 뒤 카드와 검수에 그대로 간다). 다시 쓴 답이 막힘 블록으로 끝나면 그 카드는 막힘이다.
+  // 넘겨 쓰는 결과(carried: "한 번 더"로 다시 돌지 않은 카드, limited: 되풀이 상한을 받아들인 카드)는 정해진 상태 그대로 둔다(다시 검사하지 않는다)
   async #cardsAfter(ctx, i, back = false) {
     const { s, run } = ctx;
     const m = ctx.mission;
@@ -1464,24 +1491,21 @@ export class Orchestrator {
     const res = ctx.outputs[i] || [];
     const need = [];
     const count = { done: 0, blocked: 0, hole: 0, skipped: 0 };
+    const findMsg = (id) => (id ? s.messages.find((x) => x.id === id) : null);
     for (const id of st.cardIds || []) {
       const c = (m.cards || []).find((x) => x.id === id);
       if (!c) continue;
       const mine = res.filter((r) => String(r.agent?.id) === c.ownerId);
-      if (!mine.length) continue;
-      if (mine.some((r) => r.limited)) { count.blocked++; continue; } // 되풀이 상한으로 안 돌린 카드: 막힘 그대로
+      if (!mine.length || mine.some((r) => r.limited || r.carried)) continue;
       const r = mine.at(-1);
-      const msg = (r.msgId && s.messages.find((x) => x.id === r.msgId)) || s.messages.findLast((x) => x.role === 'agent' && x.runId === run.id && x.stageIndex === i && String(x.agentId) === c.ownerId && !x.cardTail);
+      const msg = findMsg(r.msgId) || s.messages.findLast((x) => x.role === 'agent' && x.runId === run.id && x.stageIndex === i && String(x.agentId) === c.ownerId && !x.cardTail);
       if (msg) c.msgId = msg.id;
+      if (r.tailMsgId) c.tailMsgId = r.tailMsgId;
       if (r.error || r.stopped || r.skipped || !String(r.text || '').trim()) { c.status = 'skipped'; count.skipped++; continue; }
+      // 막힘을 받아들인 답(끊겼다 이어서 다시 모은 결과): 구멍(사유 막힘) 그대로
+      if (msg?.blockedBlock?.accepted || findMsg(r.tailMsgId)?.blockedBlock?.accepted) { c.status = 'hole'; c.by = 'blocked'; count.hole++; continue; }
       const b = parseBlocked(r.text);
-      if (b) {
-        c.status = 'blocked';
-        c.reason = b.reason;
-        if (msg) { msg.blockedBlock = { from: b.from, to: b.to, reason: b.reason }; this.bus.emit('message', { sessionId: s.id, message: msg }); }
-        count.blocked++;
-        continue;
-      }
+      if (b) { c.status = 'blocked'; c.reason = b.reason; count.blocked++; continue; }
       delete c.reason;
       if (hasTail(r.text)) { c.status = 'done'; c.tail = cardTail(r.text); count.done++; } else need.push({ c, r });
     }
@@ -1496,12 +1520,18 @@ export class Orchestrator {
       if (ctx.stopped) return;
       for (const { c, r } of need) {
         const a = again.find((x) => String(x.agent?.id) === c.ownerId);
-        const tmsg = s.messages.findLast((x) => x.role === 'agent' && x.runId === run.id && x.stageIndex === i && String(x.agentId) === c.ownerId);
-        if (tmsg) { tmsg.cardTail = true; c.tailMsgId = tmsg.id; }
-        if (a && !a.error && !a.stopped && hasTail(a.text)) {
+        const tmsg = findMsg(a?.msgId) || s.messages.findLast((x) => x.role === 'agent' && x.runId === run.id && x.stageIndex === i && String(x.agentId) === c.ownerId && x.cardTail);
+        if (tmsg) { c.tailMsgId = tmsg.id; r.tailMsgId = tmsg.id; }
+        const ok = a && !a.error && !a.stopped && String(a.text || '').trim();
+        const b = ok ? parseBlocked(a.text) : null;
+        if (ok) r.text = `${r.text}\n\n${a.text}`; // 검수·뒤 카드·막힘 검사는 원래 답과 다시 쓴 답을 같이 본다
+        if (b) {
+          c.status = 'blocked';
+          c.reason = b.reason;
+          count.blocked++;
+        } else if (ok && hasTail(a.text)) {
           c.status = 'done';
           c.tail = cardTail(a.text);
-          r.text = `${r.text}\n\n${a.text}`; // 검수·뒤 카드는 원래 답과 꼬리를 같이 본다
           count.done++;
         } else {
           c.status = 'hole';
@@ -1515,32 +1545,37 @@ export class Orchestrator {
     const parts = [count.done && tr('끝 {n}', { n: count.done }), count.blocked && tr('막힘 {n}', { n: count.blocked }), count.hole && tr('구멍 {n}', { n: count.hole }), count.skipped && tr('건너뜀 {n}', { n: count.skipped })].filter(Boolean);
     if (parts.length) logLine(m, 'card', tr('"{label}" 카드: {parts}', { label: st.label, parts: parts.join(' · ') }));
     if (count.skipped && count.skipped < (st.cardIds || []).length) st.note = tr('{n}장 건너뜀', { n: count.skipped });
-    if (st.status === 'skipped' && count.done + count.hole + count.blocked) st.status = 'done'; // 오류 난 카드만 건너뛰었다: 끝낸 카드가 있으면 단계는 끝
+    if (st.status === 'skipped' && (st.cardIds || []).some((id) => ['done', 'hole', 'blocked'].includes((m.cards || []).find((c) => c.id === id)?.status))) st.status = 'done'; // 오류 난 카드만 건너뛰었다: 끝낸 카드가 있으면 단계는 끝
     this.emitMission(s);
   }
 
-  // 일 단계 답 끝의 막힘 블록(oc-blocked, 결정 0018): 회의 단계는 보지 않는다. 되풀이 상한으로 안 돌린 카드도 보지 않는다
+  // 일 단계 답 끝의 막힘 블록(oc-blocked, 결정 0018): 회의 단계는 보지 않는다. 되풀이 상한으로 안 돌린 카드, 넘겨 쓰는 결과, 이미 받아들인 막힘도 보지 않는다
+  // (끊겼다 이어서 해도 받아들인 막힘은 그 답 메시지의 표시로 안다)
   #blockedOf(ctx, i) {
     const st = ctx.run.stages[i];
     if (st.meeting) return [];
     const m = ctx.mission;
-    return (ctx.outputs[i] || []).filter((r) => !r.error && !r.stopped && !r.limited && r.text).map((r) => {
+    const find = (id) => (id ? ctx.s.messages.find((x) => x.id === id) : null);
+    return (ctx.outputs[i] || []).filter((r) => !r.error && !r.stopped && !r.limited && !r.carried && r.text).map((r) => {
       const b = parseBlocked(r.text);
       if (!b) return null;
-      // 화면이 그 자리를 감추고 "막힘: 이유"로 보여 준다
-      const msg = r.msgId ? ctx.s.messages.find((x) => x.id === r.msgId) : null;
-      if (msg && msg.text.slice(b.from).startsWith('```oc-blocked')) { msg.blockedBlock = { from: b.from, to: b.to, reason: b.reason }; this.bus.emit('message', { sessionId: ctx.s.id, message: msg }); }
+      // 화면이 그 자리를 감추고 "막힘: 이유"로 보여 준다(꼬리 다시 쓰기 답에서 막혔으면 그 답에)
+      const msg = [find(r.tailMsgId), find(r.msgId)].find((x) => x && parseBlocked(x.text));
+      if (msg?.blockedBlock?.accepted) return null;
+      const own = msg ? parseBlocked(msg.text) : null;
+      if (msg && own) { msg.blockedBlock = { from: own.from, to: own.to, reason: own.reason }; this.bus.emit('message', { sessionId: ctx.s.id, message: msg }); }
       const card = st.mission === 'cards' ? (m.cards || []).find((c) => (st.cardIds || []).includes(c.id) && c.ownerId === String(r.agent?.id)) : null;
-      return { agentId: String(r.agent?.id || ''), name: r.agent?.name || '', reason: b.reason, ...(card ? { card: card.id, title: card.title } : {}) };
+      return { agentId: String(r.agent?.id || ''), name: r.agent?.name || '', reason: b.reason, msgId: msg?.id || null, ...(card ? { card: card.id, title: card.title } : {}) };
     }).filter(Boolean);
   }
 
-  // 막혔다(oc-blocked): 기준 판정으로 넘기지 않고 묻는다(판정 질문 틀: 받아들이기 = 막힌 채로 판정 없이 끝 / 한 번 더 = 막힌 사람만 다시 / 그만). 이유를 같이 보여 준다
+  // 막혔다(oc-blocked): 기준 판정으로 넘기지 않고 묻는다(판정 질문 틀, 이유를 같이 보여 준다). 받아들이기 = 막힌 담당·카드만 빼고(카드는 구멍, 사유 막힘) 나머지 결과로 검수까지 /
+  // 한 번 더 = 막힌 사람만 다시 / 그만
   async #blockedAsk(ctx, i, items, back = false) {
     const m = ctx.mission;
     m.status = 'waiting';
     for (const b of items) {
-      const line = logLine(m, 'blocked', b.card ? tr('막힘: {id}({name}) — {reason}', { id: b.card, name: b.name, reason: b.reason }) : tr('막힘: {name} — {reason}', { name: b.name, reason: b.reason }));
+      const line = logLine(m, 'blocked', b.card ? tr('막힘: {id}({name}) — {reason}', { id: b.card, name: b.name, reason: b.reason }) : tr('막힘: {name} — {reason}', { name: b.name, reason: b.reason }), b.msgId || null);
       line.fail = 'blocked';
     }
     logLine(m, 'ask', tr('기준을 지킬 수 없다는 답이 와서 기준 판정으로 넘기지 않고 물어봤어.'));
@@ -1549,7 +1584,16 @@ export class Orchestrator {
     const d = await this.#hold(ctx, 'waiting', { reason: 'mission', kind: 'blocked', stageIndex: i, blocked: items, left: this.#leftCriteria(m) });
     if (ctx.stopped || d.action === 'stop') { ctx.stopped = true; return 'stop'; }
     m.status = 'active';
-    logLine(m, 'answer', d.action === 'accept' ? tr('막힌 채로 받아들이기를 골랐어. 기준 판정 없이 끝내.') : tr('막힌 일을 한 번 더 하기를 골랐어.'));
+    if (d.action === 'accept') {
+      // 막힌 답은 표시해 두고(끊겼다 이어서 해도 다시 묻지 않는다), 막힌 카드는 구멍(사유: 막힘)으로
+      for (const b of items) {
+        const msg = b.msgId ? ctx.s.messages.find((x) => x.id === b.msgId) : null;
+        if (msg) { msg.blockedBlock = { ...(msg.blockedBlock || {}), reason: b.reason, accepted: true }; this.bus.emit('message', { sessionId: ctx.s.id, message: msg }); }
+        const c = b.card ? (m.cards || []).find((x) => x.id === b.card) : null;
+        if (c) { c.status = 'hole'; c.by = 'blocked'; c.reason = b.reason; c.tail = ''; }
+      }
+      logLine(m, 'answer', tr('받아들이기를 골랐어. 막힌 일은 빼고({names}) 나머지 결과로 기준 판정까지 가.', { names: items.map((b) => b.card || b.name).join(', ') })).fail = 'hole';
+    } else logLine(m, 'answer', tr('막힌 일을 한 번 더 하기를 골랐어.'));
     this.emitMission(ctx.s);
     return d.action;
   }
@@ -1569,23 +1613,25 @@ export class Orchestrator {
     const st = run.stages[i];
     let ids = back && st.meeting ? [st.agentIds.includes(String(m.leadId)) ? String(m.leadId) : st.agentIds[0]] : null;
     let first = resume;
-    // 막혀서(oc-blocked, 결정 0018) "한 번 더"를 고르면 막힌 사람만 다시 돈다(나머지 답은 그대로)
+    // 막혀서(oc-blocked, 결정 0018) "한 번 더"를 고르면 막힌 사람만 다시 돈다(나머지 답은 넘겨 쓰는 결과로 그대로)
     for (let pass = 0; ; pass++) {
-      // 일 카드 단계: 이번에 돌릴 카드의 되풀이 상한·시간당 시작 수를 먼저 본다(돌리지 않는 카드는 이전 결과 그대로)
+      // 일 카드 단계: 이번에 돌릴 카드의 되풀이 상한·시간당 시작 수를 먼저 본다(돌리지 않는 카드는 이전 결과 그대로). 시작 수는 호출 상한까지 통과한 뒤에 센다
+      let gate = null;
       if (st.mission === 'cards' && !first?.wait) {
         const want = first?.ids || st.agentIds;
-        const g = await this.#cardGate(ctx, i, want, back);
-        if (!g) { st.status = st.status === 'done' ? 'done' : 'stopped'; return; }
-        first = { ids: g.ids, keep: [...(first?.keep || []), ...g.keep] };
+        gate = await this.#cardGate(ctx, i, want, back);
+        if (!gate) { st.status = st.status === 'done' ? 'done' : 'stopped'; return; }
+        first = { ids: gate.ids, keep: [...(first?.keep || []), ...gate.keep] };
       }
       // 호출 상한은 그 단계가 쓸 호출 수로 본다: 보통 단계는 인원, 회의를 여는 단계는 회의 호출 수 식(결정 0017. 준비 회의와 같다). 이어서 하는 첫 바퀴는 다시 돌릴 사람 수
       const need = first?.ids ? first.ids.length : st.meeting && !ids ? meetingCalls(st.agentIds.length, st.meeting.rounds) : (ids || st.agentIds).length;
       if (!first?.wait && !(await this.#capCheck(ctx, i, need, 'work', back))) return;
+      gate?.commit();
       m.phase = 'work';
       if (!first?.wait) this.#missionStage(ctx, i, back || pass ? 'again' : 'start');
       // 일하는 사람은 CLI 를 띄울 때 넣고 끝나면 뺀다(#atWorking). 이어서 그대로 쓰는 답은 처음부터 끝낸 답으로
-      this.#missionAt(ctx, { stageIndex: i, phase: 'work', back, finished: (first?.keep || []).map((o) => o.msgId).filter(Boolean) });
-      await this.#runStage(ctx, i, null, { agentIds: ids, resume: first });
+      this.#missionAt(ctx, { stageIndex: i, phase: 'work', back, finished: (first?.keep || []).flatMap((o) => [o.msgId, o.tailMsgId]).filter(Boolean) });
+      await this.#runStage(ctx, i, null, { agentIds: ids, resume: first, back });
       if (ctx.resumeAt?.stageIndex === i) ctx.resumeAt = null; // [이어서] 한 줄은 끊긴 단계에만(뒤 단계에는 안 붙인다)
       if (ctx.stopped) { st.status = st.status === 'done' ? 'done' : 'stopped'; return; }
       if (st.mission === 'cards') {
@@ -1596,13 +1642,12 @@ export class Orchestrator {
       if (!blocked.length) break;
       const d = await this.#blockedAsk(ctx, i, blocked, back);
       if (d === 'stop') { st.status = st.status === 'done' ? 'done' : 'stopped'; return; }
-      if (d === 'accept') { ctx.halt = true; break; }
+      if (d === 'accept') break; // 막힌 일만 빼고 다음 단계·판정으로(받아들인 막힘은 그 답 메시지에 표시돼 있다)
       const again = blocked.map((b) => b.agentId);
-      first = { ids: again, keep: (ctx.outputs[i] || []).filter((r) => !again.includes(String(r.agent?.id))) };
+      first = { ids: again, keep: (ctx.outputs[i] || []).filter((r) => !again.includes(String(r.agent?.id))).map((r) => ({ ...r, carried: true })) };
       ids = null;
     }
     this.#missionStage(ctx, i, 'end');
-    if (ctx.halt) return; // 막힌 채로 받아들였다: 다음 단계·판정으로 가지 않는다
     // 다음 자리: 앞으로 가는 중이면 다음 일 단계, 마지막 일 단계를 끝냈거나 되돌림이면 기준 판정(검수자가 없으면 마지막 일 단계 자리)
     const rv = run.stages.findIndex((x) => x.mission === 'review');
     const end = rv >= 0 ? rv : run.stages.length;
@@ -1670,7 +1715,9 @@ export class Orchestrator {
     this.#missionAt(ctx, { stageIndex: i, phase: 'review', wait: { reason: 'mission', kind } });
     // 남은 일(기준 밖)과 바뀌면 안 되는 것을 어긴 것(결정 0015 개정)도 같은 질문 창에 보인다(남은 일은 막지 않는다)
     const d = await this.#hold(ctx, 'waiting', { reason: 'mission', kind, stageIndex: i, round: m.round || 0, left, notes, ...(more ? {} : { more: false }), ...(reviewer ? {} : { reviewer: false }),
-      ...(m.extras?.length ? { extras: [...m.extras] } : {}), ...(m.keepBroken?.length ? { keepBroken: [...m.keepBroken] } : {}) });
+      ...(m.extras?.length ? { extras: [...m.extras] } : {}), ...(m.keepBroken?.length ? { keepBroken: [...m.keepBroken] } : {}),
+      // 일 카드(결정 0018): 되돌릴 마지막 카드 단계에 조사·확인 카드만 있으면 "한 번 더"를 골라도 고치는(만들기·글) 카드가 돌지 않는다고 알린다
+      ...(this.#noFixer(ctx) ? { noFixer: true } : {}) });
     if (ctx.stopped || d.action === 'stop') { ctx.stopped = true; return 'stop'; }
     m.status = 'active';
     logLine(m, 'answer', d.action === 'accept' ? tr('받아들이기를 골랐어.') : kind === 'notes' ? tr('추가 지시를 반영해서 한 번 더 하기를 골랐어.') : tr('한 번 더 고치기를 골랐어.'));
@@ -1717,7 +1764,9 @@ export class Orchestrator {
       if (isPrep(x) || x.mission === 'plan') return [];
       const outs = (ctx.outputs[k] || []).filter((o) => !o.error && o.text && o.text.trim());
       if (ctx.returnedAt >= 0 && k > ctx.returnedAt) return outs.length ? [{ label: x.label, name: [...new Set(outs.map((o) => o.agent?.name || ''))].join(', '), text: '', stale: true }] : [];
-      return outs.map((o) => ({ label: labelOf(x, o), name: o.agent?.name || '', text: o.text }));
+      // 막혔다고 해서 사용자가 받아들인 답(결정 0018): 결과 대신 비었다는 코드의 줄과, 막힌 이유(표식 안의 참고 자료)만
+      const accepted = (o) => [o.msgId, o.tailMsgId].map((id) => (id ? s.messages.find((y) => y.id === id) : null)).find((y) => y?.blockedBlock?.accepted);
+      return outs.map((o) => { const a = accepted(o); return a ? { label: labelOf(x, o), name: o.agent?.name || '', blocked: a.blockedBlock.reason || '' } : { label: labelOf(x, o), name: o.agent?.name || '', text: o.text }; });
     });
     const ids = m.criteria.map((c) => c.id);
     const textOf = new Map(m.criteria.map((c) => [c.id, c.text]));
@@ -1782,17 +1831,21 @@ export class Orchestrator {
     this.emitMission(s);
   }
 
-  // 작업 폴더의 git 이 알려 주는 바뀐 파일(결정 0015 개정): git status --porcelain 의 경로를 최대 50줄. 테스트로 보이는 파일(경로에 test·spec)은 따로.
+  // 작업 폴더의 git 이 알려 주는 바뀐 파일(결정 0015 개정): git status --porcelain -z 의 경로를 최대 50개. 테스트로 보이는 파일(testLike)은 따로.
+  // git 은 PATH 에서 찾은 실행 파일의 전체 경로로 띄운다(윈도우에서 작업 폴더에 둔 git.exe 가 먼저 뜨지 않게). 셸을 거쳐야 하는 래퍼밖에 없으면 쓰지 않는다.
   // git 이 없거나, 저장소가 아니거나, 5초 안에 안 끝나면 null(오류로 만들지 않는다)
   #gitChanged(cwd) {
     return new Promise((resolve) => {
       try {
-        // 작업 폴더의 저장소 설정이 명령을 띄우지 못하게(core.fsmonitor) 끄고, 색인 잠금 파일을 만들지 않는다(--no-optional-locks)
-        execFile('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', 'status', '--porcelain', '--untracked-files=all'], { cwd, timeout: 5000, windowsHide: true, maxBuffer: 1024 * 1024 }, (err, out) => {
+        const git = resolveCommand('git');
+        if (!git || git.shell || !path.isAbsolute(git.file)) return resolve(null);
+        // 작업 폴더의 저장소 설정이 명령을 띄우지 못하게(core.fsmonitor) 끄고, 색인 잠금 파일을 만들지 않고(--no-optional-locks), 경로는 따옴표 없이 NUL 로 받는다
+        const args = [...git.prefixArgs, '--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.quotePath=false', 'status', '--porcelain', '-z', '--untracked-files=all'];
+        execFile(git.file, args, { cwd, timeout: 5000, windowsHide: true, maxBuffer: 1024 * 1024 }, (err, out) => {
           if (err) return resolve(null);
-          const files = String(out || '').split(/\r?\n/).filter((l) => l.trim()).map((l) => l.slice(3).replace(/^"|"$/g, '').split(' -> ').at(-1));
+          const files = porcelainPaths(out);
           if (!files.length) return resolve(null);
-          resolve({ files: files.slice(0, 50), more: Math.max(0, files.length - 50), tests: files.filter((f) => /test|spec/i.test(f)) });
+          resolve({ files: files.slice(0, 50), more: Math.max(0, files.length - 50), tests: files.filter(testLike) });
         });
       } catch { resolve(null); }
     });
@@ -2346,6 +2399,8 @@ export class Orchestrator {
     const cardSt = run.stages[stageIdx];
     const myCard = cardSt?.mission === 'cards' && ctx.mission?.cards ? ctx.mission.cards.find((c) => (cardSt.cardIds || []).includes(c.id) && c.ownerId === String(agentId)) : null;
     if (myCard) msg.card = { missionId: ctx.mission.id, id: myCard.id };
+    // 끝의 두 칸 다시 쓰기 답은 만들 때 바로 표시한다(그 사이에 끊겨도 이어서 할 때 이 답을 카드 결과로 고르지 않게)
+    if (myCard && ctx.tailAsk?.has(String(agentId))) msg.cardTail = true;
     s.messages.push(msg);
     this.bus.emit('message', { sessionId: s.id, message: msg });
     const finish = (status, error) => {
@@ -2947,11 +3002,13 @@ export class Orchestrator {
       const n = Math.max(0, Number(this.store.settings.historyTurns) || 0) * 2;
       const recent = new Set(s.messages.slice(-Math.max(n, 2)).map((m) => m.id));
       const oneOff = new Set(resumed ? s.messages.filter((m) => m.once && m.agentId === agent.id).map((m) => m.id) : []);
+      // 살아 있는 목표의 일 카드 답(결정 0018)은 기억으로도 불러오지 않는다(뒤 카드는 기다린 카드의 결과만 표식 안으로 받는다)
+      const liveCards = new Set(s.messages.filter((m) => m.card && notTalk(m, s)).map((m) => m.id));
       const budget = Math.min(8000, Math.max(300, Number(this.store.settings.memoryBudget) || 2000));
       const r = await mem.search(userMsg.text, {
         budget,
         // 이어 가는 대화면 이 에이전트가 이 세션에서 한 말은 CLI 가 기억하니 뺀다. 한 번 실행으로 돈 답(목표 실행의 회의 차례 등, 결정 0017)은 그 대화에 없으니 빼지 않는다
-        exclude: (c) => c.messageId === userMsg.id || c.messageId === msg.id || recent.has(c.messageId)
+        exclude: (c) => c.messageId === userMsg.id || c.messageId === msg.id || recent.has(c.messageId) || liveCards.has(c.messageId)
           || (resumed && c.sessionId === s.id && ((c.agentId === agent.id && !oneOff.has(c.messageId))
             || (String(c.messageId).startsWith('imp-') && agent.id === (s.importedFrom?.agentId || Object.keys(s.sessionProvider || {})[0]))))
           || (c.provider === 'local' && agent.provider !== 'local'),

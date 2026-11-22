@@ -419,7 +419,7 @@ export function MissionGate({ s, run }) {
       ${blocked ? html`<ul class="small">${(hold.blocked || []).map((b) => html`<li><b>${b.card ? `${b.card} · ${b.name}` : b.name}</b>: ${b.reason} <span class="muted">· ${t('에이전트가 씀 · 사용자 확인 안 함')}</span></li>`)}</ul>`
         : html`<ul class="small">${(hold.cards || []).map((c) => html`<li><b>${c.id}</b> · ${c.title} <span class="muted">(${t('{n}번 시작함 · 상한 {cap}번', { n: c.starts, cap: c.cap })})</span></li>`)}</ul>`}
       <div class="ask-rows">
-        ${row(1, t('받아들이기'), blocked ? t('막힌 채로 기준 판정 없이 끝내.') : t('그 카드는 다시 돌리지 않고 지금 결과로 이어 가.'), 'accept')}
+        ${row(1, t('받아들이기'), blocked ? t('막힌 일만 빼고 나머지 결과로 기준 판정까지 가(막힌 카드는 구멍으로 적어).') : t('그 카드는 다시 돌리지 않고 지금 결과로 이어 가.'), 'accept')}
         ${row(2, t('한 번 더'), blocked ? t('막힌 일만 한 번 더 해.') : t('그 카드를 한 번 더 시작해.'), 'more')}
       </div>
       <div class="ask-foot"><span class="grow"></span><button type="button" class="btn sm danger" disabled=${busy} onClick=${() => ctl('stop')}>${t('그만')}</button></div>
@@ -435,6 +435,7 @@ export function MissionGate({ s, run }) {
     <div class="ask-question">${q}</div>
     ${left.length > 0 && html`<div class="crit-table" role="list" aria-label=${t('남은 기준')}>${left.map((c) => html`<${CritRow} c=${{ ...c, text: `${c.id}. ${c.text}` }} />`)}</div>`}
     ${hold.keepBroken?.length > 0 && html`<div class="warnbox" role="note"><b>${t('지키기로 한 것을 어김')}</b><ul class="small">${hold.keepBroken.map((x) => html`<li>${x}</li>`)}</ul><span class="small muted">${t('에이전트가 씀 · 사용자 확인 안 함')}</span></div>`}
+    ${hold.noFixer && hold.more !== false && html`<div class="small muted" role="note">${t('마지막 카드 단계에 조사·확인 카드만 있어서, "한 번 더"를 골라도 고치는(만들기·글) 카드는 돌지 않아.')}</div>`}
     ${hold.extras?.length > 0 && html`<div class="notice"><b>${t('남은 일')}</b> <span class="small muted">${t('기준 밖에서 본 문제야. 막지 않아.')}</span><ul class="small">${hold.extras.map((x) => html`<li>${x}</li>`)}</ul></div>`}
     <div class="ask-rows">
       ${row(1, notes ? t('그대로 끝') : t('받아들이기'), notes ? t('추가 지시는 반영하지 않고 지금 판정으로 끝내.') : t('남은 기준은 판정 그대로 두고 끝내.'), 'accept')}
@@ -468,6 +469,7 @@ function CardList({ m }) {
         <div class="crit-head"><span class=${`chip${cls}`}>${label}</span><span><b>${c.id}</b> · ${c.title} <span class="muted">— ${agentById(c.ownerId)?.name || c.ownerId}</span></span></div>
         ${c.status === 'waiting' && html`<div class="small muted crit-ev">${waitWords(c, cards)}</div>`}
         ${c.status === 'blocked' && c.reason && html`<div class="small muted crit-ev">${c.reason}</div>`}
+        ${c.status === 'hole' && c.by === 'blocked' && html`<div class="small muted crit-ev">${t('막혀서 뺐어: {reason}', { reason: c.reason || '' })}</div>`}
         ${c.msgId && html`<button type="button" class="btn ghost sm" onClick=${() => jump(c.msgId)}>${t('그 메시지로 가기')}</button>`}
       </div>`;
     })}

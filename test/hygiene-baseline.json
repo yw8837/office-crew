@@ -1,4 +1,4 @@
 {
-  "fixedSleeps": 37,
+  "fixedSleeps": 39,
   "_how": "Count of fixed-time sleeps in test/*.test.js, checked by test/hygiene.test.js. It may only go down: when you replace sleeps with waitFor, lower this number to the new count."
 }

@@ -389,12 +389,12 @@ test('데모(가짜 AI) 팀으로 회의하면 차례에 맞는 짧은 답이 �
     const mm = meetMsgs(s.id);
     assert.deepEqual(mm.map((m) => m.meeting.phase), ['opinion', 'opinion', 'opinion', 'turn', 'research', 'turn', 'conclude'], '데모 반대편이 2바퀴에 질문 하나를 붙이고 조사 역할이 찾아 온다');
     const of = (phase) => mm.filter((m) => m.meeting.phase === phase);
-    // 데모 조사: 반대편의 질문을 조사 역할(데모 하나)이 사실 두 줄·출처·확인 못 함 한 줄로 답한다
+    // 데모 조사: 반대편의 질문을 조사 역할(데모 하나)이 "- 사실 | 출처 | 확인함" 두 줄과 확인 못 함 한 줄로 답한다(출처는 열리지 않는 example.test 주소)
     const [res] = of('research');
     assert.equal(res.agentId, a.id);
     assert.equal(res.checkOf, of('turn')[0].id);
-    assert.match(res.text, /출처: 데모 자료/);
-    assert.match(res.text, /확인 못 함: /);
+    assert.match(res.text, /\| https:\/\/example\.test\/demo\/check\/source-a \| 확인함/);
+    assert.match(res.text, /\| 없음 \| 확인 못 함$/m);
     assert.equal(of('turn')[0].check?.status, 'answered');
     assert.ok(of('turn')[0].check.question.trim());
     assert.equal(of('turn')[1].check, undefined, '반대편이 아닌 차례는 묻지 않는다');

@@ -4,6 +4,10 @@
 - Date: 2026-11-17
 - Related: [0005](0005-meeting-stage.md) (this record replaces its flow: what happens from round 2 and what the chair is given; 0005 is otherwise unchanged), [0009](0009-agents-ask-with-a-marked-block.md) (the verdict uses the same kind of marked block), `server/meeting.js`, `server/orchestrator.js` (`#meeting`, `#meetingPrompt`), `public/js/views/session.js`, `public/js/views/manage.js`, `test/meeting.test.js`, `test/meeting-turns.test.js`
 
+## Revision 2026-11-20: meetings inside a goal run start a new conversation
+
+In a goal's work run ([0017](0017-goal-mode-research-and-meeting-first.md)) the turns, verdicts and conclusion below run once in a new conversation: each prompt carries everything said so far, and the shorter prompt for a participant who continues its own conversation is not used. Since 2026-11-22, in a goal's work run only: every turn runs read-only for that call; the opinion ends with a position line; every turn is told to write first what it doesn't agree with and what made it change its position; a participant's own earlier words are shown apart from the others'; the opposing side is told to rebut the strongest claim with evidence; and when the turn rounds cost more than one call, the chair also gives a verdict after round 1 on whether everyone, the opposing side included, took the same position, and on agree the turn rounds are skipped (the verdicts between turn rounds below still leave the opposing side out). Meetings outside goal mode are unchanged.
+
 ## Context
 
 In decision 0005, every participant reviewed the others' opinions at the same time from round 2. Nobody answered anybody: each review was written before the other reviews of that round existed, so a meeting was parallel monologues rather than a conversation. A meeting also ran all its rounds even when everyone already agreed, and nobody was given the job of looking for weaknesses.

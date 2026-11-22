@@ -272,7 +272,8 @@ test('2. 끝까지: 훑어보기 → 조사 질문 → 질문마다 조사 → �
   ]);
   assert.equal(run.stages[2].count, 3, '단계 띠의 조사 ×3');
   assert.deepEqual(run.stages[3].meeting, { rounds: 2, chairId: a.id, tokenCap: 1000000, opposeId: null });
-  assert.equal(agentMsgs(s, (x) => x.runId === run.id && x.stageIndex === 3).length, meetingCalls(2, 2), '준비 회의의 실제 호출 수가 카드 어림값의 식과 같다');
+  assert.equal(agentMsgs(s, (x) => x.runId === run.id && x.stageIndex === 3).length, meetingCalls(2, 2), '준비 회의의 답 수가 카드 어림값의 식과 같다');
+  assert.equal(calls(from).filter((c) => c.texts[0]?.includes('[회의 안건]')).length, meetingCalls(2, 2), '준비 회의로 실제로 띄운 CLI 수가 카드 어림값의 식과 같다');
   assert.equal(m.calls.used, FULL);
   assert.equal(calls(from).length, FULL, '가짜 CLI 를 띄운 수와 같다');
   // 조사 노트(목표에 적힌 것과 카드). 카드는 대화·기억에 싣지 않는 글 없는 카드

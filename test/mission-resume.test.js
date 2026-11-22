@@ -464,7 +464,7 @@ test('9. 병렬 단계에서 한 명만 끊김: 이미 끝낸 사람은 다시 �
   await h2.app.close();
 });
 
-test('10. 회의 중 끊김: 회의는 1바퀴부터 참석자 전원과 조사 담당이 새 대화로, "[이어서]"는 각자의 첫 차례에만. 회의 설정이 바뀌면 이유와 함께 409', async () => {
+test('10. 회의 중 끊김: 회의는 1바퀴부터 다시 한다. 목표의 회의 차례는 늘 새 대화라 참석자·조사 담당의 저장된 대화는 그대로 두고 "[이어서]"도 안 붙인다. 회의 설정이 바뀌면 이유와 함께 409', async () => {
   const t = await app();
   const a = await mk('회의진행', '분석');
   const b = await mk('회의참석', '정리');
@@ -477,8 +477,11 @@ test('10. 회의 중 끊김: 회의는 1바퀴부터 참석자 전원과 조사 
   // 2바퀴 차례 글의 질문을 조사 담당이 찾는 중에 끊긴다
   await t.waitFor(() => h1.S(sid).messages.some((m) => m.meeting?.phase === 'research' && m.status === 'streaming') && h1.S(sid).mission.at.working.includes(r.id) && logged(base, '회의에서 나온 질문 하나를 도구로 찾아서 답해'), 40000, '회의 조사 중');
   assert.equal(h1.S(sid).mission.at.stageIndex, 0);
-  const { h2, snap } = await crash(h1, sid, (x) => { x.providerSessions[r.id] = 'claude-sess-research'; (x.sessionProvider ||= {})[r.id] = 'claude'; });
-  assert.ok(snap.providerSessions[a.id] && snap.providerSessions[b.id], '참석자는 회의 차례의 대화가 있었다');
+  // 목표 실행의 회의는 새 대화로 돈다(결정 0017): 회의 차례는 참석자의 CLI 대화 번호를 만들지도 쓰지도 않는다.
+  // 끊긴 회의를 이어서 해도 참석자·조사 담당의 저장된 대화를 그대로 두는지 보려고, 얼린 세션에 대화 번호를 심어 둔다
+  assert.ok(!h1.S(sid).providerSessions[a.id] && !h1.S(sid).providerSessions[b.id], '회의 차례는 참석자의 대화 번호를 만들지 않는다');
+  const { h2, snap } = await crash(h1, sid, (x) => { for (const [id, sess] of [[r.id, 'claude-sess-research'], [a.id, 'claude-sess-chair'], [b.id, 'claude-sess-member']]) { x.providerSessions[id] = sess; (x.sessionProvider ||= {})[id] = 'claude'; } });
+  assert.ok(snap.providerSessions[a.id] && snap.providerSessions[b.id], '참석자에게 이어 갈 대화 번호가 있었다');
   await stays(h2, sid, snap);
   // 회의 설정(바퀴 수)을 바꾸면 무엇이 달라졌는지 알려 주며 거절하고, 되돌리면 이어 간다
   const team = structuredClone(h2.app.store.get('teams', tm.id));
@@ -490,19 +493,18 @@ test('10. 회의 중 끊김: 회의는 1바퀴부터 참석자 전원과 조사 
   assert.equal((await h2.api('PUT', `/api/teams/${tm.id}`, team)).status, 200);
   const from = t.fakeLog().length;
   assert.equal((await h2.resume(sid, snap.mission.id)).status, 200);
-  assert.deepEqual([a.id, b.id, r.id].map((id) => h2.S(sid).providerSessions[id]), [undefined, undefined, undefined], '참석자 전원과 조사 담당은 새 대화로');
+  assert.deepEqual([a.id, b.id, r.id].map((id) => h2.S(sid).providerSessions[id]), ['claude-sess-chair', 'claude-sess-member', 'claude-sess-research'], '참석자·조사 담당의 저장된 대화는 그대로');
   await done(h2, sid);
   assert.equal(h2.S(sid).mission.status, 'done');
   const run = h2.S(sid).runs.at(-1);
   const phases = h2.S(sid).messages.filter((m) => m.runId === run.id && m.stageIndex === 0).map((m) => m.meeting?.phase);
   assert.deepEqual(phases, ['opinion', 'opinion', 'turn', 'research', 'conclude'], '회의를 1바퀴부터 다시 했다');
   const meetPrompts = texts(from).filter((p) => p.includes('"회의"를 네가 맡았어'));
-  assert.equal(meetPrompts.filter((p) => p.includes('[이어서]')).length, 3, '두 참석자의 첫 의견과 조사 담당의 첫 조사에만');
+  assert.ok(meetPrompts.length >= 5 && meetPrompts.every((p) => !p.includes('[이어서]')), '회의 차례에는 "[이어서]"가 안 붙는다(작업 폴더를 확인하라는 말이 회의 발언에는 맞지 않는다)');
   const research = calls(from).find((x) => x.texts[0]?.includes('회의에서 나온 질문 하나를 도구로 찾아서 답해'));
-  assert.ok(research.texts[0].includes('[이어서]') && !research.args.includes('--resume'), '조사 담당도 새 대화');
-  assert.ok(meetPrompts.filter((p) => !p.includes('[이어서]')).length >= 2, '2바퀴 차례와 결론에는 안 붙는다');
+  assert.ok(!research.texts[0].includes('[이어서]') && !research.args.includes('--resume'), '저장된 대화가 있어도 회의 중 조사는 새 대화(한 번 실행)');
   assert.ok(!texts(from).some((p) => p.includes('"빌드"를 네가 맡았어') && p.includes('[이어서]')));
-  assert.ok(h2.S(sid).mission.log.some((x) => x.text === `회의 단계 "회의"는 1바퀴부터 다시 하고, 참석자(${a.name}, ${b.name}, ${r.name})는 새 대화로 시작해.`));
+  assert.ok(h2.S(sid).mission.log.some((x) => x.text === '회의 단계 "회의"는 1바퀴부터 다시 해. 회의 차례는 늘 새 대화라 참석자의 저장된 대화는 그대로 둬.'));
   await h2.app.close();
 });
 

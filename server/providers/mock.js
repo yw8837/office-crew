@@ -5,7 +5,7 @@ import { makeHandle } from './util.js';
 import { tr } from '../i18n.js';
 import { roleKind } from '../routing.js';
 import { checkBlock } from '../meeting.js';
-import { goalBlock, reviewBlock } from '../mission.js';
+import { goalBlock, reviewBlock, researchBlock } from '../mission.js';
 
 // 역할 키(조사·정리·분석·빌드)는 그대로, 보이는 문구만 설정 언어로.
 // 에이전트의 역할 이름은 첫 실행 때 OS 언어로 저장되므로(Research, 調査 …) 역할 종류로 바꿔서 키를 찾는다
@@ -65,9 +65,11 @@ const OPPOSE = () => [tr('지금 가장 힘을 받는 안'), tr('그 안의 약�
 const isOpposer = (prompt) => prompt.includes(tr('너는 이번 회의에서 반대편이야. 지금 가장 힘을 받는 안의 약점, 빠진 것, 틀릴 조건을 찾아서 말해. 근거 없이 꾸며 내지는 마. 반대할 게 정말 없으면 무엇을 확인했는지 적어.'));
 // 반대편이 2바퀴 차례에서 질문 블록 안내를 받았으면 답 끝에 질문 하나를 붙인다(데모에서 회의 중 조사가 보이게)
 const asksCheck = (prompt) => prompt.includes(checkBlock()) && prompt.includes(tr('[회의 — 차례 발언 ({r}/{n}바퀴)]', { r: 2, n: '\u0000' }).split('\u0000')[0]);
-function meetingAnswer(phase, role, opposer, ask) {
+function meetingAnswer(phase, role, opposer, ask, prompt = '') {
   if (phase === 'research') {
-    return [`- ${tr('다른 자료 2건에서도 같은 방향의 결과가 나왔어.')}`, `- ${tr('그중 1건은 표본이 작아서 근거로는 약해.')}`, `- ${tr('출처: 데모 자료')}`, `- ${tr('확인 못 함: 반대 결과를 낸 자료는 찾지 못했어.')}`].join('\n');
+    // 조사 답 형식("- 사실 | 출처 | 확인함·확인 못 함")대로. 출처는 데모라 실제로 열리지 않는 example.test 주소
+    return [`- ${tr('다른 자료 2건에서도 같은 방향의 결과가 나왔어.')} | https://example.test/demo/check/source-a | ${tr('확인함')}`, `- ${tr('그중 1건은 표본이 작아서 근거로는 약해.')} | https://example.test/demo/check/source-b | ${tr('확인함')}`,
+      `- ${tr('반대 결과를 낸 자료는 찾지 못했어.')} | ${tr('없음')} | ${tr('확인 못 함')}`].join('\n');
   }
   if (phase === 'opinion') {
     const [claim, why, wrong, sure] = OPINIONS()[role] || OPINIONS().분석;
@@ -80,7 +82,9 @@ function meetingAnswer(phase, role, opposer, ask) {
   }
   // 판정: 데모 진행자는 한 바퀴 만에 합의한다
   if (phase === 'judge') {
-    return `${tr('반대편을 뺀 참석자들의 입장이 같은 안을 가리켜. 반대편이 짚은 약점은 결론의 남은 이견에 적을게.')}\n\n\`\`\`oc-verdict\n${JSON.stringify({ verdict: 'agree', reason: tr('모두 같은 안을 가리켜.') })}\n\`\`\``;
+    // 목표 회의의 1바퀴 뒤 판정은 반대편을 포함해서 본다(결정 0017). 그 밖의 판정은 반대편을 뺀다(결정 0010)
+    const first = String(prompt || '').includes(tr('너는 이 회의의 진행자야. 1바퀴 의견만 보고 차례 바퀴를 건너뛸지 판정해. 반대편을 포함한 모든 참석자의 "입장"이 같은 안을 가리킬 때만 합의야. 한 사람이라도 다른 안이면 계속이야.'));
+    return `${first ? tr('1바퀴에 반대편을 포함한 모두의 입장이 같은 안을 가리켜. 차례 바퀴 없이 결론을 낼게.') : tr('반대편을 뺀 참석자들의 입장이 같은 안을 가리켜. 반대편이 짚은 약점은 결론의 남은 이견에 적을게.')}\n\n\`\`\`oc-verdict\n${JSON.stringify({ verdict: 'agree', reason: tr('모두 같은 안을 가리켜.') })}\n\`\`\``;
   }
   return [
     `## ${tr('회의 결론')}`, '',
@@ -129,6 +133,33 @@ function reviewAnswer({ nonce, goal, round, ids }) {
   return `${tr('기준마다 확인했어(데모).')}\n\n\`\`\`oc-review\n${JSON.stringify({ nonce, results })}\n\`\`\``;
 }
 
+// ── 일하기 전 조사(결정 0017) ──
+// 훑어보기·조사 프롬프트는 코드가 만든 머리 줄("[조사 전 훑어보기]", "[조사 — 질문 n/m]")로 시작하고, 조사 질문 프롬프트는 블록 예시(researchBlock())로 끝난다.
+// 그 모양일 때만 그 차례로 보고 같은 형식의 짧은 답을 낸다(데모 팀으로 사용량 0으로 조사·회의를 눌러 볼 수 있게)
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function prepTurn(prompt) {
+  const p = String(prompt);
+  const first = p.split('\n', 1)[0];
+  if (first === tr('[조사 전 훑어보기]')) return { kind: 'scan' };
+  if (p.trimEnd().endsWith(researchBlock()) && p.split('\n').includes(tr('[조사 질문 뽑기]'))) return { kind: 'questions' };
+  const head = new RegExp(`^${esc(tr('[조사 — 질문 {n}/{total}]')).replace('\\{n\\}', '(\\d+)').replace('\\{total\\}', '\\d+')}$`);
+  const m = first.match(head);
+  return m ? { kind: 'research', n: Number(m[1]) } : null;
+}
+function prepAnswer({ kind, n }, prompt) {
+  const t = topic(prompt);
+  if (kind === 'scan') {
+    return [tr('## 훑어보기 — {t}', { t }), '', `- ${tr('주제: 요청을 작게 끝까지 해내는 방법(데모)')}`, `- ${tr('지금 사정: 비슷한 자료 2건이 있어(데모)')}`, `- ${tr('출발할 자료: 데모 웹 검색 · 내부 문서')}`, `- ${tr('확인해야 할 가정: 마감과 범위(확인 못 함)')}`].join('\n');
+  }
+  if (kind === 'questions') {
+    const questions = [tr('비슷한 서비스나 사례는 무엇이 있나?'), tr('사용자들이 가장 많이 불만을 말하는 점은?'), tr('지켜야 할 조건이나 마감은 무엇인가?')];
+    return `${tr('조사할 질문을 뽑았어(데모).')}\n\n\`\`\`oc-research\n${JSON.stringify({ questions })}\n\`\`\``;
+  }
+  // 조사 답 형식("- 사실 | 출처 | 확인함·확인 못 함")대로. 출처는 데모라 실제로 열리지 않는 example.test 주소(결정 0017)
+  return [tr('## 조사 {n} — 찾은 사실(데모)', { n }), '', `- ${tr('자료 2건이 같은 방향을 가리켜.')} | https://example.test/demo/q${n}/source-a | ${tr('확인함')}`,
+    `- ${tr('그중 1건은 표본이 작아.')} | https://example.test/demo/q${n}/source-b | ${tr('확인함')}`, `- ${tr('반대 결과를 낸 자료는 찾지 못했어.')} | ${tr('없음')} | ${tr('확인 못 함')}`].join('\n');
+}
+
 export default {
   id: 'mock', get label() { return tr('데모'); }, get sub() { return tr('가상 에이전트 · 사용량 0'); }, kind: 'mock', color: '#64748b',
   efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -156,8 +187,9 @@ export default {
       const phase = meetingPhase(prompt);
       const goal = !phase && isGoalTurn(prompt);
       const review = !phase && !goal ? reviewTurn(prompt) : null;
-      // 회의 중과 목표 잡기·기준 판정 차례에는 도구를 쓰지 않는다(파일을 고치지 말라는 지시와 같게)
-      for (const [name, input, ms] of (phase || goal || review ? [] : PLANS()[roleKey(agent.role)] || [])) {
+      const prep = !phase && !goal && !review ? prepTurn(prompt) : null;
+      // 회의 중과 목표 잡기·기준 판정·조사 질문 차례에는 도구를 쓰지 않는다(파일을 고치지 말라는 지시와 같게). 훑어보기·조사는 웹 검색만
+      for (const [name, input, ms] of (phase || goal || review || prep?.kind === 'questions' ? [] : prep ? PLANS().조사.slice(0, 1) : PLANS()[roleKey(agent.role)] || [])) {
         if (stopped) break;
         const id = `t${++n}`;
         emit({ type: 'tool', id, name, input, status: 'running' });
@@ -167,8 +199,9 @@ export default {
         }
         emit({ type: 'tool', id, name, status: 'done', output: tr('{name} 완료(데모)', { name }) });
       }
-      if ((phase || goal || review) && !stopped) await wait(1200); // 읽고 생각하는 시간
-      const body = phase ? meetingAnswer(phase, roleKey(agent.role), isOpposer(prompt), asksCheck(prompt)) : goal ? goalAnswer(prompt) : review ? reviewAnswer(review) : answer(roleKey(agent.role), agent.name, prompt);
+      if ((phase || goal || review || prep?.kind === 'questions') && !stopped) await wait(1200); // 읽고 생각하는 시간
+      const body = phase ? meetingAnswer(phase, roleKey(agent.role), isOpposer(prompt), asksCheck(prompt), prompt) : goal ? goalAnswer(prompt) : review ? reviewAnswer(review)
+        : prep ? prepAnswer(prep, prompt) : answer(roleKey(agent.role), agent.name, prompt);
       for (let i = 0; i < body.length && !stopped;) {
         const step = 2 + Math.floor(Math.random() * 5);
         const piece = body.slice(i, i + step);

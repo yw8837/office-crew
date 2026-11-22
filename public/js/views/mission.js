@@ -8,7 +8,12 @@ import { t, locale } from '../i18n/index.js';
 
 const CRIT_COUNT = 7; // 서버와 같은 상한(server/mission.js)
 const lines = (text) => String(text || '').split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
-const viewOf = (x) => ({ goal: x?.goal || '', criteria: [...(x?.criteria || [])], outOfScope: [...(x?.outOfScope || [])], userDecides: [...(x?.userDecides || [])] });
+// 카드 값(서버가 대조하는 모양). 기준마다 확인 방법(checks)과 바뀌면 안 되는 것(keep)은 있을 때만(결정 0014 개정. 옛 카드는 없다)
+const viewOf = (x) => ({
+  goal: x?.goal || '', criteria: [...(x?.criteria || [])], outOfScope: [...(x?.outOfScope || [])], userDecides: [...(x?.userDecides || [])],
+  ...(x?.checks?.some(Boolean) ? { checks: [...x.checks] } : {}), ...(x?.keep?.length ? { keep: [...x.keep] } : {}),
+});
+const checksOf = (v) => v.criteria.map((_, i) => v.checks?.[i] || '');
 
 // 목표 상태 칩: [글, 칩 모양]
 export const missionChip = (status) => ({
@@ -39,7 +44,8 @@ function prepEstimate(pp, on) {
   return `${t('어림값(일하기 전 대목만)')}: ${parts.join(' · ')}. ${t('블록이나 빈 답을 다시 요청하거나 다시 시도하면 더 들어.')}`;
 }
 // 조사 한 갈래가 끝나지 못한 이유(칩)
-const missChip = (status) => ({ empty: t('빈 답'), failed: t('오류'), skipped: t('건너뜀') }[status] || t('끝나지 않음'));
+// 빈 답은 빈 답 다시 요청까지 두 번 놓친 갈래라 일 카드·판정과 같은 이름 "구멍"을 붙인다(결정 0018)
+const missChip = (status) => ({ empty: `${t('빈 답')} · ${t('구멍')}`, failed: t('오류'), skipped: t('건너뜀') }[status] || t('끝나지 않음'));
 
 // 조사 노트 카드(결정 0017): 코드가 묶은 카드. 머리에 확인 못 한 수, 질문마다 답의 앞부분과 그 답으로 가는 "전체 보기". 모두 에이전트가 쓴 글이다
 export function ResearchCard({ m }) {
@@ -154,11 +160,55 @@ function Section({ title, items, ordered = false, empty }) {
 }
 
 function CardBody({ v }) {
+  const checks = checksOf(v);
+  // 기준마다 확인 방법이 있으면 그 기준 아래 작게(결정 0014 개정)
+  const crit = v.criteria.map((c, i) => (checks[i] ? html`${c}<div class="small muted">${t('확인 방법')}: ${checks[i]}</div>` : c));
   return html`
     <div class="goal-sec"><div class="small muted"><b>${t('목표')}</b></div><div>${v.goal || html`<span class="muted">${t('(비어 있음)')}</span>`}</div></div>
-    <${Section} title=${t('합격 기준')} items=${v.criteria} ordered=${true} empty=${t('기준이 없어. "고쳐서 시작"으로 기준을 적어 줘.')} />
+    <${Section} title=${t('합격 기준')} items=${crit} ordered=${true} empty=${t('기준이 없어. "고쳐서 시작"으로 기준을 적어 줘.')} />
     <${Section} title=${t('범위 밖')} items=${v.outOfScope} empty=${t('없음')} />
-    <${Section} title=${t('사용자가 정할 것')} items=${v.userDecides} empty=${t('없음')} />`;
+    <${Section} title=${t('사용자가 정할 것')} items=${v.userDecides} empty=${t('없음')} />
+    ${v.keep?.length > 0 && html`<${Section} title=${t('바뀌면 안 되는 것')} items=${v.keep} empty=${t('없음')} />`}`;
+}
+
+// ── 일 카드(결정 0018) ──
+// 일하는 방식을 못 쓰는 이유
+const workWhy = (why) => ({
+  approve: t('팀 단계에 승인 관문이 있어서 일 카드로는 못 해(관문을 말없이 없애지 않아).'),
+  meeting: t('팀 단계에 회의가 있어서 일 카드로는 못 해(회의를 말없이 없애지 않아).'),
+  few: t('검수 역할이 아닌 팀원이 한 명뿐이라 일 카드로 나눌 수 없어.'),
+}[why] || '');
+// 카드 상태 칩: [글, 칩 모양]. 기다리는 카드는 하는 중으로 세지 않는다
+export const cardChip = (status) => ({ waiting: [t('기다림'), ''], running: [t('하는 중'), ' accent'], done: [t('끝'), ' ok'], blocked: [t('막힘'), ' err'], skipped: [t('건너뜀'), ' warn'], hole: [t('구멍'), ' warn'] }[status] || [status, '']);
+const KIND = () => ({ research: t('조사'), write: t('글'), build: t('만들기'), check: t('확인') });
+// 기다리는 카드가 무엇을 기다리는지(앞 카드가 다 끝났으면 차례를 기다림)
+const waitWords = (c, cards) => {
+  const left = (c.needs || []).filter((n) => !['done', 'hole', 'skipped', 'blocked'].includes(cards.find((x) => x.id === n)?.status));
+  return left.length ? t('{ids}을(를) 기다림', { ids: left.join(', ') }) : t('차례를 기다림');
+};
+
+// 계획 카드: 진행자가 쓴 일 카드 목록(코드가 다듬고 번호·단계를 붙임). 사용자 확인 없이 이어 간다. 지금 목표의 카드면 상태 칩도
+export function PlanCard({ m }) {
+  const s = state.sessionData[state.route.id];
+  const live = s?.mission?.id === m.missionId ? s.mission.cards || [] : [];
+  return html`<div class="msg proposal"><div class="hire goal-card" role="group" aria-label=${t('일 계획')}>
+    <div class="hire-head"><b>📋 ${t('일 계획')}</b><span class="chip">${t('카드 {n}장', { n: m.cards.length })}</span>
+      <span class="small muted">${t('에이전트가 씀 · 사용자 확인 안 함')}</span></div>
+    ${m.fallback && html`<div class="warnbox" role="note">${t('진행자 답에서 계획 블록을 읽지 못해서 카드 하나로 일해.')}</div>`}
+    ${(m.reassigned || []).map((x) => html`<div class="notice" role="note">${t('{id}의 담당 "{from}"이(가) 팀 명단에 없어서 {to}에게 맡겼어.', { id: x.id, from: x.from || '?', to: x.to })}</div>`)}
+    <div class="small">${m.wavesText}</div>
+    <ol class="plan-cards">${m.cards.map((c) => {
+      const now = live.find((x) => x.id === c.id);
+      const [label, cls] = now ? cardChip(now.status) : ['', ''];
+      return html`<li>
+        <div><b>${c.id}</b> · ${c.title} <span class="muted">— ${agentById(c.ownerId)?.name || c.owner} · ${KIND()[c.kind] || c.kind}</span>${now && html` <span class=${`chip${cls}`}>${label}</span>`}</div>
+        ${c.needs?.length > 0 && html`<div class="small muted">${t('{ids}의 결과를 기다려', { ids: c.needs.join(', ') })}</div>`}
+        ${c.done && html`<div class="small muted">${t('끝 기준')}: ${c.done}</div>`}
+        <div class="small muted">${t('맡을 파일')}: ${c.files?.length ? c.files.join(', ') : t('(적지 않음)')}${c.solo ? ` · ${t('파일을 안 적어서 혼자 돌아')}` : ''}</div>
+        ${c.not && html`<div class="small muted">${t('건드리면 안 되는 것')}: ${c.not}</div>`}
+      </li>`;
+    })}</ol>
+  </div></div>`;
 }
 
 // ── 목표 카드 ──
@@ -173,6 +223,8 @@ export function GoalCard({ m }) {
   const [kept, setKept] = useState([]); // "남기기"를 고른 팀 단계 번호
   const [prepShown, setPrepShown] = useState(null); // 조사·회의 먼저가 지금 팀으로 안 될 때 서버가 준 지금 값(결정 0017)
   const [prepOn, setPrepOn] = useState(null); // 사용자가 고친 체크 { research, meeting }(없으면 카드의 기본값)
+  const [workShown, setWorkShown] = useState(null); // 일 카드를 지금 팀으로 못 쓸 때 서버가 준 지금 값(결정 0018)
+  const [workSel, setWorkSel] = useState(null); // 사용자가 고른 일하는 방식('cards' | 'stages', 없으면 카드의 기본값)
   const goalIn = useRef(null);
   const editBtn = useRef(null);
   const editing = !!edit;
@@ -191,6 +243,7 @@ export function GoalCard({ m }) {
       <${CardBody} v=${v} />
       ${mission && 'reviewerId' in mission && mission.status !== 'unreviewed' && html`<div class="small muted">${mission.reviewerId ? t('검수: {name}이(가) 기준마다 판정해.', { name: agentById(mission.reviewerId)?.name || mission.reviewerId }) : t('검수할 다른 팀원이 없어서 판정 없이 끝나고 네게 물어.')}${mission.dropped?.length ? ` · ${t('기준 판정으로 대신해서 건너뛰는 단계: {labels}', { labels: mission.dropped.join(', ') })}` : ''}</div>`}
       ${m.prepChosen && html`<div class="small muted">${prepWords(m.prepChosen)}</div>`}
+      ${m.workChosen && html`<div class="small muted">${m.workChosen === 'cards' ? t('일 카드로 나눠 해.') : t('팀 단계표대로 해.')}</div>`}
       ${mission?.status === 'unreviewed' && html`<div class="notice">${t('일은 끝났어. 기준 판정은 아직 없어.')}</div>`}
       ${mission?.status === 'done' && html`<div class="notice">✅ ${t('기준 {n}개를 모두 통과해서 끝냈어.', { n: mission.criteria.length })}</div>`}
       ${mission?.status === 'accepted' && html`<div class="notice">${t('받아들여서 끝냈어 · 남은 기준 {n}개', { n: left })}</div>`}
@@ -217,6 +270,8 @@ export function GoalCard({ m }) {
       if (e.data?.review) { setRvShown(e.data.review); setKept((k) => k.filter((i) => e.data.review.droppable?.some((d) => d.index === i))); }
       // 조사·회의 먼저가 지금 팀으로 안 되면 지금 값으로 다시 그린다(이제 못 하는 대목의 체크는 끈다)
       if (e.data?.prep) { const p = e.data.prep; setPrepShown(p); setPrepOn((o) => ({ research: !!(o || prepOf(p)).research && p.research.can, meeting: !!(o || prepOf(p)).meeting && p.meeting.can })); }
+      // 일 카드를 지금 팀으로 못 쓰면 지금 값으로 다시 그리고 팀 단계표로 돌린다
+      if (e.data?.work) { setWorkShown(e.data.work); setWorkSel(e.data.work.can ? null : 'stages'); }
       toast(e.message, 'error');
       setBusy(false);
       return false;
@@ -229,10 +284,15 @@ export function GoalCard({ m }) {
   const on = pp ? prepOn || prepOf(pp) : null;
   const prep = pp ? { research: !!on.research && pp.research.can, meeting: !!on.meeting && pp.meeting.can, ...(pp.lead ? { lead: pp.lead.id } : {}), researchers: pp.research.who.map((w) => w.id), attendees: pp.meeting.who.map((w) => w.id) } : undefined;
   const noLead = !!pp?.lead && !pp.lead.inTeam; // 카드를 본 뒤 진행자가 팀에서 빠졌다(조사 질문·회의를 맡을 사람이 없다)
-  const start = () => send('confirm', { missionId: m.missionId, expected: v, review, prep });
-  const edited = edit && { goal: edit.goal.trim(), criteria: lines(edit.criteria), outOfScope: lines(edit.outOfScope), userDecides: lines(edit.userDecides) };
+  // 일하는 방식(결정 0018): 옛 카드(이 칸 없음)는 보내지 않는다(팀 단계표대로)
+  const wk = workShown || m.work || null;
+  const work = wk ? (workSel || wk.on) : undefined;
+  const start = () => send('confirm', { missionId: m.missionId, expected: v, review, prep, ...(wk ? { work } : {}) });
+  // 고친 값: 기준 줄과 같은 줄의 확인 방법을 짝지어 빈 기준은 그 확인 방법과 같이 뺀다
+  const pairs = edit ? String(edit.criteria).split(/\r?\n/).map((c, i) => [c.trim(), (String(edit.checks || '').split(/\r?\n/)[i] || '').trim()]).filter(([c]) => c) : [];
+  const edited = edit && { goal: edit.goal.trim(), criteria: pairs.map((x) => x[0]), checks: pairs.map((x) => x[1]), outOfScope: lines(edit.outOfScope), userDecides: lines(edit.userDecides), keep: lines(edit.keep) };
   const canEdited = !!edited && !!edited.goal && edited.criteria.length > 0;
-  const startEdited = () => { if (canEdited) send('confirm', { missionId: m.missionId, expected: v, edited, review, prep }); };
+  const startEdited = () => { if (canEdited) send('confirm', { missionId: m.missionId, expected: v, edited, review, prep, ...(wk ? { work } : {}) }); };
   const names = (who) => who.map((w) => agentById(w.id)?.name || w.name || w.id).join(', ');
   const prepLine = pp && html`<div class="goal-sec goal-prep">
     <div class="small muted"><b>${t('조사·회의 먼저')}</b></div>
@@ -254,13 +314,22 @@ export function GoalCard({ m }) {
     <div class="small muted"><b>${t('검수')}</b></div>
     ${rvShown && html`<div class="notice" role="status">${t('검수자나 건너뛸 단계가 바뀌어서 지금 값으로 다시 그렸어. 다시 확인해 줘.')}</div>`}
     <div>${rv.reviewerId ? t('검수: {name}이(가) 기준마다 판정해.', { name: rv.reviewerName || agentById(rv.reviewerId)?.name || rv.reviewerId }) : t('검수할 다른 팀원이 없어서 판정 없이 끝나고 네게 물어.')}</div>
-    ${(rv.droppable || []).map((d) => html`<label class="goal-keep small">
+    ${rv.reviewerId && m.reviewerReadOnly !== undefined && html`<div class="small">${m.reviewerReadOnly ? t('읽기 전용이라 명령·테스트를 못 돌려. 파일을 읽어서 확인하는 데까지만 판정해.') : t('명령·테스트를 돌려 확인할 수 있어.')}</div>`}
+    ${work !== 'cards' && (rv.droppable || []).map((d) => html`<label class="goal-keep small">
       <input type="checkbox" checked=${kept.includes(d.index)} disabled=${busy} onChange=${(e) => keep(d.index, e.target.checked)} />
       <span><b>${t('남기기')}</b> · "${d.label}"${d.names?.length ? ` (${d.names.join(', ')})` : ''} — ${kept.includes(d.index) ? t('남겨서 그대로 돌려.') : t('이 단계는 기준 판정으로 대신해서 건너뛰어.')}
         ${d.instruction && html`<span class="muted goal-keep-ins">${t('이 단계의 지시(건너뛰면 안 쓰여): {text}', { text: d.instruction })}</span>`}</span>
     </label>`)}
   </div>`;
-  const openEdit = () => setEdit({ goal: v.goal, criteria: v.criteria.join('\n'), outOfScope: v.outOfScope.join('\n'), userDecides: v.userDecides.join('\n') });
+  const workLine = wk && html`<div class="goal-sec goal-work" role="radiogroup" aria-label=${t('일하는 방식')}>
+    <div class="small muted"><b>${t('일하는 방식')}</b></div>
+    ${workShown && html`<div class="notice" role="status">${t('지금 팀으로는 일 카드로 나눠 할 수 없어서 다시 그렸어. 다시 확인해 줘.')}</div>`}
+    <label class="goal-keep small"><input type="radio" name=${`work-${m.id}`} checked=${work === 'cards'} disabled=${busy || !wk.can} onChange=${() => setWorkSel('cards')} />
+      <span><b>${t('일 카드로 나눠 하기')}</b> — ${wk.can ? t('진행자가 일을 카드 몇 장으로 나눠 담당에게 맡겨(계획 1번). 결과가 실제로 필요할 때만 순서를 걸어. 팀 단계표의 단계는 이번 목표에서 돌지 않아.') : workWhy(wk.why)}</span></label>
+    <label class="goal-keep small"><input type="radio" name=${`work-${m.id}`} checked=${work !== 'cards'} disabled=${busy} onChange=${() => setWorkSel('stages')} />
+      <span><b>${t('팀 단계표대로')}</b> — ${t('팀에 짜 둔 단계를 순서대로 돌아.')}</span></label>
+  </div>`;
+  const openEdit = () => setEdit({ goal: v.goal, criteria: v.criteria.join('\n'), checks: checksOf(v).join('\n'), outOfScope: v.outOfScope.join('\n'), userDecides: v.userDecides.join('\n'), keep: (v.keep || []).join('\n') });
   const closeEdit = () => { setEdit(null); setTimeout(() => editBtn.current?.focus(), 0); };
   const cancel = () => send('cancel', { missionId: m.missionId });
   // 고치는 칸: Esc 는 고치기 취소, Ctrl+Enter 만 이 내용으로 시작(목표 한 줄 칸도 Enter 만으로는 시작하지 않는다)
@@ -283,16 +352,19 @@ export function GoalCard({ m }) {
         <label>${t('목표 (한 줄)')}<input class="input" ref=${goalIn} value=${edit.goal} maxlength="200" disabled=${busy}
           onInput=${(e) => setEdit({ ...edit, goal: e.target.value })} onKeyDown=${onKey} /></label>
         ${field('criteria', t('합격 기준 (한 줄에 하나, {n}개까지)', { n: CRIT_COUNT }), 4)}
+        ${field('checks', t('확인 방법 (기준과 같은 줄에, 없으면 빈 줄)'), 3)}
         ${field('outOfScope', t('범위 밖 (한 줄에 하나)'), 2)}
         ${field('userDecides', t('사용자가 정할 것 (한 줄에 하나)'), 2)}
+        ${field('keep', t('바뀌면 안 되는 것 (한 줄에 하나)'), 2)}
         <div class="small muted">${t('기준 {n}개', { n: edited.criteria.length })}${edited.criteria.length > CRIT_COUNT ? ` · ${t('{n}개를 넘는 줄은 빠져.', { n: CRIT_COUNT })}` : ''} · ${t('Esc 고치기 취소 · Ctrl+Enter 시작')}</div>
+        ${workLine}
         ${reviewLine}
         ${prepLine}
         <div class="hire-acts">
           <button class="btn primary sm" disabled=${busy || !canEdited} onClick=${startEdited}>${t('이 내용으로 시작')}</button>
           <button class="btn sm" disabled=${busy} onClick=${closeEdit}>${t('고치기 취소')}</button>
         </div>
-      </div>` : html`<${CardBody} v=${v} />${reviewLine}${prepLine}`}
+      </div>` : html`<${CardBody} v=${v} />${workLine}${reviewLine}${prepLine}`}
     ${!editing && html`<div class="hire-acts">
       <button class="btn primary sm" disabled=${busy || stale || !v.goal || !v.criteria.length} onClick=${start}>${t('이대로 시작')}</button>
       <button class="btn sm" ref=${editBtn} disabled=${busy || stale} aria-expanded=${editing ? 'true' : 'false'} onClick=${openEdit}>${t('고쳐서 시작')}</button>
@@ -318,12 +390,38 @@ export function MissionGate({ s, run }) {
   const row = (k, label, desc, action) => html`<button type="button" class="ask-row" disabled=${busy} onClick=${() => ctl(action)}>
     <span class="ask-num" aria-hidden="true">${k}</span><span class="ask-row-text"><b>${label}</b>${desc && html`<span>${desc}</span>`}</span><span class="ask-go" aria-hidden="true">→</span>
   </button>`;
+  // 일 카드(결정 0018): 한 시간 안에 시작한 카드 수 상한
+  if (hold.reason === 'cap' && hold.kind === 'rate') {
+    return html`<div class="ask-panel mission-gate" role="group" aria-label=${t('카드 시작 수 상한')}>
+      <div class="ask-head"><span class="ask-who">🔢 ${t('한 시간 안에 시작한 카드')}</span></div>
+      <div class="ask-question">${t('한 시간 안에 카드 {used}장을 시작했어(상한 {cap}장). 더 시작할까?', { used: hold.used, cap: hold.cap })}</div>
+      <div class="ask-rows">${row(1, t('{n}장 더', { n: hold.step }), t('상한을 늘리고 이어서 해.'), 'more')}</div>
+      <div class="ask-foot"><span class="grow"></span><button type="button" class="btn sm danger" disabled=${busy} onClick=${() => ctl('stop')}>${t('그만')}</button></div>
+    </div>`;
+  }
   if (hold.reason === 'cap') {
     return html`<div class="ask-panel mission-gate" role="group" aria-label=${t('호출 상한')}>
       <div class="ask-head"><span class="ask-who">🔢 ${t('목표의 호출 상한')}</span></div>
       <div class="ask-question">${t('호출 {used}번에 닿았어(상한 {cap}번). 더 할까?', { used: hold.used, cap: hold.cap })}</div>
       <div class="small muted">${t('다음 단계를 시작하기 전에 멈췄어. 회의 단계는 회의 호출 수(의견·차례·판정·결론)를 보고 시작해. 단계 안의 다시 시도·이어받기와 회의 중 조사는 상한을 넘을 수 있어.')}</div>
       <div class="ask-rows">${row(1, t('{n}번 더', { n: hold.step }), t('상한을 늘리고 이어서 해.'), 'more')}</div>
+      <div class="ask-foot"><span class="grow"></span><button type="button" class="btn sm danger" disabled=${busy} onClick=${() => ctl('stop')}>${t('그만')}</button></div>
+    </div>`;
+  }
+  // 막힘(oc-blocked)과 일 카드의 되풀이 상한(결정 0018)
+  if (hold.kind === 'blocked' || hold.kind === 'limit') {
+    const blocked = hold.kind === 'blocked';
+    const q = blocked ? t('기준을 지킬 수 없다는 답이 왔어. 기준 판정으로 넘기지 않고 멈췄어. 어떻게 할까?')
+      : t('카드 {ids}를 시작한 횟수가 상한에 닿았어. 어떻게 할까?', { ids: (hold.cards || []).map((c) => c.id).join(', ') });
+    return html`<div class="ask-panel mission-gate" role="group" aria-label=${blocked ? t('막힘') : t('카드 되풀이 상한')}>
+      <div class="ask-head"><span class="ask-who">${blocked ? `⛔ ${t('막힘')}` : `🔁 ${t('카드 되풀이 상한')}`}</span></div>
+      <div class="ask-question">${q}</div>
+      ${blocked ? html`<ul class="small">${(hold.blocked || []).map((b) => html`<li><b>${b.card ? `${b.card} · ${b.name}` : b.name}</b>: ${b.reason} <span class="muted">· ${t('에이전트가 씀 · 사용자 확인 안 함')}</span></li>`)}</ul>`
+        : html`<ul class="small">${(hold.cards || []).map((c) => html`<li><b>${c.id}</b> · ${c.title} <span class="muted">(${t('{n}번 시작함 · 상한 {cap}번', { n: c.starts, cap: c.cap })})</span></li>`)}</ul>`}
+      <div class="ask-rows">
+        ${row(1, t('받아들이기'), blocked ? t('막힌 채로 기준 판정 없이 끝내.') : t('그 카드는 다시 돌리지 않고 지금 결과로 이어 가.'), 'accept')}
+        ${row(2, t('한 번 더'), blocked ? t('막힌 일만 한 번 더 해.') : t('그 카드를 한 번 더 시작해.'), 'more')}
+      </div>
       <div class="ask-foot"><span class="grow"></span><button type="button" class="btn sm danger" disabled=${busy} onClick=${() => ctl('stop')}>${t('그만')}</button></div>
     </div>`;
   }
@@ -336,6 +434,8 @@ export function MissionGate({ s, run }) {
     <div class="ask-head"><span class="ask-who">🎯 ${t('목표 판정')}</span></div>
     <div class="ask-question">${q}</div>
     ${left.length > 0 && html`<div class="crit-table" role="list" aria-label=${t('남은 기준')}>${left.map((c) => html`<${CritRow} c=${{ ...c, text: `${c.id}. ${c.text}` }} />`)}</div>`}
+    ${hold.keepBroken?.length > 0 && html`<div class="warnbox" role="note"><b>${t('지키기로 한 것을 어김')}</b><ul class="small">${hold.keepBroken.map((x) => html`<li>${x}</li>`)}</ul><span class="small muted">${t('에이전트가 씀 · 사용자 확인 안 함')}</span></div>`}
+    ${hold.extras?.length > 0 && html`<div class="notice"><b>${t('남은 일')}</b> <span class="small muted">${t('기준 밖에서 본 문제야. 막지 않아.')}</span><ul class="small">${hold.extras.map((x) => html`<li>${x}</li>`)}</ul></div>`}
     <div class="ask-rows">
       ${row(1, notes ? t('그대로 끝') : t('받아들이기'), notes ? t('추가 지시는 반영하지 않고 지금 판정으로 끝내.') : t('남은 기준은 판정 그대로 두고 끝내.'), 'accept')}
       ${hold.more !== false && row(2, notes ? t('반영해서 한 번 더') : t('한 번 더'), notes ? (hold.reviewer === false ? t('마지막 일 단계가 추가 지시를 넣어 다시 해. 검수할 사람이 없어서 그 뒤에 판정 없이 다시 물어.') : t('마지막 일 단계가 추가 지시를 넣어 다시 하고, 다시 검수해.')) : t('마지막 일 단계가 걸린 기준을 고친 뒤 다시 검수해.'), 'more')}
@@ -355,6 +455,25 @@ function jump(id) {
   changed();
 }
 
+// 진행 기록의 일 카드 목록(결정 0018): 상태 칩과 담당. 기다리는 카드는 "하는 중"으로 세지 않고 무엇을 기다리는지 보여 준다
+function CardList({ m }) {
+  const cards = m.cards || [];
+  const n = (st) => cards.filter((c) => c.status === st).length;
+  const sum = [['running', t('하는 중')], ['waiting', t('기다림')], ['done', t('끝')], ['blocked', t('막힘')], ['hole', t('구멍')], ['skipped', t('건너뜀')]].filter(([st]) => n(st)).map(([st, w]) => `${w} ${n(st)}`).join(' · ');
+  return html`<div style="margin-top:8px" role="list" aria-label=${t('일 카드')}>
+    <div class="small muted"><b>${t('일 카드')}</b> · ${sum}</div>
+    ${cards.map((c) => {
+      const [label, cls] = cardChip(c.status);
+      return html`<div class="crit" role="listitem">
+        <div class="crit-head"><span class=${`chip${cls}`}>${label}</span><span><b>${c.id}</b> · ${c.title} <span class="muted">— ${agentById(c.ownerId)?.name || c.ownerId}</span></span></div>
+        ${c.status === 'waiting' && html`<div class="small muted crit-ev">${waitWords(c, cards)}</div>`}
+        ${c.status === 'blocked' && c.reason && html`<div class="small muted crit-ev">${c.reason}</div>`}
+        ${c.msgId && html`<button type="button" class="btn ghost sm" onClick=${() => jump(c.msgId)}>${t('그 메시지로 가기')}</button>`}
+      </div>`;
+    })}
+  </div>`;
+}
+
 // ── 오른쪽 패널의 진행 기록 탭 ──
 export function MissionLog({ s }) {
   const m = s.mission;
@@ -364,7 +483,7 @@ export function MissionLog({ s }) {
   const L = (m.log || []).slice().reverse();
   const left = (m.criteria || []).filter((c) => c.status !== 'pass').length;
   // 실패 줄의 종류(결정 0015): 검수에서 걸림 / 한도·바깥 장애
-  const FAIL = { review: t('검수에서 걸림'), outside: t('바깥 장애') };
+  const FAIL = { review: t('검수에서 걸림'), outside: t('바깥 장애'), blocked: t('막힘'), hole: t('구멍'), keep: t('지킬 것 어김') };
   const text = (x) => html`<span>${x.text}${x.fail && FAIL[x.fail] ? html` <span class="chip warn">${FAIL[x.fail]}</span>` : ''}</span>`;
   return html`<div>
     <div class="card"><h4>🎯 ${t('목표')} <span class=${`chip${cls}`}>${label}</span></h4>
@@ -386,6 +505,10 @@ export function MissionLog({ s }) {
       ${m.criteria?.length > 0 && html`<div style="margin-top:8px" class="crit-table" role="list" aria-label=${t('합격 기준')}>
         ${m.criteria.map((c, i) => html`<${CritRow} c=${c} n=${i + 1} />`)}
       </div>`}
+      ${m.mustKeep?.length > 0 && html`<div class="small muted" style="margin-top:6px"><b>${t('바뀌면 안 되는 것')}</b> · ${t('사용자 확인')}<ul>${m.mustKeep.map((x) => html`<li>${x}</li>`)}</ul></div>`}
+      ${m.keepBroken?.length > 0 && html`<div class="warnbox" style="margin-top:6px"><b>${t('지키기로 한 것을 어김')}</b><ul class="small">${m.keepBroken.map((x) => html`<li>${x}</li>`)}</ul><span class="small muted">${t('에이전트가 씀 · 사용자 확인 안 함')}</span></div>`}
+      ${m.extras?.length > 0 && html`<div class="notice" style="margin-top:6px"><b>${t('남은 일')}</b> <span class="small muted">${t('기준 밖에서 본 문제야. 막지 않아.')} · ${t('에이전트가 씀 · 사용자 확인 안 함')}</span><ul class="small">${m.extras.map((x) => html`<li>${x}</li>`)}</ul></div>`}
+      ${m.cards?.length > 0 && html`<${CardList} m=${m} />`}
       ${m.status === 'unreviewed' && html`<div class="notice" style="margin-top:6px">${t('일은 끝났어. 기준 판정은 아직 없어.')}</div>`}
       ${m.status === 'done' && html`<div class="notice" style="margin-top:6px">✅ ${t('기준 {n}개를 모두 통과해서 끝냈어.', { n: m.criteria.length })}</div>`}
       ${m.status === 'accepted' && html`<div class="notice" style="margin-top:6px">${t('받아들여서 끝냈어 · 남은 기준 {n}개', { n: left })}</div>`}

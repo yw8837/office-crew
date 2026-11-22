@@ -67,7 +67,9 @@ const isOpposer = (prompt) => prompt.includes(tr('너는 이번 회의에서 반
 const asksCheck = (prompt) => prompt.includes(checkBlock()) && prompt.includes(tr('[회의 — 차례 발언 ({r}/{n}바퀴)]', { r: 2, n: '\u0000' }).split('\u0000')[0]);
 function meetingAnswer(phase, role, opposer, ask) {
   if (phase === 'research') {
-    return [`- ${tr('다른 자료 2건에서도 같은 방향의 결과가 나왔어.')}`, `- ${tr('그중 1건은 표본이 작아서 근거로는 약해.')}`, `- ${tr('출처: 데모 자료')}`, `- ${tr('확인 못 함: 반대 결과를 낸 자료는 찾지 못했어.')}`].join('\n');
+    // 조사 답 형식("- 사실 | 출처 | 확인함·확인 못 함")대로. 출처는 데모라 실제로 열리지 않는 example.test 주소
+    return [`- ${tr('다른 자료 2건에서도 같은 방향의 결과가 나왔어.')} | https://example.test/demo/check/source-a | ${tr('확인함')}`, `- ${tr('그중 1건은 표본이 작아서 근거로는 약해.')} | https://example.test/demo/check/source-b | ${tr('확인함')}`,
+      `- ${tr('반대 결과를 낸 자료는 찾지 못했어.')} | ${tr('없음')} | ${tr('확인 못 함')}`].join('\n');
   }
   if (phase === 'opinion') {
     const [claim, why, wrong, sure] = OPINIONS()[role] || OPINIONS().분석;
@@ -151,7 +153,9 @@ function prepAnswer({ kind, n }, prompt) {
     const questions = [tr('비슷한 서비스나 사례는 무엇이 있나?'), tr('사용자들이 가장 많이 불만을 말하는 점은?'), tr('지켜야 할 조건이나 마감은 무엇인가?')];
     return `${tr('조사할 질문을 뽑았어(데모).')}\n\n\`\`\`oc-research\n${JSON.stringify({ questions })}\n\`\`\``;
   }
-  return [tr('## 조사 {n} — 찾은 사실(데모)', { n }), '', `- ${tr('자료 2건이 같은 방향을 가리켜. (출처: 데모 웹 검색)')}`, `- ${tr('그중 1건은 표본이 작아. (출처: 데모 내부 문서)')}`, `- ${tr('확인 못 함: 반대 결과를 낸 자료는 찾지 못했어.')}`].join('\n');
+  // 조사 답 형식("- 사실 | 출처 | 확인함·확인 못 함")대로. 출처는 데모라 실제로 열리지 않는 example.test 주소(결정 0017)
+  return [tr('## 조사 {n} — 찾은 사실(데모)', { n }), '', `- ${tr('자료 2건이 같은 방향을 가리켜.')} | https://example.test/demo/q${n}/source-a | ${tr('확인함')}`,
+    `- ${tr('그중 1건은 표본이 작아.')} | https://example.test/demo/q${n}/source-b | ${tr('확인함')}`, `- ${tr('반대 결과를 낸 자료는 찾지 못했어.')} | ${tr('없음')} | ${tr('확인 못 함')}`].join('\n');
 }
 
 export default {

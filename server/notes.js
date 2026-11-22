@@ -59,7 +59,8 @@ const oneLine = (s) => s.replace(/\s+/g, ' ').trim();
 const cleanText = (s) => strip(s).replace(/\r\n?/g, '\n').trim();
 
 // 흔한 주입 무늬(에이전트·바깥 자료에서 온 글에만 쓴다). 넓게 잡아서 평범한 글이 걸릴 수도 있다: 걸리면 저장하지 않고 이유를 돌려준다
-const INJECTION = [
+// 조사 답의 지시처럼 보이는 줄을 셀 때도 같은 무늬를 쓴다(mission.js 의 instructionLine, 결정 0017)
+export const INJECTION = [
   ['ignore', [
     /\b(?:ignore|disregard|forget|override|bypass)\b[^.!?\n]{0,40}\b(?:instructions?|rules|directions|prompts?|guidelines|guardrails|polic(?:y|ies))\b/i,
     /\b(?:ignore|disregard|forget)\s+(?:all\s+|everything\s+)?(?:the\s+)?(?:above|previous|prior|earlier)\b/i,

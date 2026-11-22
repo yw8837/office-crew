@@ -2691,7 +2691,7 @@ export class Orchestrator {
     const files = (userMsg.attachments || []).filter((a) => !(prov.caps.images && a.mime?.startsWith('image/')));
     if (files.length) parts.push(`${tr('[첨부 파일 — 필요하면 열어서 읽어]')}\n${files.map((a) => `- ${a.name}: ${a.path}`).join('\n')}`);
     // 일하기 전 조사·회의(결정 0017): 조사 노트는 일하기 전 회의와 일 단계에, 회의 결론은 일 단계에 무작위 표식 안의 참고 자료로(기준 판정에는 안 준다)
-    if (ctx.prepData?.questions && (st.mission === 'meeting' || !st.mission)) parts.push(researchNote(ctx.prepData.questions, undefined, { work: !st.mission, conclusion: !!ctx.prepData.conclusion }));
+    if (ctx.prepData?.questions && (st.mission === 'meeting' || !st.mission)) parts.push(researchNote(ctx.prepData.questions, undefined, { work: !st.mission }));
     if (ctx.prepData?.conclusion && !st.mission) parts.push(conclusionPrompt(ctx.prepData.conclusion));
     // 앞 단계가 읽은 글(웹페이지·저장소 문서)의 문구가 다음 단계에 지시처럼 넘어오지 않게 구획한다. 표시는 매번 달라서 결과 안에서 흉내 낼 수 없다.
     // 준비 대목은 위의 조사 노트·회의 결론으로 따로 준다

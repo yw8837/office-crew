@@ -54,7 +54,7 @@ export function ResearchCard({ m }) {
     ${m.textOnly?.length && html`<div class="warnbox" role="note">${t('{names}의 조사는 읽기 전용을 막는 장치가 없어서 글 지시로만 묶였어.', { names: m.textOnly.map((x) => `${x.name}(${x.ai})`).join(', ') })}</div>`}
     ${qs.map((q) => html`<div class="research-q">
       <div class="small"><b>${q.id}</b> · ${q.text} <span class="muted">— ${agentById(q.agentId)?.name || q.agentId}</span>${q.status !== 'done' ? html` <span class="chip warn">${t('확인 못 함')} · ${missChip(q.status)}</span>` : ''}</div>
-      ${q.suspect > 0 && html`<div class="warnbox" role="note">${t('이 답에는 지시처럼 보이는 줄이 {n}개 있어. 일 단계에는 이 답 대신 안내 한 줄만 가.', { n: q.suspect })}</div>`}
+      ${q.suspect > 0 && html`<div class="warnbox" role="note">${t('이 답에는 지시처럼 보이는 줄이 {n}개 있어. 일 단계에는 그 줄만 빼고 가.', { n: q.suspect })}</div>`}
       ${q.excerpt && html`<div class="small research-ex">${q.excerpt}${q.more ? '…' : ''}</div>`}
       ${q.msgId && html`<button type="button" class="btn ghost sm" onClick=${() => jump(q.msgId)}>${t('전체 보기')}</button>`}
     </div>`)}

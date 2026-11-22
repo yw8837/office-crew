@@ -44,9 +44,14 @@ export function ResearchCard({ m }) {
   return html`<div class="msg proposal"><div class="hire goal-card" role="group" aria-label=${t('조사 노트')}>
     <div class="hire-head"><b>🔎 ${t('조사 노트')}</b><span class=${`chip${m.missing ? ' warn' : ' ok'}`}>${t('질문 {n}개 중 {m}개 확인 못 함', { n: m.total, m: m.missing })}</span>
       <span class="small muted">${t('에이전트가 씀 · 사용자 확인 안 함')}</span></div>
+    ${(m.suspect !== undefined || m.unsourced !== undefined) && html`<div class="small">
+      <span class=${`chip${m.suspect ? ' warn' : ''}`}>${t('지시처럼 보이는 줄 {n}개', { n: m.suspect || 0 })}</span> <span class=${`chip${m.unsourced ? ' warn' : ''}`}>${t('출처 없는 줄 {n}개', { n: m.unsourced || 0 })}</span>
+      <span class="muted">${t('코드가 센 수')}</span></div>`}
     ${m.fallback && html`<div class="warnbox" role="note">${t('진행자 답에서 조사 질문을 읽지 못해서 질문 하나로 조사했어.')}</div>`}
+    ${m.textOnly?.length && html`<div class="warnbox" role="note">${t('{names}의 조사는 읽기 전용을 막는 장치가 없어서 글 지시로만 묶였어.', { names: m.textOnly.map((x) => `${x.name}(${x.ai})`).join(', ') })}</div>`}
     ${qs.map((q) => html`<div class="research-q">
       <div class="small"><b>${q.id}</b> · ${q.text} <span class="muted">— ${agentById(q.agentId)?.name || q.agentId}</span>${q.status !== 'done' ? html` <span class="chip warn">${t('확인 못 함')} · ${missChip(q.status)}</span>` : ''}</div>
+      ${q.suspect > 0 && html`<div class="warnbox" role="note">${t('이 답에는 지시처럼 보이는 줄이 {n}개 있어. 일 단계에는 이 답 대신 안내 한 줄만 가.', { n: q.suspect })}</div>`}
       ${q.excerpt && html`<div class="small research-ex">${q.excerpt}${q.more ? '…' : ''}</div>`}
       ${q.msgId && html`<button type="button" class="btn ghost sm" onClick=${() => jump(q.msgId)}>${t('전체 보기')}</button>`}
     </div>`)}

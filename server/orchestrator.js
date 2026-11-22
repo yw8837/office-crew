@@ -19,7 +19,7 @@ import { pickForPrompt, promptRef } from './notes.js';
 import { parseGoal, goalBlock, goalWarn, newMission, toCriteria, cardOf, sameCard, cleanGoal, pickLead, mixedLocal, logLine, alive, NOTE_COUNT,
   reviewPlan, reviewCard, parseReview, reviewPrompt, applyReview, tally, allPass, returnItems, returnPrompt, prevPrompt, sameDroppable, MISSION_CALL_CAP, CAP_STEP, RETURN_CAP,
   stageDiff, teamRoles, resumePoint, pastOutputs,
-  PREP_KINDS, isPrep, prepPlan, prepCard, prepFits, meetingCalls, parseResearch, scanPrompt, questionsPrompt, researchPrompt, researchNote, conclusionPrompt, Q_FINAL, NOTE_SHOW, PREP_ROUNDS } from './mission.js';
+  PREP_KINDS, isPrep, prepPlan, prepCard, prepFits, meetingCalls, answerFlags, parseResearch, scanPrompt, questionsPrompt, researchPrompt, researchNote, conclusionPrompt, Q_FINAL, NOTE_SHOW, PREP_ROUNDS } from './mission.js';
 
 const ACTIVE = new Set(['running', 'paused', 'waiting']);
 const FORCE_END_MS = 5000; // 멈춘 CLI를 끄라고 한 뒤 이만큼 기다려도 안 끝나면 강제로 끝낸다
@@ -1145,7 +1145,7 @@ export class Orchestrator {
         if (ctx.stopped || !(await this.#prepPause(ctx, i))) return; // 질문을 시작하기 전마다 일시정지·중지를 본다
         q.status = 'running'; // 이대로 끊기면 이어서 할 때 이 질문부터 다시
         this.store.saveSessionNow(s);
-        const { r, msg } = await this.#prepOnce(ctx, i, id, researchPrompt({ ...args, question: q.text, n: qs.indexOf(q) + 1, total: qs.length }), { kind: 'research', qid: q.id });
+        const { r, msg } = await this.#prepOnce(ctx, i, id, researchPrompt({ ...args, question: q.text, others: qs.filter((x) => x !== q).map((x) => x.text), n: qs.indexOf(q) + 1, total: qs.length }), { kind: 'research', qid: q.id });
         if (ctx.stopped) return; // 앱을 끄거나 중지했으면 끝나지 않은 질문으로 둔다
         q.msgId = msg?.id || null;
         q.status = r.error ? 'failed' : r.stopped ? 'skipped' : msg?.text.trim() ? 'done' : 'empty';
@@ -1168,14 +1168,24 @@ export class Orchestrator {
     const m = ctx.mission;
     const qs = m.research.questions;
     const miss = qs.filter((q) => q.status !== 'done').length;
+    const find = (id) => (id ? s.messages.find((x) => x.id === id && x.role === 'agent') : null);
+    const questions = qs.map((q) => {
+      const msg = find(q.msgId);
+      const chars = msg ? [...msg.text] : [];
+      // 코드가 센 지시처럼 보이는 줄·출처 없는 줄(답이 있을 때만)
+      const f = q.status === 'done' && msg ? answerFlags(msg.text) : { suspect: 0, unsourced: 0 };
+      return { id: q.id, text: q.text, agentId: q.agentId, status: q.status, msgId: q.msgId || null, excerpt: q.status === 'done' ? chars.slice(0, NOTE_SHOW).join('') : '', more: q.status === 'done' && chars.length > NOTE_SHOW, suspect: f.suspect, unsourced: f.unsourced };
+    });
+    // 훑어보기·조사를 맡은 AI 가운데 읽기 전용을 CLI 인자나 앱이 막지 못하는 AI(글 지시로만 묶임). 이름과 AI 이름
+    const turns = [find(m.research.scanMsgId), ...qs.map((q) => find(q.msgId))].filter((x) => x?.provider);
+    const textOnly = [...new Map(turns.filter((x) => !PROVIDERS[x.provider]?.caps?.permissions)
+      .map((x) => [`${x.agentId}:${x.provider}`, { name: this.store.get('agents', x.agentId)?.name || x.agentId, ai: PROVIDERS[x.provider]?.label || x.provider }])).values()];
     const card = {
       id: newId('m'), role: 'proposal', kind: 'research', status: 'done', text: '', missionId: m.id, total: qs.length, missing: miss, createdAt: Date.now(),
       ...(m.research.fallback ? { fallback: true } : {}),
-      questions: qs.map((q) => {
-        const msg = q.msgId ? s.messages.find((x) => x.id === q.msgId && x.role === 'agent') : null;
-        const chars = msg ? [...msg.text] : [];
-        return { id: q.id, text: q.text, agentId: q.agentId, status: q.status, msgId: q.msgId || null, excerpt: q.status === 'done' ? chars.slice(0, NOTE_SHOW).join('') : '', more: q.status === 'done' && chars.length > NOTE_SHOW };
-      }),
+      suspect: questions.reduce((n, q) => n + q.suspect, 0), unsourced: questions.reduce((n, q) => n + q.unsourced, 0),
+      ...(textOnly.length ? { textOnly } : {}),
+      questions,
     };
     s.messages.push(card);
     m.research.noteMsgId = card.id;
@@ -2655,7 +2665,7 @@ export class Orchestrator {
     const files = (userMsg.attachments || []).filter((a) => !(prov.caps.images && a.mime?.startsWith('image/')));
     if (files.length) parts.push(`${tr('[첨부 파일 — 필요하면 열어서 읽어]')}\n${files.map((a) => `- ${a.name}: ${a.path}`).join('\n')}`);
     // 일하기 전 조사·회의(결정 0017): 조사 노트는 일하기 전 회의와 일 단계에, 회의 결론은 일 단계에 무작위 표식 안의 참고 자료로(기준 판정에는 안 준다)
-    if (ctx.prepData?.questions && (st.mission === 'meeting' || !st.mission)) parts.push(researchNote(ctx.prepData.questions));
+    if (ctx.prepData?.questions && (st.mission === 'meeting' || !st.mission)) parts.push(researchNote(ctx.prepData.questions, undefined, { work: !st.mission, conclusion: !!ctx.prepData.conclusion }));
     if (ctx.prepData?.conclusion && !st.mission) parts.push(conclusionPrompt(ctx.prepData.conclusion));
     // 앞 단계가 읽은 글(웹페이지·저장소 문서)의 문구가 다음 단계에 지시처럼 넘어오지 않게 구획한다. 표시는 매번 달라서 결과 안에서 흉내 낼 수 없다.
     // 준비 대목은 위의 조사 노트·회의 결론으로 따로 준다

@@ -24,7 +24,6 @@ after(async () => {
   if (t) { try { await t.close(); } catch { /* 윈도우 파일 잠금 무시 */ } }
 });
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const S = (id) => t.app.store.getSession(id);
 const mk = async (name, role, extra = {}) => (await t.api('POST', '/api/agents', { name, role, provider: 'claude', model: 'claude-sonnet-5-5', permission: 'plan', routing: 'manual', ...extra })).json;
 const mkTeam = async (name, stages) => (await t.api('POST', '/api/teams', { name, stages })).json;
@@ -387,7 +386,7 @@ test('7. 일하는 방식 고르기: 승인 관문·회의 단계가 있는 팀,
   assert.ok(!m.log.some((x) => x.text.includes('일 카드')), '옛 화면의 확인은 예전 기록 그대로');
 });
 
-test('8. 막힘 출구(oc-blocked): 카드가 막히면 기준 판정으로 넘기지 않고 이유와 함께 묻는다(한 번 더 → 막힌 카드만 / 받아들이기 → 판정 없이 accepted). 단계표 방식 일 단계도 같다(그만)', async () => {
+test('8. 막힘 출구(oc-blocked): 카드가 막히면 기준 판정으로 넘기지 않고 이유와 함께 묻는다(한 번 더 → 막힌 카드만 / 받아들이기 → 막힌 카드만 빼고 판정까지). 단계표 방식 일 단계도 같다(그만)', async () => {
   await app();
   const { tm } = await team3('막힘');
   const from = mark();
@@ -404,10 +403,17 @@ test('8. 막힘 출구(oc-blocked): 카드가 막히면 기준 판정으로 넘�
   run = await waitHold(sid, 'mission', 'blocked');
   assert.deepEqual(cardPrompts(n1, 'k1').length + cardPrompts(n1, 'k2').length, 1, '막힌 카드(k1)만 다시');
   assert.equal(S(sid).mission.cards[0].starts, 2);
+  // 받아들이기(사용자 결정): 막힌 카드만 빼고(구멍, 사유 막힘) 나머지 결과로 기준 판정까지. 검수에는 그 카드가 비었다는 코드의 줄, 막힌 이유는 표식 안에만
   await ctl(sid, 'accept');
   await done(sid);
-  assert.deepEqual([S(sid).mission.status, S(sid).mission.round, prompts(from).some((p) => p.includes('[기준 판정 — '))], ['accepted', 0, false], '판정 없이 끝');
-  assert.ok(S(sid).mission.log.some((x) => x.text === '막힌 채로 받아들여서 끝냈어. 기준 판정은 하지 않았어.'));
+  const ma = S(sid).mission;
+  assert.deepEqual([ma.status, ma.round, ma.cards.map((c) => [c.status, c.by || '', c.reason || ''])], ['done', 1, [['hole', 'blocked', '가짜 막힘: 기준 1을 지킬 수 없어'], ['done', '', '']]]);
+  assert.ok(ma.log.some((x) => x.fail === 'hole' && x.text === '받아들이기를 골랐어. 막힌 일은 빼고(k1) 나머지 결과로 기준 판정까지 가.'));
+  const rp = prompts(from).find((p) => p.includes('[기준 판정 — 1번째 검수]'));
+  assert.ok(rp.includes('(이 담당은 기준을 지킬 수 없다고 막혔고 사용자가 받아들여서, 이 결과는 비어 있어.'), '비었다는 줄(코드가 씀)');
+  assert.equal(outside(rp, '가짜 막힘: 기준 1을 지킬 수 없어', '결과'), 0, '막힌 이유는 표식 안에만');
+  assert.ok(!rp.includes('CARDANSWER-k1'), '막힌 카드의 답 글은 검수에 안 간다');
+  assert.ok(S(sid).messages.find((x) => x.id === ma.cards[0].msgId).blockedBlock.accepted);
   // 단계표 방식: 막힘 출구 안내가 일 단계 프롬프트에 있고, 막히면 묻는다
   const f2 = mark();
   const st = await goal(tm.id, 'WORKBLOCK', { work: 'stages' });
@@ -417,6 +423,19 @@ test('8. 막힘 출구(oc-blocked): 카드가 막히면 기준 판정으로 넘�
   await ctl(st, 'stop');
   await done(st);
   assert.equal(S(st).mission.status, 'stopped');
+  // 막힘을 받아들이면 그 카드를 기다리던 카드는 "결과가 없어"를 받는다. 그만으로 끝나면 남은 기다림 카드는 건너뜀으로 정리
+  const f3 = mark();
+  const dep = await goal(tm.id, 'CARDBLOCK PLANDEP');
+  await waitHold(dep, 'mission', 'blocked');
+  await ctl(dep, 'accept');
+  await done(dep);
+  assert.ok(cardPrompts(f3, 'k2')[0].includes('앞 카드 k1을(를) 건너뛰었거나 막혀서 결과가 없어.'));
+  const stop = await goal(tm.id, 'CARDBLOCK PLANDEP');
+  await waitHold(stop, 'mission', 'blocked');
+  await ctl(stop, 'stop');
+  await done(stop);
+  assert.deepEqual(S(stop).mission.cards.map((c) => c.status), ['blocked', 'skipped'], '기다리던 k2 는 건너뜀');
+  assert.ok(S(stop).mission.log.some((x) => x.text === '목표가 끝나서 돌지 않은 카드 k2는 건너뜀으로 적었어.'));
 });
 
 test('9. 되풀이 상한(카드 하나 3번): 오류 난 카드만 다시 하고, 세 번 시작한 카드를 또 시작하려 하면 묻는다(받아들이기 → 그 카드 없이 판정). 시간당 시작 수 상한도 묻는다(20장 더)', async () => {
@@ -542,6 +561,10 @@ test('13. git: 작업 폴더가 git 저장소면 바뀐 파일 목록(표식 안
     execFileSync('git', ['init', '-q'], { cwd: dir });
     fs.writeFileSync(path.join(dir, 'test', 'a.test.js'), 'x');
     fs.writeFileSync(path.join(dir, 'app.js'), 'x');
+    // 테스트가 아닌 이름(latest.md·inspect.js)과 따옴표가 붙던 이름(한글·띄어쓰기)
+    fs.writeFileSync(path.join(dir, 'latest.md'), 'x');
+    fs.writeFileSync(path.join(dir, 'inspect.js'), 'x');
+    fs.writeFileSync(path.join(dir, '한 글 파일.txt'), 'x');
   }
   const from = mark();
   const sid = await goal(tm.id, '', { cwd: dir });
@@ -549,7 +572,8 @@ test('13. git: 작업 폴더가 git 저장소면 바뀐 파일 목록(표식 안
   const rp = prompts(from).find((p) => p.includes('[기준 판정 — 1번째 검수]'));
   if (git) {
     assert.ok(/--- 파일 [0-9a-f]{8} 시작 ---\n(?:[^\n]*\n)*?test\/a\.test\.js/.test(rp), rp.slice(rp.indexOf('[바뀐 파일')));
-    assert.ok(S(sid).mission.log.some((x) => x.kind === 'git' && x.text === '테스트로 보이는 파일이 바뀌었어: test/a.test.js'));
+    assert.ok(S(sid).mission.log.some((x) => x.kind === 'git' && x.text === '테스트로 보이는 파일이 바뀌었어: test/a.test.js'), 'latest.md·inspect.js 는 테스트 파일이 아니다');
+    assert.ok(rp.includes('\n한 글 파일.txt\n'), '경로는 따옴표·이스케이프 없이(-z, core.quotePath=false)');
   }
   // 저장소가 아닌 폴더: 목록 줄도 진행 기록도 없다
   const plain = path.join(t.root, 'plain');
@@ -637,4 +661,202 @@ test('15. 그대로인 것: 목표 모드를 끈 세션과 단계표 방식 목�
     assert.equal(S(sid).mission.status, 'done');
     assert.ok(S(sid).mission.cards.length >= 2 && S(sid).mission.cards.every((c) => c.status === 'done'));
   }
+});
+
+test('16. 검토 반영(순수 함수): git -z 경로 읽기·테스트 파일 판별, 꼬리는 답 끝에서만, 명단에 없던 담당 이름은 표식 안, 막힘을 받아들인 담당은 검수에 비었다는 줄', async () => {
+  const { porcelainPaths, testLike } = await import('../server/mission.js');
+  assert.deepEqual(porcelainPaths(' M src/a.js\0?? 한 글 파일.txt\0R  new name.js\0old name.js\0 D gone.js\0'), ['src/a.js', '한 글 파일.txt', 'new name.js', 'gone.js']);
+  assert.deepEqual(porcelainPaths(''), []);
+  assert.deepEqual(['test/a.js', 'src/tests/b.js', 'x/__tests__/c.js', 'a.test.js', 'b.spec.ts', 'latest.md', 'inspect.js', 'contest/a.js', 'docs/testing.md'].map(testLike), [true, true, true, true, true, false, false, false, false]);
+  // 꼬리: 답 마지막 12줄 안에 있어야 한다(중간에 같은 낱말로 시작하는 줄은 꼬리가 아니다)
+  const mid = `바꾼 파일: a.js\n다음 카드가 알아야 할 것: x\n${Array.from({ length: 15 }, (_, k) => `본문 ${k}`).join('\n')}`;
+  assert.equal(hasTail(mid), false);
+  assert.equal(hasTail(`${mid}\n바꾼 파일: b.js\n다음 카드가 알아야 할 것: y`), true);
+  // 담당 다시 고르기: 진행자가 쓴 이름은 무작위 표식 안
+  const pp = planPrompt({ roster: [{ name: '가', role: '조사' }], retry: 'owner', missing: [BAD], mark: 'abcdef12' });
+  assert.equal(outside(pp, BAD, '이름'), 0);
+  assert.ok(pp.startsWith('[담당 다시 고르기]'));
+  // 검수 자료: 막힘을 받아들인 담당은 결과 대신 비었다는 코드의 줄, 막힌 이유는 표식 안
+  const rp = reviewPrompt({ criteria: [{ id: 'c1', text: 'a' }], nonce: 'x', works: [{ label: '일 1/1 · k1', name: '가', blocked: BAD }, { label: '일 1/1 · k2', name: '나', text: '답' }], mark: 'abcdef12' });
+  assert.ok(rp.includes('### 1. 일 1/1 · k1 — 가\n(이 담당은 기준을 지킬 수 없다고 막혔고 사용자가 받아들여서, 이 결과는 비어 있어.'));
+  assert.equal(outside(rp, BAD, '결과'), 0);
+});
+
+test('17. 계획: 담당 다시 고르기 답의 블록이 깨지면(WHOBROKEN) 1차 계획을 지키고 명단에 없는 담당만 대신 맡긴다', async () => {
+  await app();
+  const { r, b, tm } = await team3('일차');
+  const sid = await goal(tm.id, 'PLANWHO WHOBROKEN PLANDEP');
+  await done(sid);
+  const m = S(sid).mission;
+  assert.deepEqual(m.cards.map((c) => [c.id, c.ownerId, c.needs]), [['k1', r.id, []], ['k2', b.id, ['k1']]], '1차 계획(k2 가 k1 을 기다림)을 그대로, k2 담당만 만들기 역할에게');
+  assert.deepEqual([planCard(sid).fallback, planCard(sid).reassigned], [undefined, [{ id: 'k2', from: '없는사람', to: b.name }]]);
+  assert.ok(S(sid).messages.some((x) => (x.blocks || []).some((y) => y.text === '다시 요청한 답에서 계획 블록을 읽지 못했어. 앞 계획으로 일하고, 명단에 없는 담당만 다른 팀원에게 맡길게.')));
+});
+
+test('18. 넘겨 쓰는 카드는 다시 검사하지 않는다(K2NOTAIL + 한 번 더). 다시 쓴 끝 두 칸이 막힘으로 끝나면 카드도 막힘(TAILBLOCK)', async () => {
+  await app();
+  const { tm } = await team3('넘김');
+  const from = mark();
+  const sid = await goal(tm.id, 'CARDBLOCK K2NOTAIL');
+  await waitHold(sid, 'mission', 'blocked');
+  assert.deepEqual(S(sid).mission.cards.map((c) => c.status), ['blocked', 'hole']);
+  await ctl(sid, 'more');
+  await t.waitFor(() => cardPrompts(from, 'k1').length === 2 && S(sid).runs.at(-1).hold?.kind === 'blocked', 30000, '다시 막힘');
+  const tails = prompts(from).filter((p) => /^\[일 카드 k2\]$/m.test(p) && p.includes('[끝의 두 칸 다시 쓰기]'));
+  assert.equal(tails.length, 1, 'k2 꼬리 다시 요청은 한 번뿐');
+  assert.equal(S(sid).mission.log.filter((x) => x.fail === 'hole' && x.text.startsWith('k2:')).length, 1, '구멍 기록도 한 번');
+  assert.equal(S(sid).mission.cards[1].status, 'hole');
+  await ctl(sid, 'stop');
+  await done(sid);
+  const tb = await goal(tm.id, 'TAILBLOCK');
+  const run = await waitHold(tb, 'mission', 'blocked');
+  assert.deepEqual([run.hold.blocked.map((x) => [x.card, x.reason]), S(tb).mission.cards[0].status], [[['k1', '가짜 막힘: 꼬리 쓰다 막힘']], 'blocked']);
+  const tmsg = S(tb).messages.find((x) => x.id === S(tb).mission.cards[0].tailMsgId);
+  assert.ok(tmsg.cardTail && tmsg.blockedBlock?.reason === '가짜 막힘: 꼬리 쓰다 막힘', '막힘 표시는 다시 쓴 답에');
+  await ctl(tb, 'stop');
+  await done(tb);
+});
+
+test('19. 카드 시작 수는 호출 상한을 통과한 뒤에 센다. 되돌림 중 되풀이 상한을 물을 때 끊긴 자리는 되돌림. 받아들인 카드는 되돌림에서도 다시 묻지 않는다', async () => {
+  await app();
+  const { tm } = await team3('셈');
+  // 호출 상한 2(목표 1 + 계획 1): 카드 단계 앞에서 묻고, 그만이면 카드 시작 수·시간당 수는 그대로 0
+  const cap = await goal(tm.id, '', { before: async (s) => { S(s).mission.calls.cap = 2; } });
+  await waitHold(cap, 'cap');
+  assert.deepEqual([S(cap).mission.cards.map((c) => c.starts), S(cap).mission.rate.starts.length], [[0, 0], 0]);
+  await ctl(cap, 'stop');
+  await done(cap);
+  // 되돌림에서 k1 이 계속 오류(BACKFAIL): 처음 1 + 되돌림 1 + 다시 1 → 다음 다시 하기에서 상한 질문, 끊긴 자리는 되돌림
+  const back = await goal(tm.id, 'REVIEWFAIL BACKFAIL');
+  for (let n = 0; n < 2; n++) {
+    await waitHold(back, 'error');
+    await ctl(back, 'retry');
+    if (n === 0) await t.waitFor(() => S(back).runs.at(-1).hold?.reason !== 'error', 10000, '다시 하기 시작');
+  }
+  await waitHold(back, 'mission', 'limit');
+  assert.deepEqual([S(back).mission.at.back, S(back).mission.at.wait], [true, { reason: 'mission', kind: 'limit' }]);
+  await ctl(back, 'stop');
+  await done(back);
+  // 상한을 받아들인 카드(limited)는 검수 불합격 뒤 되돌림에서도 묻지 않고 돌지 않는다
+  const from = mark();
+  const lim = await goal(tm.id, 'CARDFAIL REVIEWFAIL');
+  for (let n = 1; n <= 3; n++) {
+    await waitHold(lim, 'error');
+    await ctl(lim, 'retry');
+    if (n < 3) await t.waitFor(() => S(lim).mission.cards[0].starts > n, 10000, '다시 하기');
+  }
+  await waitHold(lim, 'mission', 'limit');
+  await ctl(lim, 'accept');
+  await done(lim);
+  const m = S(lim).mission;
+  assert.deepEqual([m.status, m.returns, m.cards[0].limited, cardPrompts(from, 'k1').length, cardPrompts(from, 'k2').length], ['done', 1, true, 3, 2], '되돌림에서 k2 만 다시');
+  assert.equal(m.log.filter((x) => x.text.startsWith('카드 k1를 시작한 횟수가 상한에 닿았어')).length, 1);
+});
+
+test('20. 판정 질문 창: 되돌릴 마지막 카드 단계에 확인 카드만 있으면 그렇다고 알린다(PLANCHECKLAST)', async () => {
+  await app();
+  const { tm } = await team3('확인만');
+  const sid = await goal(tm.id, 'PLANCHECKLAST REVIEWFAIL2');
+  const run = await waitHold(sid, 'mission', 'verdict');
+  assert.equal(run.hold.noFixer, true);
+  await ctl(sid, 'stop');
+  await done(sid);
+  const ok = await goal(tm.id, 'PLANDEP REVIEWFAIL2');
+  const r2 = await waitHold(ok, 'mission', 'verdict');
+  assert.equal(r2.hold.noFixer, undefined, '마지막 단계에 만들기 카드가 있으면 없다');
+  await ctl(ok, 'stop');
+  await done(ok);
+});
+
+test('21. 기억: 살아 있는 목표의 카드 답은 프로젝트 기억으로도 뒤 카드에 들어가지 않는다', async () => {
+  await app();
+  const { tm } = await team3('기억');
+  await t.api('PUT', '/api/settings', { memory: true });
+  try {
+    const from = mark();
+    const sid = await goal(tm.id, 'CARDBLOCK PLANDEP', { request: 'CARDANSWER 카드 일 정리해 줘' });
+    await waitHold(sid, 'mission', 'blocked');
+    // 막힌 k1 의 답이 기억에 들어간 뒤에 k2 를 돌린다(그래야 기억이 불러올 수 있는 상태에서 본다)
+    await t.waitFor(async () => (await (await t.app.memory.of(t.app.orch.memoryFolder(S(sid)))).search('CARDANSWER 카드 일 정리해 줘', { budget: 4000 })).hits.some((h) => String(h.text).includes('CARDANSWER-k1')), 10000, '기억에 k1 답');
+    await ctl(sid, 'accept');
+    await done(sid);
+    const k2 = cardPrompts(from, 'k2')[0];
+    assert.ok(!k2.includes('CARDANSWER-k1'), '막힌 k1 의 답은 기억으로도 안 들어온다');
+  } finally {
+    await t.api('PUT', '/api/settings', { memory: false });
+  }
+});
+
+test('22. 끊김·이어서(대기와 다시 쓰기): 막힘 대기·되풀이 상한 대기·시간당 상한 대기에서 끊기면 호출 없이 같은 질문, 끝 두 칸 다시 쓰기 중·"한 번 더" 뒤에 끊겨도 이어 간다', async () => {
+  await app();
+  const { tm } = await team3('대기끊김');
+  const resumeFrom = async (h, sid) => {
+    const { h2 } = await crash(h, sid);
+    assert.equal((await h2.resume(sid, h2.S(sid).mission.id)).status, 200);
+    return h2;
+  };
+  const holdOf = (h, sid, kind) => t.waitFor(() => { const r = h.S(sid).runs.at(-1); return r?.hold && (r.hold.kind === kind) && r; }, 30000, `${kind} 대기`);
+  // 막힘 대기
+  let h = await reopen();
+  const b1 = await goal(tm.id, 'CARDBLOCK', { h });
+  await holdOf(h, b1, 'blocked');
+  let n = mark();
+  let h2 = await resumeFrom(h, b1);
+  await holdOf(h2, b1, 'blocked');
+  assert.equal(calls(n).length, 0, '같은 질문을 호출 없이');
+  await h2.api('POST', `/api/sessions/${b1}/control`, { action: 'accept' });
+  await done(b1, h2.S, h2.idle);
+  assert.deepEqual([h2.S(b1).mission.status, h2.S(b1).mission.cards[0].status], ['done', 'hole']);
+  // 되풀이 상한 대기
+  h = await reopen();
+  const l1 = await goal(tm.id, 'CARDFAIL', { h });
+  for (let k = 1; k <= 3; k++) {
+    await t.waitFor(() => h.S(l1).runs.at(-1)?.hold?.reason === 'error', 30000, '오류 대기');
+    await h.api('POST', `/api/sessions/${l1}/control`, { action: 'retry' });
+    if (k < 3) await t.waitFor(() => h.S(l1).mission.cards[0].starts > k, 10000, '다시 하기');
+  }
+  await holdOf(h, l1, 'limit');
+  n = mark();
+  h2 = await resumeFrom(h, l1);
+  await holdOf(h2, l1, 'limit');
+  assert.equal(calls(n).length, 0);
+  await h2.api('POST', `/api/sessions/${l1}/control`, { action: 'accept' });
+  await done(l1, h2.S, h2.idle);
+  assert.deepEqual([h2.S(l1).mission.status, h2.S(l1).mission.cards[0].limited], ['done', true]);
+  // 시간당 상한 대기
+  h = await reopen();
+  const r1 = await goal(tm.id, '', { h, before: async (s) => { h.S(s).mission.rate = { cap: 1, starts: [] }; } });
+  await holdOf(h, r1, 'rate');
+  n = mark();
+  h2 = await resumeFrom(h, r1);
+  await holdOf(h2, r1, 'rate');
+  assert.equal(calls(n).length, 0);
+  await h2.api('POST', `/api/sessions/${r1}/control`, { action: 'more' });
+  await done(r1, h2.S, h2.idle);
+  assert.equal(h2.S(r1).mission.status, 'done');
+  // 끝 두 칸 다시 쓰기 중 끊김(SLOWTAIL): 이어서 해도 k1 의 결과는 원래 답(다시 쓰기 답을 결과로 고르지 않는다)
+  h = await reopen();
+  let f = mark();
+  const t1 = await goal(tm.id, 'CARDNOTAIL1 SLOWTAIL', { h });
+  await t.waitFor(() => prompts(f).some((p) => /^\[일 카드 k1\]$/m.test(p) && p.includes('[끝의 두 칸 다시 쓰기]')), 15000, '다시 쓰기 차례');
+  const main = h.S(t1).messages.find((x) => x.card?.id === 'k1' && !x.cardTail);
+  assert.ok(h.S(t1).messages.some((x) => x.card?.id === 'k1' && x.cardTail), '다시 쓰기 답은 만들 때 바로 표시');
+  h2 = await resumeFrom(h, t1);
+  await done(t1, h2.S, h2.idle);
+  const c1 = h2.S(t1).mission.cards[0];
+  assert.deepEqual([h2.S(t1).mission.status, c1.status, c1.msgId], ['done', 'done', main.id]);
+  // "한 번 더" 뒤 끊김(SLOWK1): 끝낸 k2 는 다시 돌지 않고, k1 만 다시 막혀서 같은 질문
+  h = await reopen();
+  f = mark();
+  const o1 = await goal(tm.id, 'CARDBLOCK SLOWK1', { h });
+  await holdOf(h, o1, 'blocked');
+  await h.api('POST', `/api/sessions/${o1}/control`, { action: 'more' });
+  await t.waitFor(() => cardPrompts(f, 'k1').length === 2, 15000, 'k1 다시');
+  n = mark();
+  h2 = await resumeFrom(h, o1);
+  await holdOf(h2, o1, 'blocked');
+  assert.deepEqual([cardPrompts(n, 'k1').length, cardPrompts(n, 'k2').length], [1, 0], 'k2 는 넘겨 쓴다');
+  await h2.api('POST', `/api/sessions/${o1}/control`, { action: 'accept' });
+  await done(o1, h2.S, h2.idle);
+  assert.deepEqual(h2.S(o1).mission.cards.map((c) => c.status), ['hole', 'done']);
 });

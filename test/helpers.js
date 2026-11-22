@@ -31,6 +31,26 @@ export function installFakeClis(dir) {
   }
   // 가짜 스크립트가 ESM 으로 읽히게
   fs.writeFileSync(path.join(dir, 'package.json'), '{"type":"module"}');
+  // 이 프로세스에선 이 폴더 밖의 CLI를 띄우지 못하게 한다(진짜 AI CLI 차단. server/providers/util.js 의 fakeOnlyError)
+  process.env.OFFICE_CREW_FAKE_ONLY = '1';
+  process.env.OFFICE_CREW_FAKE_BIN = dir;
+}
+
+// 조건이 참(truthy)이 될 때까지 기다린다. 시간이 넘으면 무엇을 기다렸는지와 마지막 상태를 담아 실패한다.
+// 고정 시간 잠자기(await sleep(300) 등) 대신 이걸 쓴다(test/hygiene.test.js 의 잠자기 개수 기준값)
+export async function waitFor(cond, { timeout = 15000, interval = 25, what = '조건' } = {}) {
+  const t0 = Date.now();
+  let last;
+  for (;;) {
+    try { last = await cond(); } catch (e) { last = e; } // 조건이 던진 오류도 마지막 상태로 남긴다
+    if (last && !(last instanceof Error)) return last;
+    if (Date.now() - t0 > timeout) {
+      let shown;
+      try { shown = last instanceof Error ? `${last.name}: ${last.message}` : JSON.stringify(last); } catch { shown = String(last); }
+      throw new Error(`${what} 대기 시간 초과(${timeout}ms). 마지막 상태: ${String(shown).slice(0, 500)}`);
+    }
+    await new Promise((r) => setTimeout(r, interval));
+  }
 }
 
 export async function startTestApp() {
@@ -38,6 +58,9 @@ export async function startTestApp() {
   const bin = path.join(root, 'bin');
   fs.mkdirSync(bin);
   installFakeClis(bin);
+  // 가드가 허용하는 폴더를 이 테스트 전용 임시 폴더 전체로 넓힌다(테스트가 여기에 직접 만든 .cmd 같은 도우미 스크립트도 띄울 수 있게).
+  // 진짜 CLI는 이 폴더에 있을 수 없으니 막는 힘은 같다
+  process.env.OFFICE_CREW_FAKE_BIN = root;
   process.env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
   process.env.FAKE_LOG = path.join(root, 'fake.log');
   clearResolveCache();

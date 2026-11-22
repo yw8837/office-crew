@@ -80,6 +80,32 @@ function safeShellArg(a) {
   return a;
 }
 
+// 테스트 안전장치: OFFICE_CREW_FAKE_ONLY 가 켜져 있으면 가짜 CLI 폴더 밖의 실행 파일은 띄우지 않는다.
+// 값이 1·true 면 OFFICE_CREW_FAKE_BIN 폴더, 그 밖의 값이면 그 값 자체를 폴더로 본다(폴더를 모르면 전부 막는다).
+// 변수가 없으면(사용자 실행) null 이라 아무것도 하지 않는다
+export function fakeOnlyDir() {
+  const v = process.env.OFFICE_CREW_FAKE_ONLY;
+  if (!v || v === '0') return null;
+  return /^(1|true)$/i.test(v) ? (process.env.OFFICE_CREW_FAKE_BIN || '') : v;
+}
+
+const realOf = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
+function insideDir(file, dir) {
+  if (!dir || !file) return false;
+  const rel = path.relative(realOf(dir), realOf(file));
+  return !!rel && rel.split(path.sep)[0] !== '..' && !path.isAbsolute(rel);
+}
+
+// 막아야 하면 오류를, 아니면 null 을 준다. r 은 resolveCommand 결과(.cmd 래퍼를 node + 스크립트로 푼 경우엔 그 스크립트를 본다)
+export function fakeOnlyError(name, r) {
+  const dir = fakeOnlyDir();
+  if (dir === null) return null;
+  if (r && (insideDir(r.file, dir) || (r.file === process.execPath && insideDir(r.prefixArgs[0], dir)))) return null;
+  const err = new Error(tr('가짜 CLI만 허용된 실행(OFFICE_CREW_FAKE_ONLY)이라 진짜 {name} 명령을 띄우지 않았어.', { name }));
+  err.code = 'EFAKEONLY';
+  return err;
+}
+
 export function spawnCli(name, args, { cwd, env, unset = [], stdin = 'pipe' } = {}) {
   const r = resolveCommand(name);
   if (!r) {
@@ -87,6 +113,8 @@ export function spawnCli(name, args, { cwd, env, unset = [], stdin = 'pipe' } = 
     err.code = 'ENOENT';
     throw err;
   }
+  const blocked = fakeOnlyError(name, r);
+  if (blocked) throw blocked;
   const finalArgs = [...r.prefixArgs, ...args];
   const opts = {
     // 뺄 변수와 새로 넣을 변수의 기존 값(대소문자 다른 것 포함)을 먼저 지우고 넣는다

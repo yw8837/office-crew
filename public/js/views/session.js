@@ -538,7 +538,7 @@ function Chat({ s, run }) {
         return;
       }
     }
-    const h = run && !run.endedAt && run.status === 'waiting' && (run.hold?.reason === 'mission' || run.hold?.reason === 'cap') ? run.hold : null;
+    const h = run && !run.endedAt && run.status === 'waiting' && (run.hold?.reason === 'mission' || run.hold?.reason === 'cap' || run.hold?.reason === 'quota') ? run.hold : null;
     if (el && h && gateAt.current !== h.at) {
       gateAt.current = h.at;
       const g = stick.current ? el.querySelector('.chat-inner .mission-gate') : null;
@@ -645,7 +645,7 @@ const cardTitles = (s, run, st) => {
 };
 
 // 목표의 판정 뒤 묻기·호출 상한으로 기다리는 단계면 단계 띠에 보일 표시(아니면 ''). 끝난 판정 단계가 ✓ 로 보여 다 끝난 것처럼 읽히지 않게(결정 0015)
-const goalWait = (run, i) => (run.status === 'waiting' && run.hold?.stageIndex === i ? { mission: '🎯', cap: '🔢' }[run.hold.reason] || '' : '');
+const goalWait = (run, i) => (run.status === 'waiting' && run.hold?.stageIndex === i ? { mission: '🎯', cap: '🔢', quota: '⏳' }[run.hold.reason] || '' : '');
 
 // ── 진행 바 + 승인/오류 카드 ──
 function RunBar({ s, run }) {
@@ -683,8 +683,8 @@ function Gate({ s, run }) {
       <div class="row"><button class="btn primary sm" onClick=${() => ctl('resume')}><${Icon} name="play" /> ${t('재개')}</button><button class="btn sm danger" onClick=${() => ctl('stop')}>${t('중지')}</button></div></div>`;
   }
   if (run.status !== 'waiting' || !hold) return null;
-  // 목표의 판정 뒤 묻기·호출 상한(결정 0015)은 질문 창 모양으로 따로 그린다
-  if (hold.reason === 'mission' || hold.reason === 'cap') return html`<${MissionGate} s=${s} run=${run} key=${hold.at} />`;
+  // 목표의 판정 뒤 묻기·호출 상한(결정 0015)·한도 대기(결정 0019)는 질문 창 모양으로 따로 그린다
+  if (hold.reason === 'mission' || hold.reason === 'cap' || hold.reason === 'quota') return html`<${MissionGate} s=${s} run=${run} key=${hold.at} />`;
   const st = run.stages[hold.stageIndex];
   if (hold.reason === 'approve') {
     const next = run.stages[hold.stageIndex + 1];

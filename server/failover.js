@@ -50,13 +50,15 @@ export function nearLimit(limit, threshold = 95) {
   return avoidUntil(limit, threshold) > Date.now();
 }
 
-// 한도에 걸린 AI는 초기화 시각(모르면 30분)까지 쉬게 둔다
+// 한도에 걸린 AI는 초기화 시각(모르면 30분)까지 쉬게 둔다.
+// known: 초기화 시각을 실제로 알았는지(30분 어림이면 false. 목표의 한도 대기는 아는 시각만 "초기화 뒤 이어서"에 쓴다, 결정 0019)
 export class Cooldown {
   constructor() { this.map = new Map(); }
 
   mark(provider, { until, reason = '' } = {}) {
-    const t = until && until > Date.now() ? until : Date.now() + 30 * 60 * 1000;
-    this.map.set(provider, { until: t, reason: String(reason).slice(0, 200), at: Date.now() });
+    const known = !!until && until > Date.now();
+    const t = known ? until : Date.now() + 30 * 60 * 1000;
+    this.map.set(provider, { until: t, known, reason: String(reason).slice(0, 200), at: Date.now() });
     return this.map.get(provider);
   }
 

@@ -172,8 +172,11 @@ export function CutBox({ s, m, compact = false }) {
     set({ busy: true, why: '' });
     try { await post(`/api/sessions/${s.id}/mission/resume`, { missionId: m.id }); set({ busy: false }); } catch (e) { set({ busy: false, why: e.message }); toast(e.message, 'error'); }
   };
+  // 한도 대기에서 끊겼으면 초기화 예정 시각(결정 0019. 자동 이어서 타이머는 메모리라 앱을 끄면 사라진다)
+  const q = m.at?.wait?.reason === 'quota' ? m.at.wait : null;
+  const quota = q ? (q.until > Date.now() ? t('한도 초기화 예정 {time}.', { time: when(q.until) }) : q.until ? t('한도 초기화 예정 시각({time})이 지났어.', { time: when(q.until) }) : t('사용량 한도에 걸려 기다리던 중이었어(초기화 시각은 몰라).')) : '';
   return html`<div class=${compact ? 'warnbox row' : 'warnbox'} role="note" style=${compact ? 'max-width:860px;margin:0 auto 8px;flex-wrap:wrap' : ''}>
-    <span>${compact ? '⚠ ' : ''}${t('앱이 꺼져서 목표가 끊겼어. 저절로 다시 시작하지 않아.')} ${from ? html`<span class="small">${from}</span>` : t('이 목표는 끊긴 자리가 적혀 있지 않아서 이어 갈 수 없어. 버리고 요청을 다시 보내 줘.')}</span>
+    <span>${compact ? '⚠ ' : ''}${t('앱이 꺼져서 목표가 끊겼어. 저절로 다시 시작하지 않아.')} ${from ? html`<span class="small">${from}</span>` : t('이 목표는 끊긴 자리가 적혀 있지 않아서 이어 갈 수 없어. 버리고 요청을 다시 보내 줘.')}${quota ? html` <span class="small">${quota}</span>` : ''}</span>
     ${compact && html`<span class="grow"></span>`}
     <div class="hire-acts">
       ${from && html`<button class="btn primary sm" disabled=${busy} onClick=${resume}>${t('이어서')}</button>`}
@@ -430,6 +433,24 @@ export function MissionGate({ s, run }) {
   const row = (k, label, desc, action) => html`<button type="button" class="ask-row" disabled=${busy} onClick=${() => ctl(action)}>
     <span class="ask-num" aria-hidden="true">${k}</span><span class="ask-row-text"><b>${label}</b>${desc && html`<span>${desc}</span>`}</span><span class="ask-go" aria-hidden="true">→</span>
   </button>`;
+  // 한도 대기(결정 0019): 이어받을 AI 없이 사용량 한도에 걸려 멈춤. 초기화 시각을 알면 "그 시각 뒤 이어서(자동)", 모르면 지금 다시·그만만
+  if (hold.reason === 'quota') {
+    const names = (hold.who || []).map((w) => w.name).join(', ');
+    const review = hold.phase === 'review';
+    return html`<div class="ask-panel mission-gate" role="group" aria-label=${t('사용량 한도 대기')}>
+      <div class="ask-head"><span class="ask-who">⏳ ${t('사용량 한도 대기')}</span></div>
+      <div class="ask-question">${review ? t('검수자 {names}이(가) 사용량 한도에 걸려 기준 판정을 못 했어. 이어받을 다른 AI가 없어. 어떻게 할까?', { names }) : t('{names}이(가) 사용량 한도에 걸려 멈췄어. 이어받을 다른 AI가 없어. 어떻게 할까?', { names })}</div>
+      ${hold.until ? html`<div class="small">${t('한도는 {time}에 초기화돼(한도 기록이나 오류 문구로 안 시각).', { time: when(hold.until) })}</div>` : html`<div class="small">${t('초기화 시각을 몰라. 한도가 풀리면 "지금 다시"를 눌러.')}</div>`}
+      ${!!hold.autoAt && html`<div class="notice" role="status">${t('{time}에 자동으로 이어서 해. 그 전에 "지금 다시"나 "그만"을 눌러도 돼.', { time: when(hold.autoAt) })}</div>`}
+      ${!!hold.until && !hold.canAuto && html`<div class="small muted">${t('자동 이어서는 목표 하나에 {n}번까지야. 이번엔 직접 골라 줘.', { n: hold.autoMax })}</div>`}
+      ${(hold.who || []).some((w) => w.error) && html`<ul class="small">${hold.who.filter((w) => w.error).map((w) => html`<li><b>${w.name}</b>${w.ai ? ` (${w.ai})` : ''}: ${w.error} <span class="muted">· ${t('AI가 보낸 오류 문구')}</span></li>`)}</ul>`}
+      <div class="ask-rows">
+        ${hold.canAuto && !hold.autoAt && row(1, t('{time} 뒤 이어서(자동)', { time: when(hold.until) }), t('초기화 시각에 여유를 조금 두고 같은 단계를 다시 시작해(자동 이어서 {n}/{max}번째).', { n: (hold.autos || 0) + 1, max: hold.autoMax }), 'later')}
+        ${row(hold.canAuto && !hold.autoAt ? 2 : 1, t('지금 다시'), review ? t('같은 회차의 기준 판정을 지금 다시 해. 한도가 안 풀렸으면 또 멈춰.') : t('한도에 걸린 사람만 같은 단계를 지금 다시 해(끝낸 사람의 답은 그대로 써). 한도가 안 풀렸으면 또 멈춰.'), 'retry')}
+      </div>
+      <div class="ask-foot"><span class="grow"></span><button type="button" class="btn sm danger" disabled=${busy} onClick=${() => ctl('stop')}>${t('그만')}</button></div>
+    </div>`;
+  }
   // 일 카드(결정 0018): 한 시간 안에 시작한 카드 수 상한
   if (hold.reason === 'cap' && hold.kind === 'rate') {
     return html`<div class="ask-panel mission-gate" role="group" aria-label=${t('카드 시작 수 상한')}>

@@ -25,6 +25,8 @@ export const NOTE_COUNT = 50; // 목표 하나에 받는 추가 지시 최대 �
 export const MISSION_CALL_CAP = 40; // 목표 하나의 CLI 호출 상한(목표 차례부터 센다. 바꾸는 설정은 없다)
 export const CAP_STEP = 20; // 상한에 닿았을 때 "20번 더"
 export const RETURN_CAP = 1; // 자동 되돌림 횟수(사용자가 "한 번 더"를 누르면 1씩 는다)
+export const QUOTA_AUTO = 3; // 한도 대기에서 "초기화 뒤 이어서(자동)"를 목표 하나에 쓸 수 있는 횟수(넘으면 그 보기 없이 묻는다. 결정 0019)
+export const QUOTA_SLACK = 45000; // 자동 이어서를 초기화 시각보다 이만큼 늦게 시작한다(시계 차이·창이 막 풀린 때를 피하려고)
 export const EVIDENCE_MAX = 500; // 검수 근거 하나 최대 글자(저장)
 export const REVIEW_SHOW = 1500; // 검수 프롬프트에 넣는 단계 답 하나의 최대 글자
 export const RETURN_EVIDENCE = 300; // 되돌림 프롬프트에 넣는 근거 하나의 최대 글자
@@ -946,7 +948,8 @@ const ERROR_MAX = 600; // 끊긴 자리에 적는 오류 문구 하나 최대 �
 
 // 끊긴 자리(mission.at)를 지금 단계표(stages)에 맞춰 읽는다. 맞지 않으면 null.
 // → { stageIndex, phase: 'work'|'review', back(되돌림 중), working(CLI 를 띄운 채 끊긴 에이전트), finished(그 단계에서 이미 끝낸 답 메시지 id),
-//     wait: null | { reason: 'cap' } | { reason: 'mission', kind: 'verdict'|'notes' } | { reason: 'approve' } | { reason: 'error', failed: [{ agentId, error }] } }.
+//     wait: null | { reason: 'cap' } | { reason: 'mission', kind: 'verdict'|'notes' } | { reason: 'approve' } | { reason: 'error', failed: [{ agentId, error }] }
+//           | { reason: 'quota', until, failed: [{ agentId, error }] }(한도 대기, 결정 0019) }.
 // work 는 기준 판정 단계 앞의 단계, review 는 기준 판정 단계(검수자가 없으면 마지막 일 단계 자리). 승인·오류 대기는 일 단계에서만.
 // working 은 팀 단계의 에이전트만 받는다(회의의 조사 담당은 회의 단계 밖 팀원일 수 있다). 대기 중이면 working 은 비운다.
 // 준비 대목(결정 0017)의 자리(phase: scan·questions·research·meeting)는 그 대목 단계여야 하고, 대기는 호출 상한만 다시 묻는다(그 밖의 대기는 그 대목을 처음부터 다시).
@@ -973,6 +976,9 @@ export function resumePoint(at, stages) {
   else if (w?.reason === 'approve' && phase === 'work') wait = { reason: 'approve' };
   else if (w?.reason === 'error' && phase === 'work' && Array.isArray(w.failed)) {
     wait = { reason: 'error', failed: w.failed.filter((f) => f && typeof f === 'object').map((f) => ({ agentId: String(f.agentId ?? ''), error: [...String(f.error ?? '')].slice(0, ERROR_MAX).join('') })) };
+  } else if (w?.reason === 'quota' && Array.isArray(w.failed)) {
+    // 한도 대기(결정 0019): 일 단계(그 단계에서 끝낸 답은 finished 에)와 기준 판정. 호출 없이 같은 질문을 다시 묻는다(초기화 시각은 저장된 값, ms)
+    wait = { reason: 'quota', until: Number.isFinite(w.until) && w.until > 0 ? w.until : 0, failed: w.failed.filter((f) => f && typeof f === 'object').map((f) => ({ agentId: String(f.agentId ?? ''), error: [...String(f.error ?? '')].slice(0, ERROR_MAX).join('') })) };
   } else if (w) return null;
   const team = new Set(stages.flatMap((st) => (st.agentIds || []).map(String)));
   const working = wait || !Array.isArray(at.working) ? [] : [...new Set(at.working.map(String))].filter((id) => team.has(id));

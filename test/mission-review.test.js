@@ -232,7 +232,7 @@ test('5. 건너뛸 단계: 카드가 보여 준 검수자·뺄 단계 목록(번
     const res = await confirm(sid, body(bad));
     assert.equal(res.status, 409, JSON.stringify(bad));
     assert.deepEqual(res.json.review, view);
-    assert.deepEqual(Object.keys(res.json).sort(), ['error', 'review']);
+    assert.deepEqual(Object.keys(res.json).sort(), ['error', 'estimate', 'review']); // 지금 팀의 호출 어림 조각도 같이(결정 0019)
     assert.match(res.json.error, /검수자나 건너뛸 단계가/);
   }
   assert.equal(S(sid).mission.status, 'draft', '어긋나면 확정하지 않는다');

@@ -52,3 +52,12 @@ export function limitRows(limits, providers, now = Date.now()) {
   }
   return out;
 }
+
+// 한도 기록이 몇 분 전 것인지를 보일 단위로(결정 0019): 60분 미만은 분, 24시간 미만은 시간, 그 넘어는 일(오래된 기록). 모르면 null
+// → { n, unit: 'min'|'hour'|'day', old }
+export function recordAge(min) {
+  if (!Number.isFinite(min) || min < 0) return null;
+  if (min < 60) return { n: Math.floor(min), unit: 'min', old: false };
+  if (min < 1440) return { n: Math.floor(min / 60), unit: 'hour', old: false };
+  return { n: Math.floor(min / 1440), unit: 'day', old: true };
+}

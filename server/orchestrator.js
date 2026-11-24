@@ -389,12 +389,14 @@ export class Orchestrator {
     const agents = this.store.all('agents');
     const now = reviewPlan(team, agents, m.leadId);
     const nowCard = reviewCard(team, agents, now);
+    // 아래 409 에는 지금 팀으로 다시 계산한 호출 어림 조각도 싣는다(화면이 어림 줄을 새 값으로 다시 그린다. 결정 0019)
+    const estNow = () => estimateParts(team, agents, { lead: m.leadId, spent: Number.isFinite(m.calls?.used) ? m.calls.used : 0, cap: Number.isFinite(m.calls?.cap) ? m.calls.cap : MISSION_CALL_CAP });
     let drop = [];
     if (body.review !== undefined && body.review !== null) {
       const r = typeof body.review === 'object' && !Array.isArray(body.review) ? body.review : {};
       const want = Array.isArray(r.drop) ? r.drop : null;
       const fits = !!want && want.every((x) => Number.isInteger(x) && now.droppable.includes(x));
-      if (!fits || !sameDroppable(r.droppable, nowCard.droppable) || String(r.reviewerId ?? '') !== String(now.reviewerId ?? '')) throw fail(409, tr('검수자나 건너뛸 단계가 화면에 보이던 것과 달라. 지금 값을 다시 보여 줄게.'), { review: nowCard });
+      if (!fits || !sameDroppable(r.droppable, nowCard.droppable) || String(r.reviewerId ?? '') !== String(now.reviewerId ?? '')) throw fail(409, tr('검수자나 건너뛸 단계가 화면에 보이던 것과 달라. 지금 값을 다시 보여 줄게.'), { review: nowCard, estimate: estNow() });
       drop = [...new Set(want)];
     }
     const final = body.edited ? cleanGoal(body.edited) : draft;
@@ -409,13 +411,13 @@ export class Orchestrator {
       const p = typeof body.prep === 'object' && !Array.isArray(body.prep) ? body.prep : {};
       const want = { research: p.research === true, meeting: p.meeting === true, lead: p.lead, researchers: p.researchers, attendees: p.attendees };
       const nowPrep = prepCard(team, agents, m.leadId, prep.direct);
-      if (!prepFits(want, nowPrep)) throw fail(409, tr('조사·회의를 지금 팀으로는 화면에 보이던 대로 할 수 없어. 지금 값을 다시 보여 줄게.'), { prep: nowPrep });
+      if (!prepFits(want, nowPrep)) throw fail(409, tr('조사·회의를 지금 팀으로는 화면에 보이던 대로 할 수 없어. 지금 값을 다시 보여 줄게.'), { prep: nowPrep, estimate: estNow() });
       Object.assign(prep, { research: want.research, meeting: want.meeting });
     }
     // 일하는 방식(결정 0018): 화면이 보여 주던 값('cards' 일 카드로 나눠 하기 / 'stages' 팀 단계표대로). 없는 요청(옛 화면)은 단계표.
     // 일 카드를 못 쓰는 팀(승인 관문·회의 단계가 있거나 검수 역할이 아닌 팀원이 한 명 이하)이면 409 와 지금 값
     const work = body.work === 'cards' ? 'cards' : 'stages';
-    if (work === 'cards' && cardsProblem(team, agents)) throw fail(409, tr('지금 팀으로는 일 카드로 나눠 할 수 없어. 지금 값을 다시 보여 줄게.'), { work: workCard(team, agents) });
+    if (work === 'cards' && cardsProblem(team, agents)) throw fail(409, tr('지금 팀으로는 일 카드로 나눠 할 수 없어. 지금 값을 다시 보여 줄게.'), { work: workCard(team, agents), estimate: estNow() });
     const userMsg = s.messages.find((x) => x.id === m.requestMsgId && x.role === 'user');
     if (!userMsg) throw fail(409, tr('요청 메시지를 찾지 못했어. 요청을 다시 보내 줘.'));
     // 일하기: 팀 단계표에서 사용자가 남기지 않은 검수 단계(승인 관문·회의가 아닌 것)를 빼고, 검수자가 있으면 맨 끝에 기준 판정 단계를 붙인다.

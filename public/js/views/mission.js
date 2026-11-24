@@ -5,7 +5,8 @@ import { html, ProviderChip } from '../ui.js';
 import { state, changed, toast, agentById } from '../state.js';
 import { post, put } from '../api.js';
 import { t, locale } from '../i18n/index.js';
-import { sumEstimate, limitRows } from '../mission-numbers.js';
+import { sumEstimate, limitRows, recordAge } from '../mission-numbers.js';
+import { WIN_LABEL } from './session.js'; // 한도 창 이름(세션 화면의 계정 한도와 같은 이름)
 
 const CRIT_COUNT = 7; // 서버와 같은 상한(server/mission.js)
 const lines = (text) => String(text || '').split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
@@ -45,11 +46,11 @@ function prepEstimate(pp, on) {
   return `${t('어림값(일하기 전 대목만)')}: ${parts.join(' · ')}. ${t('블록이나 빈 답을 다시 요청하거나 다시 시도하면 더 들어.')}`;
 }
 // ── 호출 어림·구독 한도·한도 대기(결정 0019) ──
-// 시각 한 줄: 오늘이면 시:분, 아니면 월/일 시:분
+// 시각 한 줄: 오늘이면 시:분, 아니면 월/일 시:분(24시간제는 0~23시로. 자정이 24:05 로 보이지 않게)
 const when = (ms) => {
   const d = new Date(ms);
   const same = new Date().toDateString() === d.toDateString();
-  return d.toLocaleString(locale(), same ? { hour: '2-digit', minute: '2-digit', hour12: false } : { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+  return d.toLocaleString(locale(), same ? { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' } : { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 };
 // 목표 카드의 호출 어림 줄: 서버가 실은 조각(m.estimate)을 지금 고른 값으로 더한다(서버도 같은 함수로 확인 시점의 값을 적는다). 예측이 아니라 대략치라고 밝힌다
 function EstimateLine({ est, pick }) {
@@ -64,14 +65,20 @@ function EstimateLine({ est, pick }) {
   </div>`;
 }
 // 구독 한도 줄: 그 목표에서 일할 AI들의 한도 기록 중 아직 유효한 창만(앱이 이미 받은 기록. 새로 읽지 않고, 이 목표가 몇 %를 쓸지 어림하지 않는다). 보일 창이 없으면 줄 자체를 안 그린다
-const WIN = () => ({ five_hour: t('5시간'), seven_day: t('주간') });
+// 기록이 몇 분·시간·일 전 것인지(24시간을 넘으면 오래된 기록)
+const ageWords = (min) => {
+  const a = recordAge(min);
+  if (!a) return '';
+  if (a.unit === 'min') return a.n < 1 ? t('방금 받은 기록') : t('{n}분 전 기준', { n: a.n });
+  return a.unit === 'hour' ? t('{n}시간 전 기준', { n: a.n }) : t('{n}일 전 기준', { n: a.n });
+};
 function LimitLine({ providers }) {
   const rows = limitRows(state.usage?.limits, providers || []);
   if (!rows.length) return null;
   return html`<div class="goal-sec goal-limits">
     <div class="small muted"><b>${t('구독 한도(받은 기록)')}</b></div>
-    ${rows.map((r) => html`<div class="small"><${ProviderChip} id=${r.provider} /> ${r.windows.map((w) => `${WIN()[w.key] || w.key} ${w.pct}%${w.resetsAt ? ` (${t('{time} 초기화', { time: when(w.resetsAt * 1000) })})` : ''}`).join(' · ')}
-      ${r.ago !== null && html`<span class="muted"> · ${r.ago < 1 ? t('방금 받은 기록') : t('{n}분 전 기준', { n: r.ago })}</span>`}</div>`)}
+    ${rows.map((r) => html`<div class="small"><${ProviderChip} id=${r.provider} /> ${r.windows.map((w) => `${WIN_LABEL[w.key] || w.key} ${w.pct}%${w.resetsAt ? ` (${t('{time} 초기화', { time: when(w.resetsAt * 1000) })})` : ''}`).join(' · ')}
+      ${r.ago !== null && html`<span class="muted"> · ${ageWords(r.ago)}</span>`}${recordAge(r.ago)?.old ? html` <span class="chip warn">${t('오래된 기록')}</span>` : ''}</div>`)}
     <div class="small muted">${t('앱이 이미 받은 기록이야. 이 목표가 몇 %를 쓸지는 어림하지 않아.')}</div>
   </div>`;
 }
@@ -261,6 +268,7 @@ export function GoalCard({ m }) {
   const [prepOn, setPrepOn] = useState(null); // 사용자가 고친 체크 { research, meeting }(없으면 카드의 기본값)
   const [workShown, setWorkShown] = useState(null); // 일 카드를 지금 팀으로 못 쓸 때 서버가 준 지금 값(결정 0018)
   const [workSel, setWorkSel] = useState(null); // 사용자가 고른 일하는 방식('cards' | 'stages', 없으면 카드의 기본값)
+  const [estShown, setEstShown] = useState(null); // 확인이 어긋났을 때 서버가 준 지금 팀의 호출 어림 조각(결정 0019)
   const goalIn = useRef(null);
   const editBtn = useRef(null);
   const editing = !!edit;
@@ -310,6 +318,8 @@ export function GoalCard({ m }) {
       if (e.data?.prep) { const p = e.data.prep; setPrepShown(p); setPrepOn((o) => ({ research: !!(o || prepOf(p)).research && p.research.can, meeting: !!(o || prepOf(p)).meeting && p.meeting.can })); }
       // 일 카드를 지금 팀으로 못 쓰면 지금 값으로 다시 그리고 팀 단계표로 돌린다
       if (e.data?.work) { setWorkShown(e.data.work); setWorkSel(e.data.work.can ? null : 'stages'); }
+      // 팀이 바뀌어 어긋났으면 호출 어림도 지금 팀의 조각으로 다시 더한다
+      if (e.data?.estimate) setEstShown(e.data.estimate);
       toast(e.message, 'error');
       setBusy(false);
       return false;
@@ -368,7 +378,7 @@ export function GoalCard({ m }) {
       <span><b>${t('팀 단계표대로')}</b> — ${t('팀에 짜 둔 단계를 순서대로 돌아.')}</span></label>
   </div>`;
   // 호출 어림(결정 0019): 조사·회의 체크, 일하는 방식, 남기기를 바꾸면 바로 다시 더한다(옛 카드는 이 칸이 없어 안 보인다). 구독 한도는 받은 기록이 있을 때만
-  const estLine = m.estimate && html`<${EstimateLine} est=${m.estimate} pick=${{ work: work === 'cards' ? 'cards' : 'stages', research: !!prep?.research, meeting: !!prep?.meeting, kept }} />`;
+  const estLine = (estShown || m.estimate) && html`<${EstimateLine} est=${estShown || m.estimate} pick=${{ work: work === 'cards' ? 'cards' : 'stages', research: !!prep?.research, meeting: !!prep?.meeting, kept }} />`;
   const limLine = html`<${LimitLine} providers=${m.providers} />`;
   const openEdit = () => setEdit({ goal: v.goal, criteria: v.criteria.join('\n'), checks: checksOf(v).join('\n'), outOfScope: v.outOfScope.join('\n'), userDecides: v.userDecides.join('\n'), keep: (v.keep || []).join('\n') });
   const closeEdit = () => { setEdit(null); setTimeout(() => editBtn.current?.focus(), 0); };

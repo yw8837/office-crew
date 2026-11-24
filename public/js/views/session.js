@@ -1007,7 +1007,7 @@ export function RightPanel({ s }) {
   </aside>`;
 }
 
-const WIN_LABEL = tmap(() => ({ five_hour: t('5시간'), seven_day: t('주간'), primary: t('기본 창'), secondary: t('보조 창') }));
+export const WIN_LABEL = tmap(() => ({ five_hour: t('5시간'), seven_day: t('주간'), primary: t('기본 창'), secondary: t('보조 창') })); // 목표 카드의 구독 한도 줄도 쓴다(결정 0019)
 export function Limits({ lim }) {
   const entries = Object.entries(lim || {});
   if (!entries.length) return html`<div class="muted small">${t('아직 관측된 한도가 없어. Claude·Codex로 한 번 실행하면 표시돼.')}</div>`;

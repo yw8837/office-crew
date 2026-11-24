@@ -2132,4 +2132,7 @@ export default {
   "지금 다시": "Retry now",
   "같은 회차의 기준 판정을 지금 다시 해. 한도가 안 풀렸으면 또 멈춰.": "Runs the same round of the criteria check again now. If the limit hasn't lifted, it stops again.",
   "한도에 걸린 사람만 같은 단계를 지금 다시 해(끝낸 사람의 답은 그대로 써). 한도가 안 풀렸으면 또 멈춰.": "Only those who hit the limit run the same step again now (finished answers are kept). If the limit hasn't lifted, it stops again.",
+  "{n}시간 전 기준": "as of {n} h ago",
+  "{n}일 전 기준": "as of {n} days ago",
+  "오래된 기록": "old record",
 };

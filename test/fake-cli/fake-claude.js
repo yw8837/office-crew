@@ -221,10 +221,20 @@ async function pump() {
   if ((planTurn && goalLine.includes('SLOWPLAN')) || (cardId === 'k2' && goalLine.includes('SLOWK2')) || (cardId === 'k1' && goalLine.includes('SLOWK1') && !tailRetry)
     || (cardId === 'k1' && tailRetry && goalLine.includes('SLOWTAIL'))) await sleep(3000);
   if ((scanTurn && goalLine.includes('SLOWSCAN')) || (qTurn && goalLine.includes('SLOWQ')) || (rn === 2 && goalLine.includes('SLOWR2')) || (prepMeet && goalLine.includes('SLOWMEET'))) await sleep(3000);
-  if (req.includes('SESSIONLIMIT') && !text.includes('[이어받기]')) {
+  // 목표의 일 단계 한도(결정 0019): 일 단계("[팀 작업]")·카드 차례가 사용량 한도 오류로 끝난다. 신호어는 확정 목표 줄에서:
+  // WORKQUOTA(거절 이벤트에 1시간 뒤 초기화 시각) · WORKQUOTAIN(이벤트 없이 오류 문구에 "2시간 뒤") · WORKQUOTANT(시각 없음) · WORKQUOTAK2(k2 카드만, 시각 있음).
+  // 테스트가 FAKE_LOG 옆에 ".lift" 파일을 두면 한도가 풀린 것으로 본다(REVIEWQUOTA 도 같다)
+  const lifted = !!process.env.FAKE_LOG && fs.existsSync(`${process.env.FAKE_LOG}.lift`);
+  const workTurn = !goalTurn && !reviewTurn && !planTurn && !scanTurn && !qTurn && !rn && !prepMeet && !tailRetry && (!!cardId || text.includes('[팀 작업]'));
+  const wq = !workTurn || lifted || text.includes('[이어받기]') ? ''
+    : goalLine.includes('WORKQUOTAK2') ? (cardId === 'k2' ? 'event' : '') : goalLine.includes('WORKQUOTANT') ? 'none' : goalLine.includes('WORKQUOTAIN') ? 'text' : goalLine.includes('WORKQUOTA') ? 'event' : '';
+  if (wq) {
+    if (wq === 'event') out({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', unifiedWindows: { five_hour: { utilization: 1, resetsAt: Math.floor(Date.now() / 1000) + 3600 } } } });
+    out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: wq === 'text' ? 'Usage limit reached. Try again in 2 hours.' : 'Claude AI usage limit reached', session_id: sid, usage: {} });
+  } else if (req.includes('SESSIONLIMIT') && !text.includes('[이어받기]')) {
     // "session" 이 들어간 한도 문구(이어하기 실패로 오판하면 안 됨)
     out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Session limit reached', session_id: sid, usage: {} });
-  } else if ((text.includes('QUOTAFAIL') || (reviewTurn && goalLine.includes('REVIEWQUOTA'))) && !text.includes('[이어받기]')) {
+  } else if ((text.includes('QUOTAFAIL') || (reviewTurn && goalLine.includes('REVIEWQUOTA') && !lifted)) && !text.includes('[이어받기]')) {
     // REVIEWQUOTA: 기준 판정 차례만 한도 오류(확정 목표 줄은 일 단계 프롬프트에도 들어가서 QUOTAFAIL 을 쓰면 일 단계까지 걸린다)
     // 실측 형식: 한도 초과 시 rate_limit_event(rejected) 뒤 오류 결과
     out({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', unifiedWindows: { five_hour: { utilization: 1, resetsAt: Math.floor(Date.now() / 1000) + 3600 } } } });

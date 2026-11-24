@@ -2094,4 +2094,17 @@ export default {
   "목표가 끝나서 돌지 않은 카드 {ids}는 건너뜀으로 적었어.": "The goal ended, so cards that didn't run ({ids}) are recorded as skipped.",
   "다시 요청한 답에서 계획 블록을 읽지 못했어. 앞 계획으로 일하고, 명단에 없는 담당만 다른 팀원에게 맡길게.": "The plan block couldn't be read in the answer asked for again. The earlier plan is used, and only owners missing from the list are handed to other members.",
   "받아들이기를 골랐어. 막힌 일은 빼고({names}) 나머지 결과로 기준 판정까지 가.": "Accept was chosen. The blocked work ({names}) is left out and the other results go on to the criteria check.",
+  // ── 호출 어림·구독 한도·한도 대기(결정 0019) ──
+  "호출 어림": "Call estimate",
+  "대략 {min}~{max}번 호출(목표 잡기에 이미 쓴 {spent}번·자동 되돌림 최대 {n}번 포함) · 상한 {cap}번": "About {min} to {max} calls (including {spent} already used to set the goal and up to {n} automatic return) · cap {cap}",
+  "대략 {min}~{max}번 호출(목표 잡기에 이미 쓴 {spent}번 포함) · 상한 {cap}번": "About {min} to {max} calls (including {spent} already used to set the goal) · cap {cap}",
+  "상한에 닿으면 물어볼게.": "If it reaches the cap, you'll be asked.",
+  "예측이 아니라 대략치야. 블록이나 빈 답을 다시 요청하거나, 오류로 다시 하거나, 다른 AI가 이어받거나, 한도에 걸려 다시 하면 더 들어.": "This is a rough figure, not a forecast. Asking again for a block or an empty answer, retrying after an error, another AI taking over, or retrying after a usage limit costs more.",
+  "구독 한도(받은 기록)": "Subscription limits (as last received)",
+  "{time} 초기화": "resets {time}",
+  "방금 받은 기록": "just received",
+  "{n}분 전 기준": "as of {n} min ago",
+  "앱이 이미 받은 기록이야. 이 목표가 몇 %를 쓸지는 어림하지 않아.": "These are records the app has already received. How many percent this goal will use isn't estimated.",
+  "실제 호출 {k}번(어림 {min}~{max}번)": "Actual calls: {k} (estimate {min} to {max})",
+  "실제 호출 {k}번": "Actual calls: {k}",
 };

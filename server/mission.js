@@ -11,6 +11,7 @@ import { tr } from './i18n.js';
 import { roleKind } from './routing.js';
 import { strip, suspiciousKind, INJECTION } from './notes.js';
 import { CHECK_MAX } from './meeting.js';
+import { sumEstimate } from '../public/js/mission-numbers.js'; // 호출 어림 더하기는 화면과 같은 함수(결정 0019)
 
 export const GOAL_MAX = 200; // 목표 한 줄 최대 글자
 export const CRIT_MAX = 300; // 합격 기준 하나 최대 글자
@@ -697,6 +698,37 @@ export function cardsProblem(team, agents) {
 }
 // 목표 카드에 싣는 "일하는 방식" 줄: 일 카드를 쓸 수 있는지와 못 쓰는 이유, 기본값(쓸 수 있으면 일 카드)
 export const workCard = (team, agents) => { const why = cardsProblem(team, agents); return { can: !why, why, on: why ? 'stages' : 'cards' }; };
+
+// ── 호출 어림(결정 0019) ──
+// 목표 카드(확인 전)에 싣는 어림 조각. 화면은 사용자가 고른 값(조사·회의, 일하는 방식, 남기기)으로 sumEstimate 를 불러 바로 더하고, 확인할 때 서버도 같은 함수로 더해 mission.estimate 에 둔다.
+// 대략치이지 예측이 아니다: 목표 잡기에 이미 쓴 호출(spent), 조사·회의는 prepCard 의 어림값(회의 최대에는 회의 중 조사까지), 단계표면 남은 팀 단계마다 인원(회의 단계는 회의 호출 수 식,
+// 1바퀴 합의로 줄어든 수가 최소), 일 카드면 계획 1 + 카드 1~CARD_COUNT 장, 검수자가 있으면 기준 판정 1, 자동 되돌림은 최소 0번·최대 RETURN_CAP 번(한 번 = 마지막 일 단계 + 판정).
+// 넣지 않는 것: 블록·빈 답 다시 요청, 오류 다시 하기, 이어받기, 끝의 두 칸 다시 쓰기, 팀 회의 단계의 회의 중 조사, 사용자가 고르는 "한 번 더", 한도 대기 뒤 다시 하기
+export function estimateParts(team, agents, { lead = null, spent = 0, cap = MISSION_CALL_CAP } = {}) {
+  const byId = new Map((agents || []).map((a) => [String(a.id), a]));
+  const pc = prepCard(team, agents, lead);
+  const rp = reviewPlan(team, agents, lead);
+  const isReview = (ids) => ids.every((id) => roleKind(byId.get(id).role) === 'review');
+  const rounds = (m) => { const v = m?.rounds; const x = v === null || v === undefined || v === '' ? NaN : Math.round(Number(v)); return Number.isFinite(x) ? Math.max(1, Math.min(3, x)) : 2; }; // normMeeting 과 같은 바퀴 수
+  const stages = (team?.stages || []).map((st, index) => ({ index, st, ids: [...new Set((st.agentIds || []).map(String))].filter((id) => byId.has(id)) })).filter((x) => x.ids.length)
+    .map(({ index, st, ids }) => {
+      const meet = !!st.meeting && ids.length >= 2;
+      return { index, min: meet ? meetingCallsMin(ids.length, rounds(st.meeting)) : ids.length, max: meet ? meetingCalls(ids.length, rounds(st.meeting)) : ids.length, review: isReview(ids), drop: rp.droppable.includes(index), last: meet ? 1 : ids.length };
+    });
+  const cardsOk = !cardsProblem(team, agents);
+  return {
+    spent: Number(spent) || 0, cap: Number(cap) || MISSION_CALL_CAP,
+    research: { can: pc.research.can, min: pc.research.min, max: pc.research.max },
+    meeting: { can: pc.meeting.can, min: pc.meeting.fewer, max: pc.meeting.calls + pc.meeting.checks },
+    review: rp.reviewerId ? 1 : 0, returns: rp.reviewerId ? RETURN_CAP : 0,
+    cards: cardsOk ? { min: 1 + 1, max: 1 + CARD_COUNT, last: Math.max(1, Math.min(CARD_COUNT, cardRoster(team, agents, rp.reviewerId).length)) } : null,
+    stages,
+  };
+}
+// 어림 하나: 고른 값으로 estimateParts 를 더한다(화면과 같은 sumEstimate). work: 'cards'|'stages', prep: { research, meeting }, keep: 남긴 팀 단계 번호. → { min, max, returns, cap, spent }
+export function estimateCalls(team, agents, { work = 'stages', prep = null, keep = [], lead = null, spent = 0, cap = MISSION_CALL_CAP } = {}) {
+  return sumEstimate(estimateParts(team, agents, { lead, spent, cap }), { work, research: !!prep?.research, meeting: !!prep?.meeting, kept: keep });
+}
 
 // 경로 겹침: 같은 경로이거나 한쪽이 다른 쪽 폴더 안. 빈 경로·'.'는 작업 폴더 전체라 모두와 겹친다. 대소문자·\ / 는 가리지 않는다
 const normPath = (p) => String(p ?? '').trim().replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').replace(/\/+$/, '').toLowerCase().replace(/^\.$/, '');

@@ -21,7 +21,7 @@ import { parseGoal, goalBlock, goalWarn, newMission, toCriteria, cardOf, sameCar
   stageDiff, teamRoles, resumePoint, pastOutputs,
   PREP_KINDS, isPrep, prepPlan, prepCard, prepFits, meetingCalls, firstJudge, answerFlags, guardOf, researchGuards, parseResearch, scanPrompt, questionsPrompt, researchPrompt, researchNote, conclusionPrompt, Q_FINAL, NOTE_SHOW, PREP_ROUNDS,
   workCard, cardsProblem, cardRoster, matchOwners, fallbackOwner, parsePlan, planPrompt, planWaves, waveStages, wavesLine, soloCard, cardPrompt, cardTail, hasTail, parseBlocked, blockedRule, tailRule,
-  CARD_TRIES, CARD_RATE, HOUR, porcelainPaths, testLike } from './mission.js';
+  CARD_TRIES, CARD_RATE, HOUR, porcelainPaths, testLike, estimateParts, estimateCalls } from './mission.js';
 import { execFile } from 'node:child_process';
 
 const ACTIVE = new Set(['running', 'paused', 'waiting']);
@@ -334,6 +334,11 @@ export class Orchestrator {
       const agents = this.store.all('agents');
       // 일하는 방식 줄(결정 0018): 일 카드로 나눠 할 수 있는 팀인지(못 쓰면 이유). 검수자 권한 줄(결정 0015 개정): 안내일 뿐 확인 대조에는 안 넣는다
       const rpNow = reviewPlan(team, agents, lead);
+      // 호출 어림 조각(결정 0019): 화면이 고른 값으로 바로 더한다. 목표 잡기에 이미 쓴 호출을 같이 싣는다.
+      // 구독 한도 줄에 보일 프로바이더: 팀원이 직접 정한 AI(자동 라우팅은 어디로 갈지 몰라서 뺀다). 한도 기록은 화면이 이미 받은 것만 본다
+      const seenPv = new Set();
+      const providers = (team?.stages || []).flatMap((x) => x.agentIds || []).map((id) => agents.find((a) => String(a.id) === String(id)))
+        .filter((a) => a && a.routing !== 'auto' && a.provider).map((a) => a.provider).filter((pv) => !seenPv.has(pv) && seenPv.add(pv));
       const card = {
         id: newId('m'), role: 'proposal', kind: 'goal', status: 'open', text: '', missionId: m.id, leadId: lead, draftMsgId: got?.msg.id || null,
         goal: draft.goal, criteria: draft.criteria, outOfScope: draft.outOfScope, userDecides: draft.userDecides,
@@ -342,6 +347,7 @@ export class Orchestrator {
         reviewerReadOnly: !!rpNow.reviewerId && this.store.get('agents', rpNow.reviewerId)?.permission === 'plan',
         prep: prepCard(team, agents, lead, got?.p.raw?.direct === true),
         work: workCard(team, agents),
+        estimate: estimateParts(team, agents, { lead, spent: m.calls.used, cap: m.calls.cap }), providers,
         ...(warn ? { warn } : {}), ...(got ? {} : { fallback: true }), createdAt: Date.now(),
       };
       s.messages.push(card);
@@ -418,6 +424,9 @@ export class Orchestrator {
     const rp = reviewPlan(team, agents, m.leadId, keep);
     const plan = this.#missionPlan(team, rp, { ...prep, lead: m.leadId }, work === 'cards' ? { lead: m.leadId, cards: null } : null);
     const edited = !sameCard(final, draft);
+    // 호출 어림(결정 0019): 확인 시점에 고른 값으로(카드가 보여 준 것과 같은 함수). 끝난 뒤 실제 호출 수 옆에 보인다
+    const spentCalls = Number.isFinite(m.calls?.used) ? m.calls.used : 0;
+    const estimate = estimateCalls(team, agents, { work, prep, keep, lead: m.leadId, spent: spentCalls, cap: Number.isFinite(m.calls?.cap) ? m.calls.cap : MISSION_CALL_CAP });
     const first = plan.stages[0];
     const phase0 = isPrep(first) || first.mission === 'plan' ? first.mission : 'work';
     Object.assign(m, {
@@ -433,6 +442,8 @@ export class Orchestrator {
       calls: m.calls && Number.isFinite(m.calls.used) && Number.isFinite(m.calls.cap) ? m.calls : { used: 0, cap: MISSION_CALL_CAP },
       // 조사·회의 먼저(결정 0017): 고른 대목(이어서 할 때 같은 단계표를 다시 만든다), 조사 노트(질문과 갈래마다 상태·답 메시지), 준비 회의의 결론 메시지
       prep, research: null, meetingMsgId: null,
+      // 호출 어림(결정 0019): 확인 시점에 고른 값으로 더한 값(끝난 뒤 실제 호출 수 옆에 보인다)
+      estimate,
     });
     Object.assign(card, { status: 'confirmed', confirmed: { ...final }, edited, prepChosen: { research: prep.research, meeting: prep.meeting }, ...(body.work !== undefined ? { workChosen: work } : {}), resolvedAt: Date.now() });
     logLine(m, 'confirm', edited ? tr('사용자가 고쳐서 확인했어(기준 {n}개).', { n: final.criteria.length }) : tr('사용자가 목표를 확인했어(기준 {n}개).', { n: final.criteria.length }), card.id);

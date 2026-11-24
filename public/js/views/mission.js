@@ -1,10 +1,11 @@
 // 목표 모드 화면(결정 0014): 채팅의 목표 카드(확인·고쳐서 확인·그만, 끊긴 목표 이어서·버리기)와 오른쪽 패널의 "진행 기록" 탭.
 // 카드는 서버가 저장한 초안을 그대로 보여 주고, 확인할 때 보여 주던 값 전체를 같이 보낸다(서버가 저장된 초안과 글자까지 대조한다)
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { html } from '../ui.js';
+import { html, ProviderChip } from '../ui.js';
 import { state, changed, toast, agentById } from '../state.js';
 import { post, put } from '../api.js';
 import { t, locale } from '../i18n/index.js';
+import { sumEstimate, limitRows } from '../mission-numbers.js';
 
 const CRIT_COUNT = 7; // 서버와 같은 상한(server/mission.js)
 const lines = (text) => String(text || '').split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
@@ -43,6 +44,38 @@ function prepEstimate(pp, on) {
   // 질문 블록·빈 답을 다시 요청하거나, 다시 시도·이어받기를 하면 그만큼 더 든다
   return `${t('어림값(일하기 전 대목만)')}: ${parts.join(' · ')}. ${t('블록이나 빈 답을 다시 요청하거나 다시 시도하면 더 들어.')}`;
 }
+// ── 호출 어림·구독 한도·한도 대기(결정 0019) ──
+// 시각 한 줄: 오늘이면 시:분, 아니면 월/일 시:분
+const when = (ms) => {
+  const d = new Date(ms);
+  const same = new Date().toDateString() === d.toDateString();
+  return d.toLocaleString(locale(), same ? { hour: '2-digit', minute: '2-digit', hour12: false } : { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+};
+// 목표 카드의 호출 어림 줄: 서버가 실은 조각(m.estimate)을 지금 고른 값으로 더한다(서버도 같은 함수로 확인 시점의 값을 적는다). 예측이 아니라 대략치라고 밝힌다
+function EstimateLine({ est, pick }) {
+  if (!est) return null;
+  const e = sumEstimate(est, pick);
+  const words = { min: e.min, max: e.max, spent: e.spent, n: e.returns, cap: e.cap };
+  return html`<div class="goal-sec goal-estimate">
+    <div class="small muted"><b>${t('호출 어림')}</b></div>
+    <div class="small">${e.returns ? t('대략 {min}~{max}번 호출(목표 잡기에 이미 쓴 {spent}번·자동 되돌림 최대 {n}번 포함) · 상한 {cap}번', words) : t('대략 {min}~{max}번 호출(목표 잡기에 이미 쓴 {spent}번 포함) · 상한 {cap}번', words)}</div>
+    ${e.max > e.cap && html`<div class="small">${t('상한에 닿으면 물어볼게.')}</div>`}
+    <div class="small muted">${t('예측이 아니라 대략치야. 블록이나 빈 답을 다시 요청하거나, 오류로 다시 하거나, 다른 AI가 이어받거나, 한도에 걸려 다시 하면 더 들어.')}</div>
+  </div>`;
+}
+// 구독 한도 줄: 그 목표에서 일할 AI들의 한도 기록 중 아직 유효한 창만(앱이 이미 받은 기록. 새로 읽지 않고, 이 목표가 몇 %를 쓸지 어림하지 않는다). 보일 창이 없으면 줄 자체를 안 그린다
+const WIN = () => ({ five_hour: t('5시간'), seven_day: t('주간') });
+function LimitLine({ providers }) {
+  const rows = limitRows(state.usage?.limits, providers || []);
+  if (!rows.length) return null;
+  return html`<div class="goal-sec goal-limits">
+    <div class="small muted"><b>${t('구독 한도(받은 기록)')}</b></div>
+    ${rows.map((r) => html`<div class="small"><${ProviderChip} id=${r.provider} /> ${r.windows.map((w) => `${WIN()[w.key] || w.key} ${w.pct}%${w.resetsAt ? ` (${t('{time} 초기화', { time: when(w.resetsAt * 1000) })})` : ''}`).join(' · ')}
+      ${r.ago !== null && html`<span class="muted"> · ${r.ago < 1 ? t('방금 받은 기록') : t('{n}분 전 기준', { n: r.ago })}</span>`}</div>`)}
+    <div class="small muted">${t('앱이 이미 받은 기록이야. 이 목표가 몇 %를 쓸지는 어림하지 않아.')}</div>
+  </div>`;
+}
+
 // 조사 한 갈래가 끝나지 못한 이유(칩)
 // 빈 답은 빈 답 다시 요청까지 두 번 놓친 갈래라 일 카드·판정과 같은 이름 "구멍"을 붙인다(결정 0018)
 const missChip = (status) => ({ empty: `${t('빈 답')} · ${t('구멍')}`, failed: t('오류'), skipped: t('건너뜀') }[status] || t('끝나지 않음'));
@@ -247,6 +280,8 @@ export function GoalCard({ m }) {
       ${mission?.status === 'unreviewed' && html`<div class="notice">${t('일은 끝났어. 기준 판정은 아직 없어.')}</div>`}
       ${mission?.status === 'done' && html`<div class="notice">✅ ${t('기준 {n}개를 모두 통과해서 끝냈어.', { n: mission.criteria.length })}</div>`}
       ${mission?.status === 'accepted' && html`<div class="notice">${t('받아들여서 끝냈어 · 남은 기준 {n}개', { n: left })}</div>`}
+      ${mission?.calls && ['done', 'accepted', 'stopped'].includes(mission.status) && html`<div class="small muted">${mission.estimate ? t('실제 호출 {k}번(어림 {min}~{max}번)', { k: mission.calls.used, min: mission.estimate.min, max: mission.estimate.max }) : t('실제 호출 {k}번', { k: mission.calls.used })}</div>`}
+      ${mission && ['active', 'waiting', 'cut'].includes(mission.status) && html`<${LimitLine} providers=${m.providers} />`}
       ${mission?.status === 'cut' && html`<${CutBox} s=${s} m=${mission} />`}
     </div></div>`;
   }
@@ -329,6 +364,9 @@ export function GoalCard({ m }) {
     <label class="goal-keep small"><input type="radio" name=${`work-${m.id}`} checked=${work !== 'cards'} disabled=${busy} onChange=${() => setWorkSel('stages')} />
       <span><b>${t('팀 단계표대로')}</b> — ${t('팀에 짜 둔 단계를 순서대로 돌아.')}</span></label>
   </div>`;
+  // 호출 어림(결정 0019): 조사·회의 체크, 일하는 방식, 남기기를 바꾸면 바로 다시 더한다(옛 카드는 이 칸이 없어 안 보인다). 구독 한도는 받은 기록이 있을 때만
+  const estLine = m.estimate && html`<${EstimateLine} est=${m.estimate} pick=${{ work: work === 'cards' ? 'cards' : 'stages', research: !!prep?.research, meeting: !!prep?.meeting, kept }} />`;
+  const limLine = html`<${LimitLine} providers=${m.providers} />`;
   const openEdit = () => setEdit({ goal: v.goal, criteria: v.criteria.join('\n'), checks: checksOf(v).join('\n'), outOfScope: v.outOfScope.join('\n'), userDecides: v.userDecides.join('\n'), keep: (v.keep || []).join('\n') });
   const closeEdit = () => { setEdit(null); setTimeout(() => editBtn.current?.focus(), 0); };
   const cancel = () => send('cancel', { missionId: m.missionId });
@@ -360,11 +398,13 @@ export function GoalCard({ m }) {
         ${workLine}
         ${reviewLine}
         ${prepLine}
+        ${estLine}
+        ${limLine}
         <div class="hire-acts">
           <button class="btn primary sm" disabled=${busy || !canEdited} onClick=${startEdited}>${t('이 내용으로 시작')}</button>
           <button class="btn sm" disabled=${busy} onClick=${closeEdit}>${t('고치기 취소')}</button>
         </div>
-      </div>` : html`<${CardBody} v=${v} />${workLine}${reviewLine}${prepLine}`}
+      </div>` : html`<${CardBody} v=${v} />${workLine}${reviewLine}${prepLine}${estLine}${limLine}`}
     ${!editing && html`<div class="hire-acts">
       <button class="btn primary sm" disabled=${busy || stale || !v.goal || !v.criteria.length} onClick=${start}>${t('이대로 시작')}</button>
       <button class="btn sm" ref=${editBtn} disabled=${busy || stale} aria-expanded=${editing ? 'true' : 'false'} onClick=${openEdit}>${t('고쳐서 시작')}</button>

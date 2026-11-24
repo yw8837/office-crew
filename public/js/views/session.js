@@ -8,8 +8,8 @@ import { renderMarkdown } from '../markdown.js';
 import { t, getLang, locale, tmap } from '../i18n/index.js';
 import { MemoryBadge } from './memory.js';
 import { DraftChip } from './rolenotes.js';
-import { continueList, findInMessages, hideAsks, hideCheck, hideGoal, hideReview, hideResearch } from '../chat-tools.js';
-import { GoalCard, MissionLog, MissionGate, ReviewTable, CutBox, ResearchCard } from './mission.js';
+import { continueList, findInMessages, hideAsks, hideCheck, hideGoal, hideReview, hideResearch, hidePlan, hideBlocked } from '../chat-tools.js';
+import { GoalCard, MissionLog, MissionGate, ReviewTable, CutBox, ResearchCard, PlanCard } from './mission.js';
 import { researcherOf, meetingView, boardCards } from '../office/meeting.js';
 
 export const sessionAgents = (s) => {
@@ -414,7 +414,7 @@ class Message extends Component {
           </span></div>
       </div></div>`;
     }
-    if (m.role === 'proposal') return m.kind === 'goal' ? html`<${GoalCard} m=${m} />` : m.kind === 'research' ? html`<${ResearchCard} m=${m} />` : html`<${HireCard} m=${m} />`;
+    if (m.role === 'proposal') return m.kind === 'goal' ? html`<${GoalCard} m=${m} />` : m.kind === 'research' ? html`<${ResearchCard} m=${m} />` : m.kind === 'plan' ? html`<${PlanCard} m=${m} />` : html`<${HireCard} m=${m} />`;
     if (m.role === 'system') return html`<div class="msg system"><span>${m.text}</span></div>`;
     const a = agentById(m.agentId) || { name: t('삭제된 에이전트'), emoji: '❔' };
     const streaming = m.status === 'streaming';
@@ -428,8 +428,10 @@ class Message extends Component {
     const asks = (m.asks || []).filter((x) => x.status === 'open'); // 답은 입력창 위의 질문 창에서 한다
     // 질문 블록은 입력창 위의 질문 창으로, 회의 차례의 조사 질문 블록은 글 아래 "확인 필요" 줄로, 목표 카드 블록은 목표 카드로, 판정 블록은 기준표로,
     // 일하기 전 조사 질문 블록(결정 0017)은 글 아래 질문 목록으로 보여 준다
+    // 일 카드의 계획 블록(결정 0018)은 계획 카드로, 일 단계 답 끝의 막힘 블록은 "막힘: 이유" 줄로 보여 준다
     const body = m.review ? hideReview(m.text, m.reviewBlock, streaming) : m.prep?.kind === 'questions' ? hideResearch(m.text, m.researchBlock, streaming)
-      : hideCheck(hideAsks(hideGoal(m.text, m.goalBlock, streaming), m.asks, streaming), m.check, streaming);
+      : m.prep?.kind === 'plan' ? hidePlan(m.text, m.planBlock, streaming)
+        : hideBlocked(hideCheck(hideAsks(hideGoal(m.text, m.goalBlock, streaming), m.asks, streaming), m.check, streaming), m.blockedBlock, streaming);
     // 조사 결과: 누구의 어떤 질문에 답했는지(질문이 든 차례 글에서 찾는다)
     const asker = m.checkOf ? state.sessionData[state.currentId]?.messages.find((x) => x.id === m.checkOf) : null;
     const chip = m.check ? checkChip(m.check.status) : null;
@@ -445,7 +447,7 @@ class Message extends Component {
       <${Avatar} agent=${a} />
       <div style="min-width:0">
         <div class="msg-head">
-          <b>${a.name}</b>${m.stageLabel ? html`<span class="chip">${m.stageLabel}</span>` : ''}${m.meeting ? html`<span class=${`chip${m.meeting.phase === 'conclude' ? ' accent' : ''}`}>${meetLabel(m.meeting)}</span>` : ''}${m.meeting?.opposer ? html`<span class="chip">${t('반대편')}</span>` : ''}${m.verdict ? html`<span class=${`chip${m.verdict.verdict === 'agree' ? ' accent' : ''}`}>${m.verdict.verdict === 'agree' ? t('합의') : t('계속')}</span>` : ''}${m.handoff ? html`<span class="chip accent">${t('인수인계 메모')}</span>` : ''}${m.goalDraft ? html`<span class="chip accent">${t('목표 초안')}</span>` : ''}${m.review ? html`<span class="chip accent">${t('기준 판정 {n}회차', { n: m.review.round || 1 })}</span>` : ''}${m.review?.retried ? html`<span class="chip">${t('다시 요청')}</span>` : ''}${m.prep?.qid ? html`<span class="chip">${m.prep.qid}</span>` : ''}${m.prep?.retried ? html`<span class="chip">${t('다시 요청')}</span>` : ''}${m.once && !m.review ? html`<span class="chip" title=${t('세션의 CLI 대화를 이어 가지 않고 새 대화로 한 번 돈 차례야(목표의 조사·회의).')}>${t('새 대화')}</span>` : ''}${m.flags ? html`<span class=${`chip${m.flags.suspect ? ' warn' : ''}`}>${t('지시처럼 보이는 줄 {n}개', { n: m.flags.suspect })}</span><span class=${`chip${m.flags.unsourced ? ' warn' : ''}`}>${t('출처 없는 줄 {n}개', { n: m.flags.unsourced })}</span>` : ''}${m.textOnly ? html`<span class="chip warn" title=${t('읽기 전용을 강제하는 장치가 없는 AI로 조사해서, 글 지시로만 묶였어.')}>${t('글 지시로만')}</span>` : ''}${m.noTools ? html`<span class="chip">${t('도구 없음')}</span>` : ''}
+          <b>${a.name}</b>${m.stageLabel ? html`<span class="chip">${m.stageLabel}</span>` : ''}${m.meeting ? html`<span class=${`chip${m.meeting.phase === 'conclude' ? ' accent' : ''}`}>${meetLabel(m.meeting)}</span>` : ''}${m.meeting?.opposer ? html`<span class="chip">${t('반대편')}</span>` : ''}${m.verdict ? html`<span class=${`chip${m.verdict.verdict === 'agree' ? ' accent' : ''}`}>${m.verdict.verdict === 'agree' ? t('합의') : t('계속')}</span>` : ''}${m.handoff ? html`<span class="chip accent">${t('인수인계 메모')}</span>` : ''}${m.goalDraft ? html`<span class="chip accent">${t('목표 초안')}</span>` : ''}${m.review ? html`<span class="chip accent">${t('기준 판정 {n}회차', { n: m.review.round || 1 })}</span>` : ''}${m.review?.retried ? html`<span class="chip">${t('다시 요청')}</span>` : ''}${m.prep?.qid ? html`<span class="chip">${m.prep.qid}</span>` : ''}${m.prep?.retried ? html`<span class="chip">${t('다시 요청')}</span>` : ''}${m.once && !m.review ? html`<span class="chip" title=${t('세션의 CLI 대화를 이어 가지 않고 새 대화로 한 번 돈 차례야(목표의 조사·회의).')}>${t('새 대화')}</span>` : ''}${m.prep?.kind === 'plan' ? html`<span class="chip accent">${t('일 계획')}</span>` : ''}${m.card ? html`<span class="chip accent" title=${t('일 카드')}>${m.card.id}</span>` : ''}${m.cardTail ? html`<span class="chip">${t('끝의 두 칸 다시')}</span>` : ''}${m.flags ? html`<span class=${`chip${m.flags.suspect ? ' warn' : ''}`}>${t('지시처럼 보이는 줄 {n}개', { n: m.flags.suspect })}</span><span class=${`chip${m.flags.unsourced ? ' warn' : ''}`}>${t('출처 없는 줄 {n}개', { n: m.flags.unsourced })}</span>` : ''}${m.textOnly ? html`<span class="chip warn" title=${t('읽기 전용을 강제하는 장치가 없는 AI로 조사해서, 글 지시로만 묶였어.')}>${t('글 지시로만')}</span>` : ''}${m.noTools ? html`<span class="chip">${t('도구 없음')}</span>` : ''}
           <${ProviderChip} id=${m.provider} />
           ${m.model && html`<span class="chip mono">${m.model}${m.effort ? ` · ${EFFORT_LABEL[m.effort] || m.effort}` : ''}</span>`}
           ${streaming && html`<span class="spin"></span>`}
@@ -459,6 +461,7 @@ class Message extends Component {
         ${asker?.check && html`<div class="msg-check"><span class="q">🔎 ${t('{name}의 질문', { name: agentById(asker.agentId)?.name || '?' })}: ${asker.check.question}</span></div>`}
         <div class=${`msg-body md${folded ? ' folded' : ''}`} id=${`body-${m.id}`} onFocusCapture=${folded ? () => { this.props.onToggle?.(); this.setState({ open: true }); } : undefined} dangerouslySetInnerHTML=${{ __html: body.trim() ? renderMarkdown(body) : (streaming && !asks.length ? `<p class="muted">${t('작업 중…')}</p>` : '') }}></div>
         ${m.review && !streaming && html`<${ReviewTable} r=${m.review} />`}
+        ${m.blockedBlock?.reason && !streaming && html`<div class="warnbox" role="note">⛔ ${m.blockedBlock.accepted ? t('막힘(받아들여서 이 답은 빼고 진행): {reason}', { reason: m.blockedBlock.reason }) : t('막힘: {reason}', { reason: m.blockedBlock.reason })}</div>`}
         ${m.prep?.questions?.length > 0 && html`<div class="notice">🔎 ${t('조사 질문 {n}개 — 조사 담당이 질문마다 찾아 와.', { n: m.prep.questions.length })}<ol class="prep-qs">${m.prep.questions.map((q) => html`<li>${q}</li>`)}</ol></div>`}
         ${asks.length > 0 && html`<div class="notice">🙋 ${t('아래 질문 창에서 답해 줘.')}</div>`}
         ${chip && html`<div class="msg-check"><span class="q">🔎 ${t('확인 필요: {q}', { q: m.check.question })}</span><span class=${`chip${chip[1]}`}>${chip[0]}</span></div>`}
@@ -635,6 +638,12 @@ function Welcome({ s }) {
   </div>`;
 }
 
+// 일 카드 단계(결정 0018)에 마우스를 올리면 그 단계의 카드 제목(그 목표의 카드일 때만)
+const cardTitles = (s, run, st) => {
+  if (st.mission !== 'cards' || !st.cardIds?.length || s.mission?.id !== run.missionId) return '';
+  return '\n' + st.cardIds.map((id) => { const c = (s.mission.cards || []).find((x) => x.id === id); return c ? `${id} · ${c.title}` : id; }).join('\n');
+};
+
 // 목표의 판정 뒤 묻기·호출 상한으로 기다리는 단계면 단계 띠에 보일 표시(아니면 ''). 끝난 판정 단계가 ✓ 로 보여 다 끝난 것처럼 읽히지 않게(결정 0015)
 const goalWait = (run, i) => (run.status === 'waiting' && run.hold?.stageIndex === i ? { mission: '🎯', cap: '🔢' }[run.hold.reason] || '' : '');
 
@@ -647,7 +656,7 @@ function RunBar({ s, run }) {
   const ctl = (action) => post(`/api/sessions/${s.id}/control`, { action }).catch((e) => toast(e.message, 'error'));
   return html`<div class="runbar">
     <div class="stages">
-      ${run.stages.map((st, i) => { const wait = goalWait(run, i); return html`${i > 0 && html`<span class="stage-arrow">→</span>`}<span class=${`stage ${wait ? 'review' : st.status}`} title=${`${st.agentIds.map((id) => agentById(id)?.name).join(', ')}${st.note ? ` · ${st.note}` : ''}`}>
+      ${run.stages.map((st, i) => { const wait = goalWait(run, i); return html`${i > 0 && html`<span class="stage-arrow">→</span>`}<span class=${`stage ${wait ? 'review' : st.status}`} title=${`${st.agentIds.map((id) => agentById(id)?.name).join(', ')}${st.note ? ` · ${st.note}` : ''}${cardTitles(s, run, st)}`}>
         ${wait ? wait : st.status === 'running' ? html`<span class="spin" style="width:10px;height:10px"></span>` : st.status === 'done' ? '✓' : st.status === 'error' ? '⚠' : st.status === 'review' ? '✋' : st.status === 'skipped' ? '⤼' : `${i + 1}`}
         ${st.label}${st.count ? ` ×${st.count}` : st.agentIds.length > 1 ? ` ×${st.agentIds.length}` : ''}${st.meetingNow ? ` · ${meetLabel(st.meetingNow)}` : st.meeting && st.mission !== 'meeting' ? ` · ${t('회의')}` : ''}${st.status === 'skipped' ? ` (${t('건너뜀')})` : st.note ? ` (${st.note})` : ''}
       </span>`; })}

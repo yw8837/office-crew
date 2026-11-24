@@ -960,9 +960,9 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
       const status = e.status || 500;
       if (status === 500) console.error('[오류]', e);
       // extra 에서는 정해 둔 값만 싣는다(목표 카드 대조가 어긋났을 때의 지금 초안 draft, 검수 줄 대조가 어긋났을 때의 지금 검수 줄 review,
-      // 조사·회의 먼저가 지금 팀으로 안 될 때의 지금 값 prep). error 는 덮이지 않게 맨 뒤에
+      // 조사·회의 먼저가 지금 팀으로 안 될 때의 지금 값 prep, 일 카드를 지금 팀으로 쓸 수 없을 때의 지금 값 work). error 는 덮이지 않게 맨 뒤에
       const pick = (k) => (e.extra?.[k] && typeof e.extra[k] === 'object' ? { [k]: e.extra[k] } : {});
-      if (!res.headersSent) send(res, status, { ...pick('draft'), ...pick('review'), ...pick('prep'), error: e.message || String(e) });
+      if (!res.headersSent) send(res, status, { ...pick('draft'), ...pick('review'), ...pick('prep'), ...pick('work'), error: e.message || String(e) });
       else try { res.end(); } catch { /* 이미 닫힘 */ }
     }
   });

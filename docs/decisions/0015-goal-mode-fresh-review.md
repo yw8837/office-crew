@@ -6,7 +6,7 @@
 
 ## Revision (2026-11-25, with [0019](0019-goal-mode-call-estimate-and-limit-wait.md))
 
-A criteria check that ends with a usage limit and no other AI to take over no longer ends without a verdict: the run asks with the usage-limit wait of 0019 (continue after the reset time automatically, retry now, or stop), and a retry runs the same round again. Work stages get the same wait instead of the error wait. The goal card now shows a rough estimate of the whole goal's calls before confirming (0019); tokens and subscription percentage are still not capped. The sentences below about the limit case and "no estimate before starting" describe the earlier behaviour.
+A criteria check that ends with a usage limit and no other AI to take over no longer ends without a verdict: the run asks with the usage-limit wait of 0019 (continue after the reset time automatically, retry now, accept without a verdict, or stop), a retry runs the same round again, and the call cap is checked before it. Of the stages, only work stages (team stages and task card steps) get the same wait instead of the error wait; research, meetings and the plan keep their handling. The goal card now shows a rough estimate of the whole goal's calls before confirming (0019); tokens and subscription percentage are still not capped. The sentences below about the limit case and "no estimate before starting" describe the earlier behaviour.
 
 ## Revision (2026-11-22, with [0018](0018-goal-mode-task-cards.md))
 

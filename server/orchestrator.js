@@ -7,7 +7,7 @@ import { PROVIDERS } from './providers/index.js';
 import { detectHire, draftHire } from './hire.js';
 import { toolCategory, resolveCommand } from './providers/util.js';
 import { resolveRoute, roleKind, aiKey, baseProvider } from './routing.js';
-import { Cooldown, isQuotaError, nearLimit, avoidUntil, resetTime, resetFromText, availableCatalog, pickFallback, continuationPrompt, handoffFacts } from './failover.js';
+import { Cooldown, isQuotaError, nearLimit, avoidUntil, resetTime, resetFromText, limitResetAt, availableCatalog, pickFallback, continuationPrompt, handoffFacts } from './failover.js';
 import { nextMidnight, lowerEffort } from './budget.js';
 import { settleClaude, tokenSum } from './usage.js';
 import { tr } from './i18n.js';
@@ -21,7 +21,7 @@ import { parseGoal, goalBlock, goalWarn, newMission, toCriteria, cardOf, sameCar
   stageDiff, teamRoles, resumePoint, pastOutputs,
   PREP_KINDS, isPrep, prepPlan, prepCard, prepFits, meetingCalls, firstJudge, answerFlags, guardOf, researchGuards, parseResearch, scanPrompt, questionsPrompt, researchPrompt, researchNote, conclusionPrompt, Q_FINAL, NOTE_SHOW, PREP_ROUNDS,
   workCard, cardsProblem, cardRoster, matchOwners, fallbackOwner, parsePlan, planPrompt, planWaves, waveStages, wavesLine, soloCard, cardPrompt, cardTail, hasTail, parseBlocked, blockedRule, tailRule,
-  CARD_TRIES, CARD_RATE, HOUR, porcelainPaths, testLike, estimateParts, estimateCalls, QUOTA_AUTO, QUOTA_SLACK } from './mission.js';
+  CARD_TRIES, CARD_RATE, HOUR, porcelainPaths, testLike, estimateParts, estimateCalls, QUOTA_AUTO, quotaDelay } from './mission.js';
 import { execFile } from 'node:child_process';
 
 const ACTIVE = new Set(['running', 'paused', 'waiting']);
@@ -79,6 +79,7 @@ export class Orchestrator {
     this.live = new Map(); // `${sessionId}:${agentId}` → 마지막 상태
     this.throttle = new Map();
     this.cooldown = new Cooldown(); // 사용량 한도에 걸려 잠시 쉬는 AI
+    this.quotaTimers = new Set(); // 목표의 한도 대기에서 고른 자동 이어서 타이머(대기가 끝나면 지운다. 결정 0019)
   }
 
   // 서버 재시작 시 끊긴 실행 정리
@@ -573,7 +574,7 @@ export class Orchestrator {
     if (at.wait?.reason === 'approve') stage = { wait: 'approve', keep: kept };
     else if (at.wait?.reason === 'error') stage = { wait: 'error', keep: kept, failed: at.wait.failed.map((f) => ({ agent: this.store.get('agents', f.agentId) || { id: f.agentId, name: f.agentId }, error: f.error })) };
     // 일 단계의 한도 대기(결정 0019): 그 단계에서 끝낸 답과 한도에 걸린 사람으로 같은 질문을 다시(호출 없음, 초기화 시각은 저장된 값). 기준 판정의 한도 대기는 #missionRun 이 묻는다
-    else if (at.wait?.reason === 'quota' && at.phase === 'work') stage = { wait: 'quota', keep: kept, until: at.wait.until, failed: at.wait.failed.map((f) => ({ agent: this.store.get('agents', f.agentId) || { id: f.agentId, name: f.agentId }, error: f.error })) };
+    else if (at.wait?.reason === 'quota' && at.phase === 'work') stage = { wait: 'quota', keep: kept, until: at.wait.until, failed: at.wait.failed.map((f) => ({ agent: this.store.get('agents', f.agentId) || { id: f.agentId, name: f.agentId }, error: f.error, ...(f.provider ? { provider: f.provider } : {}) })) };
     else if (at.phase === 'work' && !meetingRedo && kept.length) {
       const base = at.back && st.meeting ? [st.agentIds.includes(String(m.leadId)) ? String(m.leadId) : st.agentIds[0]] : st.agentIds;
       stage = { ids: base.filter((id) => !doneIds.has(String(id))), keep: kept };
@@ -916,20 +917,26 @@ export class Orchestrator {
           break;
         }
         // 한도 대기(결정 0019): 목표 일 실행의 일 단계(단계표·일 카드. 준비 대목과 회의 단계는 빼고 지금처럼 오류 대기)에서 실패한 사람이 모두 사용량 한도 오류면
-        // (이어받을 AI 도 없었다) 보통 오류 대기 대신 한도 대기로 묻는다. 다시 하면 한도에 걸린 사람만 다시 돌고, 끝낸 사람의 답은 그대로 쓴다
+        // (이어받을 AI 도 없었다) 보통 오류 대기 대신 한도 대기로 묻는다. 다시 하면(호출 상한을 본 뒤) 한도에 걸린 사람만 다시 돌고, 끝낸 사람의 답은 그대로 쓴다.
+        // 건너뛰기는 오류 대기의 건너뛰기와 같다(일 카드면 한도에 걸린 카드를 구멍으로 빼고 이어 간다. 막힘 받아들이기와 같은 처리)
         if (work && !isPrep(st) && !st.meeting && st.mission !== 'review' && st.mission !== 'plan' && failed.every((f) => isQuotaError(f.error))) {
           const q = await this.#quotaAsk(ctx, i, { phase: 'work', back, failed, until: quotaSaved });
           quotaSaved = undefined;
           if (q === 'stop') { ctx.stopped = true; break; }
           const again = failed.map((f) => String(f.agent?.id || ''));
-          const kept = results.filter((r) => !failed.includes(r));
-          if (st.mission === 'cards') {
-            // 일 카드: 다시 돌리는 카드도 되풀이 상한을 본다(오류 다시 하기와 같다)
-            const g = await this.#cardGate(ctx, i, again, back);
-            if (!g) { ctx.stopped = true; break; }
-            g.commit();
-            first = { ids: g.ids, keep: [...kept, ...g.keep] };
-          } else first = { ids: again, keep: kept };
+          if (q === 'skip') {
+            if (st.mission === 'cards') {
+              for (const c of (ctx.mission.cards || []).filter((x) => (st.cardIds || []).includes(x.id) && again.includes(x.ownerId))) {
+                Object.assign(c, { status: 'hole', by: 'quota', reason: tr('사용량 한도에 걸려 건너뛰었어.'), tail: '' });
+              }
+              this.emitMission(ctx.s);
+            }
+            st.status = 'skipped';
+            break;
+          }
+          // 다시 하기: 한도로 다시 돌리는 카드는 카드 시작 수·시간당 시작 수에 세지 않는다(같은 시작을 잇는 것)
+          if (st.mission === 'cards') for (const c of (ctx.mission.cards || []).filter((x) => (st.cardIds || []).includes(x.id) && again.includes(x.ownerId))) c.status = 'running';
+          first = { ids: again, keep: results.filter((r) => !failed.includes(r)) };
           this.#missionStage(ctx, i, 'again'); // 기다리는 동안 온 추가 지시도 다시 도는 사람에게
           this.#missionAt(ctx, { ...ctx.mission.at, stageIndex: i, working: [], wait: null });
           continue;
@@ -1016,13 +1023,24 @@ export class Orchestrator {
       else {
         if (!skipCheck) {
           if (reviewQuota) {
-            const failed = reviewQuota.failed.map((f) => ({ agent: this.store.get('agents', f.agentId) || { id: f.agentId, name: f.agentId }, error: f.error }));
+            const failed = reviewQuota.failed.map((f) => ({ agent: this.store.get('agents', f.agentId) || { id: f.agentId, name: f.agentId }, error: f.error, ...(f.provider ? { provider: f.provider } : {}) }));
             const q = await this.#quotaAsk(ctx, rv, { phase: 'review', failed, until: reviewQuota.until });
             reviewQuota = null;
             if (q === 'stop') { run.stages[rv].status = 'stopped'; break; }
+            if (q === 'accept') {
+              // 받아들이기: 이번 검수를 판정 없이 적고(검수를 돌리지 않는다) 받아들임으로 끝낸다(#reviewStage 의 받아들이기와 같다)
+              m.round = (m.round || 0) + 1;
+              applyReview(m, []);
+              Object.assign(m, { extras: [], keepBroken: [], repeatFail: [] });
+              Object.assign(run.stages[rv], { status: 'error', note: tr('판정 없음') });
+              logLine(m, 'review', tr('검수 {n}회차: 검수가 오류로 끝나서 판정 없이 끝남', { n: m.round })).fail = 'outside';
+              close();
+              break;
+            }
           }
           if (rv >= 0) await this.#reviewStage(ctx, rv);
           else this.#noReviewer(ctx);
+          if (ctx.quotaAccept) { ctx.quotaAccept = false; close(); break; } // 판정의 한도 대기에서 받아들이기(결정 0019)
         }
         skipCheck = false;
         if (ctx.stopped) break;
@@ -1493,7 +1511,7 @@ export class Orchestrator {
     this.emitMission(ctx.s);
     const commit = () => {
       const now = Date.now();
-      for (const c of run) { c.starts++; c.status = 'running'; m.rate.starts.push(now); }
+      for (const c of run) { c.starts++; c.status = 'running'; if (c.by === 'quota') delete c.by; m.rate.starts.push(now); } // 한도로 건너뛰었던 카드가 다시 돌면 그 표시는 지운다
       this.emitMission(ctx.s);
     };
     return { ids: run.map((c) => c.ownerId), keep, commit };
@@ -1509,8 +1527,8 @@ export class Orchestrator {
     const msg = c.msgId ? ctx.s.messages.find((x) => x.id === c.msgId) : null;
     const tailMsg = c.tailMsgId ? ctx.s.messages.find((x) => x.id === c.tailMsgId) : null;
     const text = out?.text || [msg?.text, tailMsg?.text].filter(Boolean).join('\n\n');
-    // 막혀서 뺀 카드(구멍, 사유 막힘)는 뒤 카드에 결과가 없다고만 알린다
-    return { id, status: c.by === 'blocked' ? 'blocked' : c.status, title: c.title, text, tail: c.tail || '' };
+    // 막혀서 뺀 카드(구멍, 사유 막힘)와 한도 대기에서 건너뛴 카드(결정 0019)는 뒤 카드에 결과가 없다고만 알린다
+    return { id, status: c.by === 'blocked' ? 'blocked' : c.by === 'quota' ? 'skipped' : c.status, title: c.title, text, tail: c.tail || '' };
   }
 
   // 되돌림이 다시 돌리는 마지막 카드 단계에 만들기·글 카드가 하나도 없는가(조사·확인 카드만)
@@ -1546,6 +1564,7 @@ export class Orchestrator {
       const msg = findMsg(r.msgId) || s.messages.findLast((x) => x.role === 'agent' && x.runId === run.id && x.stageIndex === i && String(x.agentId) === c.ownerId && !x.cardTail);
       if (msg) c.msgId = msg.id;
       if (r.tailMsgId) c.tailMsgId = r.tailMsgId;
+      if (r.error && c.by === 'quota' && c.status === 'hole') { count.hole++; continue; } // 한도 대기에서 건너뛴 카드(결정 0019): 구멍 그대로
       if (r.error || r.stopped || r.skipped || !String(r.text || '').trim()) { c.status = 'skipped'; count.skipped++; continue; }
       // 막힘을 받아들인 답(끊겼다 이어서 다시 모은 결과): 구멍(사유 막힘) 그대로
       if (msg?.blockedBlock?.accepted || findMsg(r.tailMsgId)?.blockedBlock?.accepted) { c.status = 'hole'; c.by = 'blocked'; count.hole++; continue; }
@@ -1728,15 +1747,15 @@ export class Orchestrator {
   }
 
   // 호출 상한(결정 0015): 단계를 시작하기 전에 남은 호출 수가 그 단계 인원보다 적으면 묻는다("20번 더" / 그만). 단계 안에서 넘는 양(다시 시도·이어받기)은 막지 않는다.
-  // phase·back: 끊긴 자리에 적을 그 단계의 차례(일·기준 판정, 되돌림인지)
-  async #capCheck(ctx, i, need, phase = 'work', back = false) {
+  // phase·back: 끊긴 자리에 적을 그 단계의 차례(일·기준 판정, 되돌림인지). keepDone: 그 단계에서 끝낸 답(finished)을 끊긴 자리에 남긴다(한도 대기 뒤 다시 하기 앞, 결정 0019)
+  async #capCheck(ctx, i, need, phase = 'work', back = false, keepDone = false) {
     const m = ctx.mission;
     const c = m.calls;
     while (!ctx.stopped && c && c.cap - c.used < need) {
       m.status = 'waiting';
       logLine(m, 'cap', tr('호출 {used}번에 닿았어(상한 {cap}번). 다음 단계에 {need}번이 들어서 물어봤어.', { used: c.used, cap: c.cap, need }));
       this.emitMission(ctx.s);
-      this.#missionAt(ctx, { stageIndex: i, phase, back, wait: { reason: 'cap' } });
+      this.#missionAt(ctx, { stageIndex: i, phase, back, ...(keepDone ? { finished: m.at?.finished || [] } : {}), wait: { reason: 'cap' } });
       const d = await this.#hold(ctx, 'waiting', { reason: 'cap', stageIndex: i, used: c.used, cap: c.cap, step: CAP_STEP });
       if (ctx.stopped || d.action !== 'more') { ctx.stopped = true; break; }
       c.cap += CAP_STEP;
@@ -1747,54 +1766,58 @@ export class Orchestrator {
     return !ctx.stopped;
   }
 
-  // 한도 대기에서 다시 시작할 시각을 정한다(결정 0019): 한도에 걸린 사람마다 그 AI(이어받기로 거친 마지막 AI와 에이전트가 정한 AI)의 아는 초기화 시각 중 늦은 쪽,
-  // 사람끼리도 가장 늦은 쪽(모두 풀려야 다시 돌 수 있다). 한 사람이라도 모르면 0(모름). 아는 시각: 한도 기록의 다 찬 창(resetTime·knownReset), 아는 시각으로 표시한 쉬는 중(Cooldown known),
-  // 오류 문구의 시각(resetFromText). 30분 어림은 아는 시각이 아니다. saved: 끊기기 전에 적어 둔 시각(이어서 할 때. 오류 문구의 "n시간 뒤"는 지금 기준이라 다시 읽지 않는다)
+  // 한도 대기에서 다시 시작할 시각을 정한다(결정 0019). 한도에 걸린 사람마다, 마지막으로 실제로 돈(한도에 걸린) AI 의 아는 초기화 시각:
+  // 한도 기록에서 실제로 다 찬 창(100% 이상이거나 거절 기록의 창, limitResetAt. 이어받기 기준 95%가 아니다)과 오류 문구의 시각(resetFromText) 중 늦은 쪽,
+  // 둘 다 없으면 오류 문구로 표시한 쉬는 중(Cooldown source 'text')의 시각. 사람끼리는 가장 늦은 쪽(모두 풀려야 다시 돈다). 한 사람이라도 모르면 0(모름).
+  // saved: 이어서 할 때 끊기기 전에 적어 둔 시각(오류 문구의 "n시간 뒤"는 지금 기준이라 다시 읽지 않는다). 그 시각이 이미 지났고 다른 시각도 모르면 passed 로 알린다
+  // → { until, passed }
   #quotaUntil(failed, saved) {
     const now = Date.now();
-    const { limits, threshold } = this.#foOpts();
-    const known = (pv, error) => {
-      if (!pv) return 0;
-      const c = this.cooldown.active(pv);
-      return Math.max(resetTime(limits[pv], threshold), knownReset(limits[pv], threshold), c?.known ? c.until : 0, error ? resetFromText(error) : 0);
-    };
+    const limits = this.store.usage.limits || {};
     let until = 0;
     for (const f of failed) {
-      const own = this.store.get('agents', String(f.agent?.id || ''))?.provider;
-      const t = Math.max(known(f.agent?.provider, saved === undefined ? f.error : ''), own && own !== f.agent?.provider ? known(own, '') : 0, saved > now ? saved : 0);
-      if (t <= now) return 0;
+      const pv = f.provider || f.agent?.provider || '';
+      const rest = pv ? this.cooldown.active(pv) : null;
+      let t = Math.max(pv ? limitResetAt(limits[pv], now) : 0, saved === undefined && f.error ? resetFromText(f.error, now) : 0, saved > now ? saved : 0);
+      if (!t && rest?.source === 'text') t = rest.until;
+      if (t <= now) return { until: 0, passed: saved > 0 && saved <= now ? saved : 0 };
       until = Math.max(until, t);
     }
-    return until;
+    return { until, passed: 0 };
   }
 
   // 한도 대기(결정 0019): 목표 일 실행의 일 단계(단계표·일 카드)나 기준 판정이 사용량 한도 오류로 끝났고 이어받을 AI 도 없을 때 묻는다.
-  // 초기화 시각을 알면 "그 시각 뒤 이어서(자동)"·지금 다시·그만, 모르면 지금 다시·그만(한도가 풀리면 지금 다시를 누르라고). 자동을 고르면 그 시각 + 여유(QUOTA_SLACK)에
-  // 같은 단계를 다시 시작한다(타이머는 메모리. 테스트는 OFFICE_CREW_QUOTA_RESUME_MS 로 기다림을 줄인다). 기다리는 동안에도 지금 다시·그만을 누를 수 있다.
+  // 초기화 시각을 알면 "그 시각 뒤 이어서(자동)"·지금 다시·건너뛰기(일 단계)/받아들이기(판정)·그만, 모르면 자동 보기 없이(한도가 풀리면 지금 다시를 누르라고).
+  // 자동을 고르면 그 시각 + 여유(QUOTA_SLACK)에 메모리 타이머가 다시 시작한다(quotaDelay. 테스트는 기다림을 줄인다). 기다리는 동안에도 다른 보기를 누를 수 있다.
+  // 타이머가 울릴 때 일시정지를 눌러 뒀으면 시작하지 않고 일시정지 대기로. 다시 하기 앞에는 호출 상한을 본다(모자라면 "20번 더"부터). 자동 이어서 횟수는 실제로 다시 시작할 때만 센다.
   // 자동 이어서는 목표 하나에 QUOTA_AUTO 번까지(넘으면 그 보기 없이 묻는다). 끊긴 자리에 적어 두어 앱을 껐다 켜면 끊긴 목표 이어서가 같은 질문을 호출 없이 다시 띄운다.
-  // failed: [{ agent, error }](한도에 걸린 사람), until: 이어서 할 때 끊기기 전에 적어 둔 초기화 시각. → 'retry' | 'stop'
+  // failed: [{ agent, error, provider? }](한도에 걸린 사람. agent.provider 는 마지막으로 돈 AI), until: 이어서 할 때 끊기기 전에 적어 둔 초기화 시각
+  // → 'retry' | 'skip'(일 단계) | 'accept'(판정) | 'stop'
   async #quotaAsk(ctx, i, { phase = 'work', back = false, failed = [], until: saved } = {}) {
     const m = ctx.mission;
     m.quota ||= { autos: 0 };
-    const until = this.#quotaUntil(failed, saved);
+    const { until, passed } = this.#quotaUntil(failed, saved);
+    const pvOf = (f) => f.provider || f.agent?.provider || '';
     const who = failed.map((f) => ({ agentId: String(f.agent?.id || ''), name: f.agent?.name || this.store.get('agents', String(f.agent?.id || ''))?.name || String(f.agent?.id || ''),
-      ai: PROVIDERS[f.agent?.provider]?.label || f.agent?.provider || '', error: [...String(f.error || '')].slice(0, 300).join('') }));
+      provider: pvOf(f), ai: PROVIDERS[pvOf(f)]?.label || pvOf(f), error: [...String(f.error || '')].slice(0, 300).join('') }));
     const names = who.map((w) => w.name).join(', ');
     const clock = (t) => { const d = new Date(t); const p = (x) => String(x).padStart(2, '0'); return `${new Date().toDateString() === d.toDateString() ? '' : `${d.getMonth() + 1}/${d.getDate()} `}${p(d.getHours())}:${p(d.getMinutes())}`; };
     m.status = 'waiting';
     logLine(m, 'quota', until ? tr('{names}이(가) 사용량 한도에 걸려 멈췄어. 이어받을 다른 AI가 없어. 한도는 {time}에 초기화돼.', { names, time: clock(until) })
       : tr('{names}이(가) 사용량 한도에 걸려 멈췄어. 이어받을 다른 AI가 없고, 초기화 시각은 몰라.', { names })).fail = 'outside';
     this.emitMission(ctx.s);
-    // 끊긴 자리: 이 단계에서 끝낸 답(finished)은 그대로 두고 한도에 걸린 사람과 오류 문구, 초기화 시각을 적는다
-    this.#missionAt(ctx, { ...m.at, stageIndex: i, phase, back, working: [], wait: { reason: 'quota', until, failed: who.map((w) => ({ agentId: w.agentId, error: [...String(failed.find((f) => String(f.agent?.id || '') === w.agentId)?.error || '')].slice(0, 600).join('') })) } });
+    // 끊긴 자리: 이 단계에서 끝낸 답(finished)은 그대로 두고 한도에 걸린 사람과 그 AI·오류 문구, 초기화 시각을 적는다
+    this.#missionAt(ctx, { ...m.at, stageIndex: i, phase, back, working: [], wait: { reason: 'quota', until, failed: who.map((w) => ({ agentId: w.agentId, error: [...String(failed.find((f) => String(f.agent?.id || '') === w.agentId)?.error || '')].slice(0, 600).join(''), ...(w.provider ? { provider: w.provider } : {}) })) } });
     const at = Date.now(); // 자동 이어서를 골라 다시 띄워도 같은 대기로(알림을 다시 보내지 않는다)
+    const out = phase === 'review' ? 'accept' : 'skip'; // 예전 출구: 일 단계는 건너뛰기(오류 대기와 같다), 판정은 받아들이기(판정 없이 끝낸다)
     let autoAt = 0;
     let timer = null;
     try {
       for (;;) {
         const canAuto = !!until && m.quota.autos < QUOTA_AUTO;
-        const d = await this.#hold(ctx, 'waiting', { reason: 'quota', stageIndex: i, phase, until, canAuto, autos: m.quota.autos, autoMax: QUOTA_AUTO, who, ...(autoAt ? { autoAt } : {}), at });
+        const d = await this.#hold(ctx, 'waiting', { reason: 'quota', stageIndex: i, phase, until, ...(passed ? { passed } : {}), canAuto, autos: m.quota.autos, autoMax: QUOTA_AUTO, out, who, ...(autoAt ? { autoAt } : {}), at });
         clearTimeout(timer);
+        this.quotaTimers.delete(timer);
         timer = null;
         if (ctx.stopped || d.action === 'stop') {
           ctx.stopped = true;
@@ -1802,25 +1825,39 @@ export class Orchestrator {
           return 'stop';
         }
         if (d.action === 'later') {
-          // 테스트만: 기다림을 줄인다(초기화 시각은 그대로 보인다)
-          const env = Number(process.env.OFFICE_CREW_QUOTA_RESUME_MS);
-          const wait = Number.isFinite(env) && env >= 0 && process.env.OFFICE_CREW_QUOTA_RESUME_MS !== '' ? env : Math.max(0, until - Date.now()) + QUOTA_SLACK;
+          const wait = quotaDelay(until);
           autoAt = Date.now() + wait;
           logLine(m, 'answer', tr('{time}에 자동으로 이어서 해. 기다리는 동안에도 "지금 다시"나 "그만"을 누를 수 있어.', { time: clock(autoAt) }));
           this.emitMission(ctx.s);
           timer = setTimeout(() => { if (ctx.gate && ctx.run.hold?.reason === 'quota') ctx.gate({ action: 'retry', auto: true }); }, Math.min(wait, 2 ** 31 - 1));
           timer.unref?.();
+          this.quotaTimers.add(timer);
           continue;
         }
+        if (d.action === out) {
+          m.status = 'active';
+          logLine(m, 'answer', out === 'skip' ? tr('한도 대기에서 건너뛰기를 골랐어. 한도에 걸린 일은 빼고 이어 가.') : tr('한도 대기에서 받아들이기를 골랐어. 이번 검수는 판정 없이 끝내.'));
+          this.emitMission(ctx.s);
+          return out;
+        }
+        // 다시 하기: 자동 이어서 타이머가 울렸을 때 일시정지를 눌러 뒀으면 시작하지 않고 일시정지 대기로(재개하면 이어서)
+        if (d.auto && ctx.pauseRequested) {
+          logLine(m, 'answer', tr('초기화 시각이 지났지만 일시정지를 눌러 둬서 시작하지 않고 기다려.'));
+          this.emitMission(ctx.s);
+          const p = await this.#hold(ctx, 'paused', { reason: 'pause', stageIndex: i });
+          if (p.action === 'stop' || ctx.stopped) { ctx.stopped = true; return 'stop'; }
+        }
+        // 다시 하기 앞에 호출 상한(모자라면 "20번 더"부터. 그 단계에서 끝낸 답은 끊긴 자리에 남긴다)
+        if (!(await this.#capCheck(ctx, i, Math.max(1, failed.length), phase, back, true))) return 'stop';
         if (d.auto) {
-          m.quota.autos++;
+          m.quota.autos++; // 실제로 다시 시작할 때만 센다
           logLine(m, 'answer', tr('초기화 시각이 지나서 자동으로 이어서 해({n}/{max}번째).', { n: m.quota.autos, max: QUOTA_AUTO }));
         } else logLine(m, 'answer', tr('한도 대기에서 "지금 다시"를 골랐어.'));
         m.status = 'active';
         this.emitMission(ctx.s);
         return 'retry';
       }
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); this.quotaTimers.delete(timer); }
   }
 
   // 판정 뒤에 사용자에게 묻는다(kind: 'verdict' 남은 기준 / 'notes' 안 쓴 추가 지시). 답: 'accept' | 'more' | 'stop'.
@@ -1885,9 +1922,12 @@ export class Orchestrator {
       if (isPrep(x) || x.mission === 'plan') return [];
       const outs = (ctx.outputs[k] || []).filter((o) => !o.error && o.text && o.text.trim());
       if (ctx.returnedAt >= 0 && k > ctx.returnedAt) return outs.length ? [{ label: x.label, name: [...new Set(outs.map((o) => o.agent?.name || ''))].join(', '), text: '', stale: true }] : [];
+      // 한도 대기에서 건너뛴 카드(결정 0019): 결과가 비었다고 코드가 알린다(막힘 받아들이기와 같다)
+      const skippedCards = x.mission === 'cards' ? (ctx.outputs[k] || []).filter((o) => o.error && (m.cards || []).find((c) => (x.cardIds || []).includes(c.id) && c.ownerId === String(o.agent?.id))?.by === 'quota')
+        .map((o) => ({ label: labelOf(x, o), name: o.agent?.name || '', quotaSkip: true })) : [];
       // 막혔다고 해서 사용자가 받아들인 답(결정 0018): 결과 대신 비었다는 코드의 줄과, 막힌 이유(표식 안의 참고 자료)만
       const accepted = (o) => [o.msgId, o.tailMsgId].map((id) => (id ? s.messages.find((y) => y.id === id) : null)).find((y) => y?.blockedBlock?.accepted);
-      return outs.map((o) => { const a = accepted(o); return a ? { label: labelOf(x, o), name: o.agent?.name || '', blocked: a.blockedBlock.reason || '' } : { label: labelOf(x, o), name: o.agent?.name || '', text: o.text }; });
+      return [...outs.map((o) => { const a = accepted(o); return a ? { label: labelOf(x, o), name: o.agent?.name || '', blocked: a.blockedBlock.reason || '' } : { label: labelOf(x, o), name: o.agent?.name || '', text: o.text }; }), ...skippedCards];
     });
     const ids = m.criteria.map((c) => c.id);
     const textOf = new Map(m.criteria.map((c) => [c.id, c.text]));
@@ -1916,7 +1956,7 @@ export class Orchestrator {
       if (r.error || r.stopped) {
         why = r.skipped || r.stopped ? 'skipped' : isQuotaError(r.error || '') ? 'outside' : 'error';
         if (why === 'outside') quotaHit = { agent: r.agent || base, error: r.error };
-        mark2({ results: [], missing: true });
+        mark2({ results: [], missing: true, ...(why === 'outside' ? { quota: true } : {}) }); // 한도로 중단된 판정 답(같은 회차를 다시 하면 화면이 회차를 겹쳐 보이지 않게 표시)
         break;
       }
       const p = msg ? parseReview(msg.text, { nonce, ids }) : { error: 'none' };
@@ -1932,13 +1972,15 @@ export class Orchestrator {
       why = 'format';
     }
     if (ctx.stopped) { st.status = 'stopped'; return; }
-    // 한도 대기(결정 0019): 판정 없이 넘어가지 않고 묻는다. 다시 하면(지금 다시·초기화 뒤 자동) 같은 회차의 판정을 처음부터 다시 한다
+    // 한도 대기(결정 0019): 판정 없이 넘어가지 않고 묻는다. 다시 하면(지금 다시·초기화 뒤 자동) 같은 회차의 판정을 처음부터 다시 한다.
+    // 받아들이기는 예전 "판정 없음" 뒤의 받아들이기와 같다: 이번 검수를 판정 없이 적고(아래) 목표를 받아들임으로 끝낸다(#missionRun 이 ctx.quotaAccept 를 본다)
     if (quotaHit) {
       st.status = 'error';
       this.#emitRun(ctx);
       const q = await this.#quotaAsk(ctx, i, { phase: 'review', failed: [quotaHit] });
       if (q === 'stop') { st.status = 'stopped'; return; }
-      return this.#reviewStage(ctx, i);
+      if (q === 'retry') return this.#reviewStage(ctx, i);
+      ctx.quotaAccept = true;
     }
     m.round = round;
     const t = applyReview(m, got || []);
@@ -2287,7 +2329,7 @@ export class Orchestrator {
         ctx.run.status = 'running';
         ctx.run.hold = null;
         // 승인·오류 대기 중에 중지하면 사무실 표시(손들기·결정 필요)도 풀어 준다
-        if (d?.action === 'stop' && (info.reason === 'approve' || info.reason === 'error')) {
+        if (d?.action === 'stop' && (info.reason === 'approve' || info.reason === 'error' || info.reason === 'quota')) { // 한도 대기(결정 0019)도 오류 대기처럼
           for (const id of ctx.run.stages[info.stageIndex].agentIds) this.#state(ctx.s.id, id, 'idle', tr('중지됨'));
         }
         this.#emitRun(ctx);
@@ -2361,7 +2403,8 @@ export class Orchestrator {
     // 계정 단위 한도가 있는 CLI만 쉬게 표시(API 프로필·ACP 에이전트는 서로 다른 계정일 수 있어 통째로 막지 않는다)
     if (ACCOUNT_LIMITED.has(baseProvider(ag.provider))) {
       // 쉬는 시간: 사용량 창의 초기화 시각 → 없으면 오류 문구에 적힌 시각 → 없으면 기본 30분
-      this.cooldown.mark(ag.provider, { until: resetTime(opts.limits[ag.provider], opts.threshold) || resetFromText(error), reason: error });
+      const fromLimits = resetTime(opts.limits[ag.provider], opts.threshold);
+      this.cooldown.mark(ag.provider, { until: fromLimits || resetFromText(error), reason: error, source: fromLimits ? 'limits' : 'text' });
       this.bus.emit('cooldown', this.restingList());
     }
     const from = PROVIDERS[ag.provider]?.label || ag.provider;
@@ -3546,14 +3589,15 @@ export class Orchestrator {
     const { s } = ctx;
     // 대기 사유마다 받을 수 있는 동작만 통과시킨다(예: 승인 대기 중 '건너뛰기'가 승인으로 처리되면 안 됨)
     // 목표(결정 0015): 판정 뒤에 묻는 대기(mission)와 호출 상한 대기(cap)
-    // 목표의 한도 대기(quota, 결정 0019): 초기화 뒤 이어서(later, 시각을 알고 자동 횟수가 남았고 아직 안 골랐을 때만)·지금 다시(retry)·그만
-    const ALLOWED = { approve: ['approve', 'reject', 'retry', 'stop'], error: ['retry', 'skip', 'stop'], pause: ['resume', 'stop'], mission: ['accept', 'more', 'stop'], cap: ['more', 'stop'], quota: ['later', 'retry', 'stop'] };
+    // 목표의 한도 대기(quota, 결정 0019): 초기화 뒤 이어서(later, 시각을 알고 자동 횟수가 남았고 아직 안 골랐을 때만)·지금 다시(retry)·건너뛰기(skip, 일 단계)·받아들이기(accept, 판정)·그만
+    const ALLOWED = { approve: ['approve', 'reject', 'retry', 'stop'], error: ['retry', 'skip', 'stop'], pause: ['resume', 'stop'], mission: ['accept', 'more', 'stop'], cap: ['more', 'stop'], quota: ['later', 'retry', 'skip', 'accept', 'stop'] };
     const gate = (d) => {
       if (!ctx.gate) return false;
       const reason = ctx.run.hold?.reason;
       if (reason && !ALLOWED[reason]?.includes(d.action)) return false;
       if (d.action === 'more' && ctx.run.hold?.more === false) return false; // 되돌릴 수 없는 대기(검수자가 없는 팀의 판정 대기)
       if (d.action === 'later' && (!ctx.run.hold?.canAuto || ctx.run.hold?.autoAt)) return false; // 시각을 모르거나, 자동 횟수를 다 썼거나, 이미 골랐다
+      if (reason === 'quota' && (d.action === 'skip' || d.action === 'accept') && ctx.run.hold?.out !== d.action) return false; // 일 단계는 건너뛰기, 판정은 받아들이기만
       ctx.gate(d);
       return true;
     };

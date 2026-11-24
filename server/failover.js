@@ -51,14 +51,14 @@ export function nearLimit(limit, threshold = 95) {
 }
 
 // 한도에 걸린 AI는 초기화 시각(모르면 30분)까지 쉬게 둔다.
-// known: 초기화 시각을 실제로 알았는지(30분 어림이면 false. 목표의 한도 대기는 아는 시각만 "초기화 뒤 이어서"에 쓴다, 결정 0019)
+// source: 초기화 시각을 어디서 알았는지('limits' 한도 기록 / 'text' 오류 문구, 30분 어림이면 ''). 목표의 한도 대기는 오류 문구에서 안 시각만 쓴다(결정 0019)
 export class Cooldown {
   constructor() { this.map = new Map(); }
 
-  mark(provider, { until, reason = '' } = {}) {
+  mark(provider, { until, reason = '', source = '' } = {}) {
     const known = !!until && until > Date.now();
     const t = known ? until : Date.now() + 30 * 60 * 1000;
-    this.map.set(provider, { until: t, known, reason: String(reason).slice(0, 200), at: Date.now() });
+    this.map.set(provider, { until: t, source: known ? String(source || '') : '', reason: String(reason).slice(0, 200), at: Date.now() });
     return this.map.get(provider);
   }
 
@@ -84,6 +84,17 @@ export function resetTime(limit, threshold = 95) {
   const ws = Object.values(limit?.windows || {}).filter((w) => w.resetsAt && w.resetsAt * 1000 > Date.now());
   if (!ws.length) return 0;
   const full = ws.filter((w) => typeof w.pct === 'number' && w.pct >= threshold);
+  return full.length ? Math.max(...full.map((w) => w.resetsAt * 1000)) : 0;
+}
+
+// 목표의 한도 대기(결정 0019)에서 아는 초기화 시각(ms, 모르면 0): 이어받기 기준(95%)이 아니라 실제로 다 찬 창만 본다.
+// 사용률 100% 이상인 창, 또는 거절(rejected) 기록에서 사용률을 모르는 창 가운데 아직 안 풀린 창의 가장 늦은 초기화 시각.
+// 사용자가 "지금 다시 쓰기"로 푼 뒤의 옛 기록은 보지 않는다. 예: 5시간 100%·주간 96%면 5시간 창의 시각
+export function limitResetAt(limit, now = Date.now()) {
+  if (!limit?.windows) return 0;
+  if (limit.releasedAt && limit.releasedAt >= (limit.observedAt || 0)) return 0;
+  const rejected = limit.status === 'rejected';
+  const full = Object.values(limit.windows).filter((w) => w && w.resetsAt && w.resetsAt * 1000 > now && (typeof w.pct === 'number' ? w.pct >= 100 : rejected));
   return full.length ? Math.max(...full.map((w) => w.resetsAt * 1000)) : 0;
 }
 

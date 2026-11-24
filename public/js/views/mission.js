@@ -120,6 +120,7 @@ function CritRow({ c, n }) {
 // 검수 답의 기준표: 서버가 받은 판정(msg.review). 판정 블록을 받지 못했으면 그렇다고만 보여 준다(블록 글은 본문에 그대로 남는다)
 export function ReviewTable({ r }) {
   if (!r || (!r.results?.length && !r.missing)) return null;
+  if (r.quota) return html`<div class="notice">🎯 ${t('검수자가 사용량 한도에 걸려 이 답에는 판정이 없어(같은 회차는 다시 판정하면 다음 답에 있어).')}</div>`; // 결정 0019
   if (r.missing) return html`<div class="notice">🎯 ${t('이 답에서는 판정 블록을 받지 못했어(판정 없음).')}</div>`;
   const t2 = { pass: 0, fail: 0, unknown: 0 };
   for (const x of r.results) t2[x.verdict] = (t2[x.verdict] || 0) + 1;
@@ -443,20 +444,26 @@ export function MissionGate({ s, run }) {
   const row = (k, label, desc, action) => html`<button type="button" class="ask-row" disabled=${busy} onClick=${() => ctl(action)}>
     <span class="ask-num" aria-hidden="true">${k}</span><span class="ask-row-text"><b>${label}</b>${desc && html`<span>${desc}</span>`}</span><span class="ask-go" aria-hidden="true">→</span>
   </button>`;
-  // 한도 대기(결정 0019): 이어받을 AI 없이 사용량 한도에 걸려 멈춤. 초기화 시각을 알면 "그 시각 뒤 이어서(자동)", 모르면 지금 다시·그만만
+  // 한도 대기(결정 0019): 이어받을 AI 없이 사용량 한도에 걸려 멈춤. 보기 순서: 그 시각 뒤 이어서(자동, 시각을 알 때만) · 지금 다시 · 건너뛰기(일 단계)/받아들이기(판정) · 그만
   if (hold.reason === 'quota') {
     const names = (hold.who || []).map((w) => w.name).join(', ');
     const review = hold.phase === 'review';
+    const auto = !!hold.canAuto && !hold.autoAt;
+    let k = 0;
     return html`<div class="ask-panel mission-gate" role="group" aria-label=${t('사용량 한도 대기')}>
       <div class="ask-head"><span class="ask-who">⏳ ${t('사용량 한도 대기')}</span></div>
       <div class="ask-question">${review ? t('검수자 {names}이(가) 사용량 한도에 걸려 기준 판정을 못 했어. 이어받을 다른 AI가 없어. 어떻게 할까?', { names }) : t('{names}이(가) 사용량 한도에 걸려 멈췄어. 이어받을 다른 AI가 없어. 어떻게 할까?', { names })}</div>
-      ${hold.until ? html`<div class="small">${t('한도는 {time}에 초기화돼(한도 기록이나 오류 문구로 안 시각).', { time: when(hold.until) })}</div>` : html`<div class="small">${t('초기화 시각을 몰라. 한도가 풀리면 "지금 다시"를 눌러.')}</div>`}
+      ${hold.until ? html`<div class="small">${t('한도는 {time}에 초기화돼(한도 기록이나 오류 문구로 안 시각).', { time: when(hold.until) })}</div>`
+        : hold.passed ? html`<div class="small">${t('한도 초기화 예정 시각({time})이 지났어. "지금 다시"를 눌러.', { time: when(hold.passed) })}</div>`
+          : html`<div class="small">${t('초기화 시각을 몰라. 한도가 풀리면 "지금 다시"를 눌러.')}</div>`}
       ${!!hold.autoAt && html`<div class="notice" role="status">${t('{time}에 자동으로 이어서 해. 그 전에 "지금 다시"나 "그만"을 눌러도 돼.', { time: when(hold.autoAt) })}</div>`}
       ${!!hold.until && !hold.canAuto && html`<div class="small muted">${t('자동 이어서는 목표 하나에 {n}번까지야. 이번엔 직접 골라 줘.', { n: hold.autoMax })}</div>`}
       ${(hold.who || []).some((w) => w.error) && html`<ul class="small">${hold.who.filter((w) => w.error).map((w) => html`<li><b>${w.name}</b>${w.ai ? ` (${w.ai})` : ''}: ${w.error} <span class="muted">· ${t('AI가 보낸 오류 문구')}</span></li>`)}</ul>`}
       <div class="ask-rows">
-        ${hold.canAuto && !hold.autoAt && row(1, t('{time} 뒤 이어서(자동)', { time: when(hold.until) }), t('초기화 시각에 여유를 조금 두고 같은 단계를 다시 시작해(자동 이어서 {n}/{max}번째).', { n: (hold.autos || 0) + 1, max: hold.autoMax }), 'later')}
-        ${row(hold.canAuto && !hold.autoAt ? 2 : 1, t('지금 다시'), review ? t('같은 회차의 기준 판정을 지금 다시 해. 한도가 안 풀렸으면 또 멈춰.') : t('한도에 걸린 사람만 같은 단계를 지금 다시 해(끝낸 사람의 답은 그대로 써). 한도가 안 풀렸으면 또 멈춰.'), 'retry')}
+        ${auto && row(++k, t('{time} 뒤 이어서(자동)', { time: when(hold.until) }), t('초기화 시각에 여유를 조금 두고 같은 단계를 다시 시작해(자동 이어서 {n}/{max}번째).', { n: (hold.autos || 0) + 1, max: hold.autoMax }), 'later')}
+        ${row(++k, t('지금 다시'), review ? t('같은 회차의 기준 판정을 지금 다시 해. 한도가 안 풀렸으면 또 멈춰.') : t('한도에 걸린 사람만 같은 단계를 지금 다시 해(끝낸 사람의 답은 그대로 써). 한도가 안 풀렸으면 또 멈춰.'), 'retry')}
+        ${review ? row(++k, t('받아들이기'), t('이번 검수는 판정 없이 끝내고, 기준은 "확인 못 함"인 채로 목표를 받아들여.'), 'accept')
+          : row(++k, t('건너뛰기'), t('한도에 걸린 일은 빼고 다음으로 넘어가(일 카드면 그 카드는 구멍으로 적어).'), 'skip')}
       </div>
       <div class="ask-foot"><span class="grow"></span><button type="button" class="btn sm danger" disabled=${busy} onClick=${() => ctl('stop')}>${t('그만')}</button></div>
     </div>`;

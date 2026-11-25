@@ -1,0 +1,203 @@
+/* 흐름 무대: 나눠 보기의 세션 화면 위쪽 그림과 접은 한 줄 띠.
+   색은 앱 테마 변수(app.css 의 --link·--ok·--warn·--err·--muted·--panel…)에서만 만들어 밝은·어두운 테마를 따라간다.
+   상태는 색만이 아니라 모양(동그라미·마름모·세모·네모·점선)과 아이콘으로도 구분한다 */
+.stg-wrap, .stg-strip {
+  --s-work: var(--link); --s-work-soft: var(--info-soft); --s-work-ink: color-mix(in srgb, var(--link) 62%, var(--text));
+  --s-tool: color-mix(in srgb, var(--link) 45%, var(--ok)); --s-tool-ink: color-mix(in srgb, var(--link) 30%, color-mix(in srgb, var(--ok) 35%, var(--text)));
+  --s-me: var(--warn); --s-me-soft: var(--warn-soft); --s-me-ink: color-mix(in srgb, var(--warn) 55%, var(--text)); --s-me-on: #2b1a00;
+  --s-lim: var(--muted); --s-err: var(--err); --s-err-ink: color-mix(in srgb, var(--err) 62%, var(--text));
+  --s-ok: var(--ok); --s-ok-ink: color-mix(in srgb, var(--ok) 62%, var(--text)); --s-idle: var(--faint);
+}
+.stg-ico { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.stg-wrap .sr, .stg-strip .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* 상태 표식 */
+.stg-bd { --c: var(--s-idle); --k: var(--panel); position: relative; display: inline-grid; place-items: center; width: 18px; height: 18px; flex: none; color: var(--k); }
+.stg-bd::before { content: ''; position: absolute; inset: 0; background: var(--c); border-radius: 50%; }
+.stg-bd > .stg-ico { position: relative; width: 11px; height: 11px; stroke-width: 2.6; }
+.stg-bd.s-idle { color: var(--muted); }
+.stg-bd.s-idle::before { background: var(--panel); box-shadow: inset 0 0 0 2px var(--s-idle); }
+.stg-bd.s-think, .stg-bd.s-write, .stg-bd.s-meet { --c: var(--s-work); }
+.stg-bd.s-tool { --c: var(--s-tool); }
+.stg-bd.s-wait { --c: var(--s-me); --k: var(--s-me-on); }
+.stg-bd.s-wait::before { border-radius: 4px; transform: rotate(45deg) scale(.86); }
+.stg-bd.s-limit { --c: var(--s-lim); }
+.stg-bd.s-limit::before { border-radius: 5px; }
+.stg-bd.s-error { --c: var(--s-err); }
+.stg-bd.s-error::before { border-radius: 2px; clip-path: polygon(50% 2%, 100% 94%, 0 94%); }
+.stg-bd.s-error > .stg-ico { transform: translateY(2px); width: 9px; height: 9px; }
+.stg-bd.s-done { --c: var(--s-ok); }
+.stg-bd.s-off { color: var(--muted); }
+.stg-bd.s-off::before { background: var(--panel); border: 2px dashed var(--s-idle); }
+/* 내 차례 맥박: 1.6초에 한 번(1초에 3번을 넘지 않게). 움직임 줄이기면 멈춘다 */
+.stg-bd.pulse::after { content: ''; position: absolute; inset: -5px; border-radius: 50%; border: 2px solid var(--s-me); animation: stg-pulse 1.6s ease-out infinite; pointer-events: none; }
+@keyframes stg-pulse { from { transform: scale(.7); opacity: .9; } to { transform: scale(1.5); opacity: 0; } }
+
+/* 알약: 내 차례(노랑) · 오류 · 끊김 · 통과로 끝 · 한도 대기. 누르면 답 창으로 가는 단추가 들어 있다 */
+.stg-pill { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 4px 0 10px; border-radius: 99px; font-size: 12.5px; font-weight: 700; white-space: nowrap; border: 1.5px solid transparent; min-width: 0; max-width: 100%; flex: 0 1 auto; }
+.stg-pill .stg-ico { width: 15px; height: 15px; }
+.stg-pill .tx { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.stg-pill .go { flex: none; border: 0; border-radius: 99px; padding: 3px 10px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.stg-pill.me { background: var(--s-me-soft); color: var(--s-me-ink); border-color: var(--s-me); }
+.stg-pill.me .go { background: var(--s-me); color: var(--s-me-on); }
+.stg-pill.err { background: var(--err-soft); color: var(--s-err-ink); border-color: var(--s-err); }
+.stg-pill.err .go { background: var(--s-err-ink); color: var(--panel); }
+.stg-pill.cut { background: var(--panel); color: var(--text-2); border: 1.5px dashed var(--s-idle); }
+.stg-pill.cut .go { background: var(--panel-3); color: var(--text); border: 1px solid var(--border-2); }
+.stg-pill.ok { background: var(--ok-soft); color: var(--s-ok-ink); border-color: color-mix(in srgb, var(--s-ok) 60%, transparent); padding-right: 12px; }
+.stg-pill.lim { background: var(--panel-3); color: var(--text-2); border-color: var(--s-lim); padding-right: 12px; }
+
+/* ── 무대 ── */
+.stg-wrap { position: relative; flex: none; display: flex; flex-direction: column; gap: 8px; padding: 9px 14px 10px; border-bottom: 1px solid var(--border); background: var(--panel-2); min-width: 0; }
+.stg-top { display: flex; align-items: center; gap: 10px; min-width: 0; height: 28px; font-size: 13px; flex: none; }
+.stg-goal { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto; }
+.stg-goal > .stg-ico { width: 15px; height: 15px; color: var(--accent-2); }
+.stg-goal b { white-space: nowrap; }
+.stg-goal .g { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); min-width: 0; }
+.stg-meta { display: flex; gap: 8px; align-items: center; flex: none; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.stg-meta .mono { font-variant-numeric: tabular-nums; }
+.stg-meta .over { color: var(--s-err-ink); font-weight: 800; }
+.stg-now { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 46%; color: var(--text-2); justify-content: flex-end; }
+.stg-now .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stg-fold { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--muted); cursor: pointer; }
+.stg-fold:hover { color: var(--text); border-color: var(--border-2); }
+
+.stg-track { flex: 1; min-height: 0; display: flex; align-items: stretch; position: relative; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.stg-st { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 7px 9px; border-radius: 12px; background: var(--panel); border: 1.5px solid var(--border-2); position: relative; overflow: hidden; transition: border-color .3s ease, box-shadow .3s ease, background-color .3s ease; }
+.stg-st.meet { flex-grow: 2.3; }
+.stg-st.rev { flex-grow: 1.3; }
+.stg-st.todo { background: transparent; border-style: dashed; }
+.stg-st.run { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent); }
+.stg-st.wait, .stg-st.ask { border: 2px dashed var(--s-me); background: color-mix(in srgb, var(--s-me-soft) 60%, var(--panel)); }
+.stg-st.limit { border: 2px solid var(--s-lim); background: var(--panel-3); }
+.stg-st.error { border: 2px solid var(--s-err); background: color-mix(in srgb, var(--err-soft) 60%, var(--panel)); }
+.stg-st.cut, .stg-st.stopped { border-style: dashed; border-color: var(--s-idle); background: transparent; }
+.stg-st.skipped { border-style: dashed; opacity: .75; }
+.stg-hd { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 800; white-space: nowrap; min-width: 0; }
+.stg-hd .lab { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.stg-hd .num { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; box-shadow: inset 0 0 0 1.5px var(--s-idle); color: var(--muted); flex: none; }
+.stg-hd .x { font-weight: 700; color: var(--muted); font-size: 11.5px; flex: none; }
+.stg-hd .tag { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; font-weight: 700; padding: 1px 7px; border-radius: 99px; color: var(--s-work-ink); background: var(--s-work-soft); }
+.stg-hd .tag .stg-ico { width: 12px; height: 12px; }
+.stg-hd .tag.ret { color: var(--s-err-ink); background: var(--err-soft); }
+.stg-hd .tag.me { color: var(--s-me-ink); background: var(--s-me-soft); box-shadow: inset 0 0 0 1px var(--s-me); }
+.stg-hd .tag.ok { color: var(--s-ok-ink); background: var(--ok-soft); }
+.stg-hd .tag.plain { color: var(--muted); background: var(--panel-3); }
+.stg-body { display: flex; align-items: flex-start; gap: 8px; min-width: 0; flex: 1; }
+.stg-body .more { align-self: center; font-size: 12px; font-weight: 700; color: var(--muted); }
+
+/* 사람 동그라미 */
+.stg-p { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; width: 42px; flex: none; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; border-radius: 8px; transition: transform .35s cubic-bezier(.4, 0, .2, 1); }
+.stg-p .av { position: relative; display: inline-grid; }
+.stg-p .avatar { border-radius: 50%; }
+.stg-p .av > .stg-bd { position: absolute; right: -4px; bottom: -4px; width: 15px; height: 15px; box-shadow: 0 0 0 2px var(--panel-2); border-radius: 50%; }
+.stg-p .av > .stg-bd > .stg-ico { width: 9px; height: 9px; }
+.stg-p .nm { font-size: 11.5px; font-weight: 700; color: var(--text-2); white-space: nowrap; max-width: 52px; overflow: hidden; text-overflow: ellipsis; }
+.stg-p.dim .avatar { filter: grayscale(.7); opacity: .45; }
+.stg-p.dim .nm { color: var(--muted); font-weight: 600; }
+.stg-p.talk { transform: translateY(-3px); }
+.stg-p.talk .avatar { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--s-work); }
+.stg-p .opp { font-size: 10.5px; font-weight: 800; color: var(--s-err-ink); background: var(--err-soft); box-shadow: inset 0 0 0 1px var(--s-err); border-radius: 4px; padding: 1px 4px; line-height: 1.3; white-space: nowrap; }
+.stg-p .lim { font-size: 11px; font-weight: 800; color: var(--text-2); white-space: nowrap; }
+.stg-p .away { font-size: 10.5px; font-weight: 700; color: var(--s-tool-ink); white-space: nowrap; }
+.stg-p .chair { position: absolute; left: 1px; top: -5px; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; background: var(--panel); color: var(--text); box-shadow: 0 0 0 1px var(--border-2); z-index: 2; }
+.stg-p .chair .stg-ico { width: 10px; height: 10px; }
+.stg-p .card { position: absolute; right: 0; top: -6px; width: 18px; height: 18px; border-radius: 5px; background: var(--panel); color: var(--accent-2); display: grid; place-items: center; box-shadow: 0 0 0 1.5px var(--accent); z-index: 2; }
+.stg-p .card .stg-ico { width: 12px; height: 12px; }
+.stg-p.seat { cursor: default; }
+.stg-seat { width: 30px; height: 30px; border-radius: 50%; border: 2px dashed var(--s-idle); display: block; }
+.stg-mb { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; padding-top: 2px; }
+.stg-say { display: flex; gap: 5px; align-items: flex-start; font-size: 12px; min-width: 0; color: var(--s-work-ink); line-height: 1.35; }
+.stg-say .stg-ico { width: 13px; height: 13px; margin-top: 2px; }
+.stg-say .t { color: var(--text); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+
+/* 기준 판정 조각 */
+.stg-crit { display: grid; grid-template-columns: repeat(2, max-content); gap: 4px; align-content: start; }
+.stg-cr { display: inline-flex; align-items: center; gap: 3px; height: 20px; padding: 0 7px 0 4px; border-radius: 6px; font-size: 11.5px; font-weight: 700; background: var(--panel-3); color: var(--muted); border: 1px solid var(--border-2); white-space: nowrap; }
+.stg-cr .stg-ico { width: 12px; height: 12px; stroke-width: 2.8; }
+.stg-cr.pass { background: var(--ok-soft); color: var(--s-ok-ink); border-color: color-mix(in srgb, var(--s-ok) 50%, transparent); }
+.stg-cr.fail { background: var(--err-soft); color: var(--s-err-ink); border-color: var(--s-err); }
+.stg-cr.unknown { color: var(--text-2); border-style: dashed; }
+.stg-cr.check { background: var(--s-work-soft); color: var(--s-work-ink); border-color: var(--s-work); }
+
+/* 연결선과 내 차례 문 */
+.stg-link { flex: none; width: 34px; position: relative; display: grid; place-items: center; }
+.stg-link::before { content: ''; position: absolute; left: 3px; right: 8px; top: 50%; height: 2px; margin-top: -1px; background: var(--border-2); }
+.stg-link::after { content: ''; position: absolute; right: 3px; top: 50%; margin-top: -5px; border: 5px solid transparent; border-left: 6px solid var(--border-2); border-right: 0; }
+.stg-link.done::before { background: var(--s-ok); }
+.stg-link.done::after { border-left-color: var(--s-ok); }
+.stg-link.cut::before { background: repeating-linear-gradient(90deg, var(--s-idle) 0 4px, transparent 4px 8px); }
+.stg-link.gate { width: 58px; }
+.stg-gate { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 2px; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; border-radius: 8px; }
+.stg-gate .stg-bd { width: 26px; height: 26px; }
+.stg-gate .stg-bd > .stg-ico { width: 14px; height: 14px; }
+.stg-gate .gl { font-size: 10.5px; font-weight: 800; color: var(--s-me-ink); background: var(--s-me-soft); border-radius: 4px; padding: 1px 3px; white-space: nowrap; box-shadow: inset 0 0 0 1px var(--s-me); }
+.stg-end { flex: none; width: 72px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border-radius: 12px; border: 1.5px dashed var(--border-2); font-size: 11.5px; font-weight: 700; color: var(--muted); text-align: center; line-height: 1.25; padding: 0 4px; }
+.stg-end .stg-bd { width: 26px; height: 26px; }
+.stg-end .stg-bd > .stg-ico { width: 14px; height: 14px; }
+.stg-end.pass { border-style: solid; border-color: var(--s-ok); background: var(--ok-soft); color: var(--s-ok-ink); }
+.stg-end.error { border-style: solid; border-color: var(--s-err); color: var(--s-err-ink); }
+.stg-folded { flex: none; align-self: center; display: grid; place-items: center; min-width: 30px; height: 30px; padding: 0 6px; border-radius: 10px; border: 1.5px dashed var(--border-2); font-size: 12px; font-weight: 700; color: var(--muted); }
+
+/* 넘기기·되돌림 카드 */
+.stg-tok { position: absolute; left: 0; top: 0; width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; background: var(--panel); color: var(--accent-2); box-shadow: 0 0 0 1.5px var(--accent), 0 3px 8px rgba(0, 0, 0, .2); z-index: 6; pointer-events: none; }
+.stg-tok.ret { color: var(--s-err-ink); box-shadow: 0 0 0 1.5px var(--s-err), 0 3px 8px rgba(0, 0, 0, .2); }
+.stg-tok .stg-ico { width: 15px; height: 15px; }
+
+/* 서버 연결 끊김: 마지막으로 받은 상태를 흐리게. 끊긴 목표: 전체 점선 */
+.stg-wrap.lost .stg-track, .stg-wrap.lost .stg-goal { filter: grayscale(1); opacity: .7; }
+.stg-wrap.cut .stg-track { filter: grayscale(.8); }
+.stg-wrap.cut::after, .stg-strip.cut::after { content: ''; position: absolute; inset: 3px; border: 1.5px dashed var(--s-idle); border-radius: 10px; pointer-events: none; }
+
+/* 작은 모양(140px 아래): 이름·말 줄을 숨기고 동그라미를 줄인다 */
+.stg-wrap.small { gap: 6px; padding: 7px 12px 8px; }
+.stg-wrap.small .stg-top { height: 26px; }
+.stg-wrap.small .stg-p { width: 28px; }
+.stg-wrap.small .stg-st { padding: 5px 8px; gap: 5px; }
+.stg-wrap.small .stg-seat { width: 24px; height: 24px; }
+.stg-wrap.small .stg-crit { grid-template-columns: repeat(4, max-content); }
+.stg-wrap.small .stg-link { width: 26px; }
+.stg-wrap.small .stg-link.gate { width: 36px; }
+.stg-wrap.small .stg-gate .gl { display: none; }
+.stg-wrap.small .stg-end { width: 56px; }
+
+/* ── 접은 한 줄 띠 ── */
+.stg-strip { position: relative; flex: none; display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--panel-2); font-size: 12px; overflow: hidden; white-space: nowrap; min-width: 0; }
+.stg-strip .segs { display: inline-flex; gap: 3px; flex: none; }
+.stg-strip .sg { width: 22px; height: 6px; border-radius: 3px; background: var(--panel-3); box-shadow: inset 0 0 0 1px var(--border-2); }
+.stg-strip .sg.done { background: var(--s-ok); box-shadow: none; }
+.stg-strip .sg.run { background: repeating-linear-gradient(-45deg, var(--s-work) 0 3px, color-mix(in srgb, var(--s-work) 45%, transparent) 3px 6px); box-shadow: none; }
+.stg-strip .sg.wait { background: var(--s-me); box-shadow: none; }
+.stg-strip .sg.limit { background: var(--s-lim); box-shadow: none; }
+.stg-strip .sg.error { background: var(--s-err); box-shadow: none; }
+.stg-strip .sg.cut, .stg-strip .sg.stopped, .stg-strip .sg.skipped { background: none; box-shadow: none; border: 1.5px dashed var(--s-idle); }
+.stg-strip .prog { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
+.stg-strip .grow { flex: 1; }
+.stg-strip .stg-pill { height: 22px; font-size: 12px; }
+.stg-strip .stg-pill .go { padding: 1px 8px; font-size: 12px; }
+.stg-strip.lost > :not(.stg-pill) { filter: grayscale(1); }
+.stg-unfold { flex: none; border: 0; background: none; color: var(--muted); display: inline-flex; align-items: center; gap: 3px; font-size: 12px; cursor: pointer; padding: 0 2px; }
+.stg-unfold:hover { color: var(--text); }
+.stg-unfold .stg-ico { width: 13px; height: 13px; }
+
+/* 아래 단추 줄(입력창 위): 단계 띠는 위쪽으로 옮기고 일시정지·재개·중지·회의 끝내기만 */
+.runbar.thin { padding: 4px 16px; gap: 8px; }
+
+/* 좁은 창: 역 줄은 가로로 밀어 본다(페이지 전체는 밀리지 않는다) */
+@media (max-width: 860px) {
+  .stg-st { min-width: 150px; }
+  .stg-st.meet { min-width: 230px; }
+  .stg-now { flex-basis: 40%; }
+}
+@media (max-width: 560px) {
+  .stg-meta { display: none; }
+  .stg-strip .segs { display: none; }
+  .stg-strip .stg-pill .tx { max-width: 34vw; }
+}
+/* 움직임 줄이기(앱 설정 또는 운영체제): 맥박·이동을 멈추고 상태 바뀜만 바로 보인다 */
+.stg-wrap.rm *, .stg-wrap.rm *::before, .stg-wrap.rm *::after, .stg-strip.rm *, .stg-strip.rm *::after { animation: none !important; transition: none !important; }
+.stg-wrap.rm .stg-bd.pulse::after, .stg-strip.rm .stg-bd.pulse::after { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .stg-bd.pulse::after { display: none; }
+  .stg-st, .stg-p { transition: none; }
+}

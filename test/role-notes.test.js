@@ -407,7 +407,7 @@ const say = async (t, sid, text) => {
   return t.fakeLog().slice(from);
 };
 
-test('10. 이어 가는 Codex 대화: 노트가 바뀌면 지시를 "바뀌었어" 줄과 다시 붙이고, 안 바뀌면 다시 붙이지 않는다. 다 비우면 "쓰지 마" 줄', async () => {
+test('10. 이어 가는 Codex 대화: 노트가 바뀌면 바뀐 노트 블록만 "바뀌었어" 줄과 다시 붙이고(지시 전체는 다시 안 보낸다), 안 바뀌면 다시 붙이지 않는다. 다 비우면 "쓰지 마" 줄', async () => {
   const t = await app();
   const ag = (await t.api('POST', '/api/agents', { name: '코덱스노트', role: '정리', provider: 'codex', model: 'gpt-6.1-sol', permission: 'plan', routing: 'manual' })).json;
   const s = (await t.api('POST', '/api/sessions', { teamId: null, agentId: ag.id })).json;
@@ -421,24 +421,25 @@ test('10. 이어 가는 Codex 대화: 노트가 바뀌면 지시를 "바뀌었�
   const [same] = await codex('두 번째 요청');
   assert.deepEqual(same.args.slice(0, 2), ['exec', 'resume']);
   assert.ok(!same.prompt.includes('<역할 지침>') && !same.prompt.includes('바뀌었어'));
-  // 보관하고 새 항목을 더하면, 다음 이어가기에 "바뀌었어" 줄과 바뀐 지시가 간다
+  // 보관하고 새 항목을 더하면, 다음 이어가기에 "바뀌었어" 줄과 바뀐 노트 블록만 간다(이름 줄·권한 문장 같은 지시 전체는 다시 안 보낸다, 결정 0023)
   notes.editItem(ag.id, notes.get(ag.id).items[0].id, { status: 'archived' });
   notes.addItem(ag.id, { text: 'NEW-RULE 새 규칙' });
   const [changed] = await codex('세 번째 요청');
   assert.deepEqual(changed.args.slice(0, 2), ['exec', 'resume']);
-  assert.ok(changed.prompt.startsWith('역할 지침이 바뀌었어. 앞에서 받은 것 대신 아래를 따라.\n<역할 지침>\n'), changed.prompt.slice(0, 80));
+  assert.ok(changed.prompt.startsWith('역할 노트가 바뀌었어. 앞에서 받은 역할 노트 대신 아래를 따라. 나머지 지시는 그대로야.\n<역할 노트>\n'), changed.prompt.slice(0, 80));
+  assert.ok(!changed.prompt.includes('<역할 지침>') && !changed.prompt.includes('너는 로컬 앱'), '지시 전체는 다시 안 보낸다');
   assert.ok(changed.prompt.includes('- NEW-RULE 새 규칙') && !changed.prompt.includes('OLD-RULE'));
   assert.ok(!changed.prompt.includes('이제 쓰지 마'));
   // 받은 뒤로 안 바뀌었으면 다시 붙이지 않는다
   const [again] = await codex('네 번째 요청');
-  assert.ok(!again.prompt.includes('<역할 지침>') && !again.prompt.includes('바뀌었어'));
+  assert.ok(!again.prompt.includes('<역할 지침>') && !again.prompt.includes('<역할 노트>') && !again.prompt.includes('바뀌었어'));
   // 노트를 다 비우면(블록이 '') 그것도 바뀐 것: 앞의 노트를 쓰지 말라는 줄이 간다
   notes.editItem(ag.id, notes.get(ag.id).items[1].id, { status: 'archived' });
   const [cleared] = await codex('다섯 번째 요청');
-  assert.ok(cleared.prompt.startsWith('역할 지침이 바뀌었어.'));
-  assert.ok(cleared.prompt.includes('앞에서 받은 역할 노트는 이제 쓰지 마.\n</역할 지침>') && !cleared.prompt.includes('NEW-RULE'));
+  assert.ok(cleared.prompt.startsWith('역할 노트가 바뀌었어.'));
+  assert.ok(cleared.prompt.includes('<역할 노트>\n앞에서 받은 역할 노트는 이제 쓰지 마.\n</역할 노트>') && !cleared.prompt.includes('NEW-RULE'));
   const [quiet] = await codex('여섯 번째 요청');
-  assert.ok(!quiet.prompt.includes('<역할 지침>'), '비운 뒤로 그대로면 다시 안 붙는다');
+  assert.ok(!quiet.prompt.includes('<역할 지침>') && !quiet.prompt.includes('<역할 노트>'), '비운 뒤로 그대로면 다시 안 붙는다');
 });
 
 test('11. 상태 전이표: 에이전트·바깥 항목은 초안→확정·보관, 확정→보관, 보관→초안만. 사용자 항목은 확정↔보관만', async () => {

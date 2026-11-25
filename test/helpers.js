@@ -54,8 +54,10 @@ export async function waitFor(cond, { timeout = 15000, interval = 25, what = '�
 }
 
 // 새 대화의 첫 프롬프트 맨 앞에는 호출마다 달라지는 지시가 붙는다(결정 0023: 그 실행만 읽기 전용인 차례의 권한 문장, 규칙 파일 읽기, 묻기 안내, 역할 노트의 참고 블록).
-// 그 덩어리는 빈 줄 없이 이어지고 빈 줄 하나로 본문과 갈린다. 본문의 모양을 보는 테스트는 이걸로 덩어리를 떼고 본다(덩어리 자체는 test/prompt-assembly.test.js 가 본다)
-const HEAD_STARTS = ['권한: ', '이번 조사는 도구 없이', '작업 폴더에 CLAUDE.md', '사용자에게 묻기:', '아래 "참고 '];
+// 이어 가는 대화에는 그 대화가 못 받은 것(묻기 안내·규칙 파일 줄, 바뀐 역할 노트 블록, 아직 못 받은 노트 항목)만 같은 자리에 붙는다.
+// 그 덩어리는 빈 줄 없이 이어지고 빈 줄 하나로 본문과 갈린다. 본문의 모양을 보는 테스트는 이걸로 덩어리를 떼고 본다(덩어리 자체는 test/prompt-assembly.test.js 가 본다).
+// 덩어리가 붙으면 안 되는 호출(노트가 안 바뀐 이어 가는 호출 등)은 HEAD_STARTS 로 시작하지 않는지 직접 본다
+export const HEAD_STARTS = ['권한: ', '이번 조사는 도구 없이', '작업 폴더에 CLAUDE.md', '사용자에게 묻기:', '아래 "참고 ', '역할 노트가 바뀌었어', '역할 노트에서 이번 일과'];
 export function promptBody(p) {
   const s = String(p ?? '');
   if (!HEAD_STARTS.some((h) => s.startsWith(h))) return s;

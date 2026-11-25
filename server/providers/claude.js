@@ -236,13 +236,8 @@ export default {
     });
 
     // 이어 간 대화는 첫 요청 때 기록한 시스템 지시를 압축 전까지 그대로 쓴다(Claude Code CLI 문서 "System prompt flags in resumed conversations").
-    // 그래서 위의 지시 파일은 이어 간 대화에 닿지 않는다. 역할 노트가 바뀌었으면(refreshSystem) Codex 와 같은 줄로 지시를 프롬프트 앞에 다시 붙이고,
-    // 노트가 다 비었으면(notesCleared) 앞의 노트를 쓰지 말라는 줄도 넣는다(결정 0013 개정, 0023)
-    const wrap = (s) => `<${tr('역할 지침')}>\n${s}\n</${tr('역할 지침')}>\n\n${prompt}`;
-    const sent = resumeId && system && opts.refreshSystem
-      ? `${tr('역할 지침이 바뀌었어. 앞에서 받은 것 대신 아래를 따라.')}\n${wrap(opts.notesCleared ? `${system}\n${tr('앞에서 받은 역할 노트는 이제 쓰지 마.')}` : system)}`
-      : prompt;
-    feeder.send(sent, images);
+    // 그래서 위의 지시 파일은 이어 간 대화에 닿지 않는다. 바뀐 역할 노트처럼 그 대화가 못 받은 것은 오케스트레이터가 프롬프트 앞에 붙여 준다(결정 0013 개정, 0023)
+    feeder.send(prompt, images);
     return {
       done: h.done,
       steer: (t) => feeder.send(t),

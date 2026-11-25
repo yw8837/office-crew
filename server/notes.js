@@ -334,12 +334,23 @@ export class NoteStore {
   }
 }
 
+// 프롬프트에 들어갈 수 있는 항목: 확정 항목만, 내 PC 모델 전용 항목은 받는 쪽이 내 PC 모델일 때만
+const promptPool = (notes, receiverLocal) => (notes?.items || []).filter((x) => x && x.status === 'confirmed' && typeof x.text === 'string' && x.text && (!x.localOnly || receiverLocal));
+
+// 노트가 바뀌었는지 볼 열쇠(결정 0023): 이 역할이 하는 일과 받을 수 있는 확정 항목 전체(사용자가 고친 내용). 요청마다 달라지는 "고른 항목"은 넣지 않는다.
+// 항목은 id 순, 고친 시각·helped·harmed 는 넣지 않는다. 하는 일도 항목도 없으면 ''(노트 없음)
+export function notesKey(notes, { receiverLocal = false } = {}) {
+  const tasks = (notes?.role?.tasks || []).filter((x) => x && String(x.title ?? '').trim()).map((x) => [x.title, x.done || '', x.check || '']);
+  const items = promptPool(notes, receiverLocal).slice().sort((a, b) => String(a.id).localeCompare(String(b.id))).map((x) => [x.id, x.source?.type || '', promptRef(x), x.text]);
+  return tasks.length || items.length ? JSON.stringify({ tasks, items }) : '';
+}
+
 // 이번 실행의 시스템 지시에 넣을 항목 고르기(AI 호출 없음). 확정 항목만, 내 PC 모델 전용 항목은 받는 쪽이 내 PC 모델일 때만.
 // 크기는 항목 글 + 프롬프트에 찍는 출처 주소(promptRef)의 글자 수로 센다.
 // 글자 합이 limit 안이면 전부(최근에 고친 것 먼저). 넘으면 요청 글과 낱말이 겹치는 순 → helped − harmed 가 큰 순 → 최근 순으로 채운다.
 // rules: 사용자 항목, refs: 에이전트·바깥 자료 항목(출처를 모르는 것도 여기), more: 넣지 못한 확정 항목 수(받을 수 없는 내 PC 전용 항목은 세지 않는다)
 export function pickForPrompt(notes, requestText, { limit = PROMPT_LIMIT, receiverLocal = false } = {}) {
-  const pool = (notes?.items || []).filter((x) => x && x.status === 'confirmed' && typeof x.text === 'string' && x.text && (!x.localOnly || receiverLocal));
+  const pool = promptPool(notes, receiverLocal);
   const recent = (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0);
   const sized = pool.map((x) => ({ x, n: chars(x.text) + chars(promptRef(x)) }));
   let picked;

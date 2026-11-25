@@ -134,7 +134,7 @@ export function makeCodex({ id = 'codex', name = '', home = null } = {}) {
   },
 
   run(opts, emit) {
-    const { agent, prompt, system, images = [], cwd, resumeId, connectors = [], extraDirs = [], refreshSystem = false, notesCleared = false } = opts;
+    const { agent, prompt, system, images = [], cwd, resumeId, connectors = [], extraDirs = [] } = opts;
     const args = resumeId ? ['exec', 'resume', resumeId] : ['exec'];
     args.push('--json', '--skip-git-repo-check');
     // 건네받은 대화 전체 파일 폴더를 읽을 수 있게 연다(새 대화를 시작할 때만. 이어 가는 대화는 이미 맥락이 있다)
@@ -174,12 +174,8 @@ export function makeCodex({ id = 'codex', name = '', home = null } = {}) {
     }
     const child = spawnCli('codex', args, { cwd, env: { ...auth.env, ...homeEnv }, unset: auth.unset });
     // 이어하기(resume)면 이전 턴에 이미 지침을 줬으므로 다시 붙이지 않는다(토큰 절약).
-    // 그 뒤에 역할 노트가 바뀌었으면(refreshSystem) 바뀌었다는 줄과 함께 지침을 다시 붙이고, 노트가 다 비었으면(notesCleared) 앞의 노트를 쓰지 말라는 줄도 넣는다(결정 0013)
-    const wrap = (s) => `<${tr('역할 지침')}>\n${s}\n</${tr('역할 지침')}>\n\n${prompt}`;
-    const fullPrompt = !system ? prompt
-      : !resumeId ? wrap(system)
-        : refreshSystem ? `${tr('역할 지침이 바뀌었어. 앞에서 받은 것 대신 아래를 따라.')}\n${wrap(notesCleared ? `${system}\n${tr('앞에서 받은 역할 노트는 이제 쓰지 마.')}` : system)}`
-          : prompt;
+    // 그 뒤에 역할 노트가 바뀌었으면 오케스트레이터가 바뀐 노트 블록만 프롬프트 앞에 붙여 준다(지침 전체를 다시 보내지 않는다. 결정 0013·0023)
+    const fullPrompt = system && !resumeId ? `<${tr('역할 지침')}>\n${system}\n</${tr('역할 지침')}>\n\n${prompt}` : prompt;
     child.stdin.end(fullPrompt);
 
     let text = '', threadId = resumeId || null, errorMsg = null, stderr = '', stopped = false;

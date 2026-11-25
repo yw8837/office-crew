@@ -217,7 +217,8 @@ function Station({ st, small }) {
     : st.ret ? html`<span class="tag ret"><${Ico} n="ret" />${t('되돌림 {n}/{of}', st.ret)}</span>`
       : st.note === 'question' ? html`<span class="tag me"><${Ico} n="ask" />${t('질문')}</span>`
         : st.note === 'merged' ? html`<span class="tag ok">${t('합침')}</span>`
-          : st.isMeeting ? html`<span class="tag plain">${t('회의')}</span>` : '';
+          : st.memo ? html`<span class="tag plain">${st.memo}</span>`
+            : st.isMeeting ? html`<span class="tag plain">${t('회의')}</span>` : '';
   const seats = st.people.map((p) => (st.meeting?.away === p.id
     ? html`<span class="stg-p seat" title=${`${p.name} · ${t('조사하러 감')}`}><span class="stg-seat"></span>${!small && html`<span class="nm">${t('비움')}</span>`}</span>`
     : html`<${Person} p=${p} small=${small} />`));
@@ -253,7 +254,7 @@ function Top({ m, small, onCollapse }) {
   const g = m.goal;
   const goal = g.kind === 'none'
     ? html`<${Ico} n="target" /><b>${t('목표 없음')}</b><span class="g">${t('할 일을 보내면 팀이 시작해')}</span>`
-    : small ? html`<${Ico} n="target" /><b>${m.progress}</b><span class="g">${m.now.text}</span>`
+    : small ? html`<${Ico} n="target" /><b>${m.progress}</b>${!(m.ask || m.lost || m.done || m.limit) && html`<span class="g">${m.now.text}</span>`}`
       : html`<${Ico} n="target" /><b>${g.mission ? t('목표') : t('요청')}</b><span class="g" title=${g.text}>${g.text}</span>`;
   const c = m.meta.calls;
   const meta = !small && (m.meta.criteria || c) && html`<span class="stg-meta">

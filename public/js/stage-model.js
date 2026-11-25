@@ -164,7 +164,7 @@ export function stageModel(input = {}) {
       parallel, isMeeting: !!st.meeting && st.mission !== 'meeting',
       meeting: mv ? { phase: mv.phase, round: mv.round, rounds: mv.rounds, label: meetLabel(meet), speakerId: mv.speakerId, chairId, away: errand && ids.includes(errand) ? errand : null } : null,
       review: st.mission === 'review' && mis ? (mis.criteria || []).map((c) => ({ id: String(c.id), text: String(c.text || ''), verdict: state === 'run' ? 'check' : c.status || 'open' })) : null,
-      note: ret ? 'ret' : asking.size ? 'question' : state === 'done' && parallel > 1 ? 'merged' : null,
+      note: ret ? 'ret' : asking.size ? 'question' : state === 'done' && parallel > 1 && !st.note ? 'merged' : null, // 누가 건너뛰었으면(메모) 합침 대신 메모를 보인다
       ret, memo: String(st.note || ''), cards, ask: false,
     };
   });

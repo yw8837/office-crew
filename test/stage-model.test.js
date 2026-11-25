@@ -58,6 +58,8 @@ test('3. 병렬 단계: ×2, 둘 다 카드를 쥐고, 한 명이 먼저 끝나�
   assert.equal(m.now.text, '만들기 · 실행 중', '일하는 사람(끝낸 사람이 아니라)');
   const after = model({ run: runOf(['done', 'done', 'done', 'running'], { stageIndex: 3 }) });
   assert.equal(st(after, 2).note, 'merged');
+  const skipped = model({ run: runOf(['done', 'done', 'done', 'running'], { stageIndex: 3 }, { 2: { note: '1명 건너뜀' } }) });
+  assert.deepEqual([st(skipped, 2).note, st(skipped, 2).memo], [null, '1명 건너뜀'], '누가 건너뛰었으면 합침 대신 단계 메모');
   assert.ok(!who(st(after, 2), 'm').held, '지난 역의 사람은 카드를 놓는다');
 });
 

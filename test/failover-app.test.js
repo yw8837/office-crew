@@ -136,7 +136,7 @@ test('곧 풀리면 기다리기: 설정이 0이면 지금처럼 바로 다른 A
 
 test('곧 풀리면 기다리기: 설정 안에 풀리면 기다렸다가 같은 AI로 하고 알림을 남긴다', async () => {
   t.app.store.settings.waitForResetMin = 5;
-  t.app.store.usage.limits = resetIn(300);
+  t.app.store.usage.limits = resetIn(1500); // 느린 PC에서 준비가 길어져도 아직 안 풀린 때에 닿게 넉넉히 둔다
   const from = t.events.length;
   const t0 = Date.now();
   const { a, s } = await runOnce(analyst('기다림켬'), '분석해줘');

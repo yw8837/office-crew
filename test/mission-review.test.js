@@ -232,7 +232,7 @@ test('5. 건너뛸 단계: 카드가 보여 준 검수자·뺄 단계 목록(번
     const res = await confirm(sid, body(bad));
     assert.equal(res.status, 409, JSON.stringify(bad));
     assert.deepEqual(res.json.review, view);
-    assert.deepEqual(Object.keys(res.json).sort(), ['error', 'review']);
+    assert.deepEqual(Object.keys(res.json).sort(), ['error', 'estimate', 'review']); // 지금 팀의 호출 어림 조각도 같이(결정 0019)
     assert.match(res.json.error, /검수자나 건너뛸 단계가/);
   }
   assert.equal(S(sid).mission.status, 'draft', '어긋나면 확정하지 않는다');
@@ -413,15 +413,16 @@ test('9. 한 번 실행의 예외: 빈 답은 같은 프롬프트로 다시 요�
   assert.deepEqual([S(loop).mission.log.find((x) => x.kind === 'review').text, S(loop).runs.at(-1).stages[2].status, reviewMsgs(loop).length], ['검수 1회차: 검수가 오류로 끝나서 판정 없이 끝남', 'error', 1]);
   await ctl(loop, 'stop');
   await waitEnd(loop);
-  // 한도 오류(이어받기를 꺼 둠): 판정 없음, 진행 기록에 바깥 장애
+  // 한도 오류(이어받기를 꺼 둠): 판정 없이 넘어가지 않고 한도 대기로 묻는다(결정 0019). 진행 기록에 바깥 장애, 판정 줄은 없다
   t.app.store.settings.failover = false;
   try {
     const q = await goal(tm.id, 'REVIEWQUOTA');
-    await waitHold(q, 'mission');
-    const line = S(q).mission.log.find((x) => x.kind === 'review');
-    assert.deepEqual([line.text, line.fail], ['검수 1회차: 검수가 오류로 끝나서 판정 없이 끝남', 'outside']);
+    await waitHold(q, 'quota');
+    const line = S(q).mission.log.find((x) => x.kind === 'quota');
+    assert.deepEqual([line.fail, S(q).mission.log.some((x) => x.kind === 'review'), S(q).runs.at(-1).hold.phase], ['outside', false, 'review']);
     await ctl(q, 'stop');
     await waitEnd(q);
+    assert.equal(S(q).mission.status, 'stopped');
   } finally {
     t.app.store.settings.failover = true;
     t.app.orch.cooldown.map.clear(); // 가짜 한도 오류가 남긴 쉬는 표시·한도 기록은 뒤 테스트에 남기지 않는다

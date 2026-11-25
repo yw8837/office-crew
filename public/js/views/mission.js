@@ -1,10 +1,12 @@
 // 목표 모드 화면(결정 0014): 채팅의 목표 카드(확인·고쳐서 확인·그만, 끊긴 목표 이어서·버리기)와 오른쪽 패널의 "진행 기록" 탭.
 // 카드는 서버가 저장한 초안을 그대로 보여 주고, 확인할 때 보여 주던 값 전체를 같이 보낸다(서버가 저장된 초안과 글자까지 대조한다)
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { html } from '../ui.js';
+import { html, ProviderChip } from '../ui.js';
 import { state, changed, toast, agentById } from '../state.js';
 import { post, put } from '../api.js';
 import { t, locale } from '../i18n/index.js';
+import { sumEstimate, limitRows, recordAge } from '../mission-numbers.js';
+import { WIN_LABEL } from './session.js'; // 한도 창 이름(세션 화면의 계정 한도와 같은 이름)
 
 const CRIT_COUNT = 7; // 서버와 같은 상한(server/mission.js)
 const lines = (text) => String(text || '').split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
@@ -43,6 +45,44 @@ function prepEstimate(pp, on) {
   // 질문 블록·빈 답을 다시 요청하거나, 다시 시도·이어받기를 하면 그만큼 더 든다
   return `${t('어림값(일하기 전 대목만)')}: ${parts.join(' · ')}. ${t('블록이나 빈 답을 다시 요청하거나 다시 시도하면 더 들어.')}`;
 }
+// ── 호출 어림·구독 한도·한도 대기(결정 0019) ──
+// 시각 한 줄: 오늘이면 시:분, 아니면 월/일 시:분(24시간제는 0~23시로. 자정이 24:05 로 보이지 않게)
+const when = (ms) => {
+  const d = new Date(ms);
+  const same = new Date().toDateString() === d.toDateString();
+  return d.toLocaleString(locale(), same ? { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' } : { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+};
+// 목표 카드의 호출 어림 줄: 서버가 실은 조각(m.estimate)을 지금 고른 값으로 더한다(서버도 같은 함수로 확인 시점의 값을 적는다). 예측이 아니라 대략치라고 밝힌다
+function EstimateLine({ est, pick }) {
+  if (!est) return null;
+  const e = sumEstimate(est, pick);
+  const words = { min: e.min, max: e.max, spent: e.spent, n: e.returns, cap: e.cap };
+  return html`<div class="goal-sec goal-estimate">
+    <div class="small muted"><b>${t('호출 어림')}</b></div>
+    <div class="small">${e.returns ? t('대략 {min}~{max}번 호출(목표 잡기에 이미 쓴 {spent}번·자동 되돌림 최대 {n}번 포함) · 상한 {cap}번', words) : t('대략 {min}~{max}번 호출(목표 잡기에 이미 쓴 {spent}번 포함) · 상한 {cap}번', words)}</div>
+    ${e.max > e.cap && html`<div class="small">${t('상한에 닿으면 물어볼게.')}</div>`}
+    <div class="small muted">${t('예측이 아니라 대략치야. 블록이나 빈 답을 다시 요청하거나, 오류로 다시 하거나, 다른 AI가 이어받거나, 한도에 걸려 다시 하면 더 들어.')}</div>
+  </div>`;
+}
+// 구독 한도 줄: 그 목표에서 일할 AI들의 한도 기록 중 아직 유효한 창만(앱이 이미 받은 기록. 새로 읽지 않고, 이 목표가 몇 %를 쓸지 어림하지 않는다). 보일 창이 없으면 줄 자체를 안 그린다
+// 기록이 몇 분·시간·일 전 것인지(24시간을 넘으면 오래된 기록)
+const ageWords = (min) => {
+  const a = recordAge(min);
+  if (!a) return '';
+  if (a.unit === 'min') return a.n < 1 ? t('방금 받은 기록') : t('{n}분 전 기준', { n: a.n });
+  return a.unit === 'hour' ? t('{n}시간 전 기준', { n: a.n }) : t('{n}일 전 기준', { n: a.n });
+};
+function LimitLine({ providers }) {
+  const rows = limitRows(state.usage?.limits, providers || []);
+  if (!rows.length) return null;
+  return html`<div class="goal-sec goal-limits">
+    <div class="small muted"><b>${t('구독 한도(받은 기록)')}</b></div>
+    ${rows.map((r) => html`<div class="small"><${ProviderChip} id=${r.provider} /> ${r.windows.map((w) => `${WIN_LABEL[w.key] || w.key} ${w.pct}%${w.resetsAt ? ` (${t('{time} 초기화', { time: when(w.resetsAt * 1000) })})` : ''}`).join(' · ')}
+      ${r.ago !== null && html`<span class="muted"> · ${ageWords(r.ago)}</span>`}${recordAge(r.ago)?.old ? html` <span class="chip warn">${t('오래된 기록')}</span>` : ''}</div>`)}
+    <div class="small muted">${t('앱이 이미 받은 기록이야. 이 목표가 몇 %를 쓸지는 어림하지 않아.')}</div>
+  </div>`;
+}
+
 // 조사 한 갈래가 끝나지 못한 이유(칩)
 // 빈 답은 빈 답 다시 요청까지 두 번 놓친 갈래라 일 카드·판정과 같은 이름 "구멍"을 붙인다(결정 0018)
 const missChip = (status) => ({ empty: `${t('빈 답')} · ${t('구멍')}`, failed: t('오류'), skipped: t('건너뜀') }[status] || t('끝나지 않음'));
@@ -80,6 +120,7 @@ function CritRow({ c, n }) {
 // 검수 답의 기준표: 서버가 받은 판정(msg.review). 판정 블록을 받지 못했으면 그렇다고만 보여 준다(블록 글은 본문에 그대로 남는다)
 export function ReviewTable({ r }) {
   if (!r || (!r.results?.length && !r.missing)) return null;
+  if (r.quota) return html`<div class="notice">🎯 ${t('검수자가 사용량 한도에 걸려 이 답에는 판정이 없어(같은 회차는 다시 판정하면 다음 답에 있어).')}</div>`; // 결정 0019
   if (r.missing) return html`<div class="notice">🎯 ${t('이 답에서는 판정 블록을 받지 못했어(판정 없음).')}</div>`;
   const t2 = { pass: 0, fail: 0, unknown: 0 };
   for (const x of r.results) t2[x.verdict] = (t2[x.verdict] || 0) + 1;
@@ -139,8 +180,11 @@ export function CutBox({ s, m, compact = false }) {
     set({ busy: true, why: '' });
     try { await post(`/api/sessions/${s.id}/mission/resume`, { missionId: m.id }); set({ busy: false }); } catch (e) { set({ busy: false, why: e.message }); toast(e.message, 'error'); }
   };
+  // 한도 대기에서 끊겼으면 초기화 예정 시각(결정 0019. 자동 이어서 타이머는 메모리라 앱을 끄면 사라진다)
+  const q = m.at?.wait?.reason === 'quota' ? m.at.wait : null;
+  const quota = q ? (q.until > Date.now() ? t('한도 초기화 예정 {time}.', { time: when(q.until) }) : q.until ? t('한도 초기화 예정 시각({time})이 지났어.', { time: when(q.until) }) : t('사용량 한도에 걸려 기다리던 중이었어(초기화 시각은 몰라).')) : '';
   return html`<div class=${compact ? 'warnbox row' : 'warnbox'} role="note" style=${compact ? 'max-width:860px;margin:0 auto 8px;flex-wrap:wrap' : ''}>
-    <span>${compact ? '⚠ ' : ''}${t('앱이 꺼져서 목표가 끊겼어. 저절로 다시 시작하지 않아.')} ${from ? html`<span class="small">${from}</span>` : t('이 목표는 끊긴 자리가 적혀 있지 않아서 이어 갈 수 없어. 버리고 요청을 다시 보내 줘.')}</span>
+    <span>${compact ? '⚠ ' : ''}${t('앱이 꺼져서 목표가 끊겼어. 저절로 다시 시작하지 않아.')} ${from ? html`<span class="small">${from}</span>` : t('이 목표는 끊긴 자리가 적혀 있지 않아서 이어 갈 수 없어. 버리고 요청을 다시 보내 줘.')}${quota ? html` <span class="small">${quota}</span>` : ''}</span>
     ${compact && html`<span class="grow"></span>`}
     <div class="hire-acts">
       ${from && html`<button class="btn primary sm" disabled=${busy} onClick=${resume}>${t('이어서')}</button>`}
@@ -225,6 +269,7 @@ export function GoalCard({ m }) {
   const [prepOn, setPrepOn] = useState(null); // 사용자가 고친 체크 { research, meeting }(없으면 카드의 기본값)
   const [workShown, setWorkShown] = useState(null); // 일 카드를 지금 팀으로 못 쓸 때 서버가 준 지금 값(결정 0018)
   const [workSel, setWorkSel] = useState(null); // 사용자가 고른 일하는 방식('cards' | 'stages', 없으면 카드의 기본값)
+  const [estShown, setEstShown] = useState(null); // 확인이 어긋났을 때 서버가 준 지금 팀의 호출 어림 조각(결정 0019)
   const goalIn = useRef(null);
   const editBtn = useRef(null);
   const editing = !!edit;
@@ -247,6 +292,8 @@ export function GoalCard({ m }) {
       ${mission?.status === 'unreviewed' && html`<div class="notice">${t('일은 끝났어. 기준 판정은 아직 없어.')}</div>`}
       ${mission?.status === 'done' && html`<div class="notice">✅ ${t('기준 {n}개를 모두 통과해서 끝냈어.', { n: mission.criteria.length })}</div>`}
       ${mission?.status === 'accepted' && html`<div class="notice">${t('받아들여서 끝냈어 · 남은 기준 {n}개', { n: left })}</div>`}
+      ${mission?.calls && ['done', 'accepted', 'stopped'].includes(mission.status) && html`<div class="small muted">${mission.estimate ? t('실제 호출 {k}번(어림 {min}~{max}번)', { k: mission.calls.used, min: mission.estimate.min, max: mission.estimate.max }) : t('실제 호출 {k}번', { k: mission.calls.used })}</div>`}
+      ${mission && ['active', 'waiting', 'cut'].includes(mission.status) && html`<${LimitLine} providers=${m.providers} />`}
       ${mission?.status === 'cut' && html`<${CutBox} s=${s} m=${mission} />`}
     </div></div>`;
   }
@@ -272,6 +319,8 @@ export function GoalCard({ m }) {
       if (e.data?.prep) { const p = e.data.prep; setPrepShown(p); setPrepOn((o) => ({ research: !!(o || prepOf(p)).research && p.research.can, meeting: !!(o || prepOf(p)).meeting && p.meeting.can })); }
       // 일 카드를 지금 팀으로 못 쓰면 지금 값으로 다시 그리고 팀 단계표로 돌린다
       if (e.data?.work) { setWorkShown(e.data.work); setWorkSel(e.data.work.can ? null : 'stages'); }
+      // 팀이 바뀌어 어긋났으면 호출 어림도 지금 팀의 조각으로 다시 더한다
+      if (e.data?.estimate) setEstShown(e.data.estimate);
       toast(e.message, 'error');
       setBusy(false);
       return false;
@@ -329,6 +378,9 @@ export function GoalCard({ m }) {
     <label class="goal-keep small"><input type="radio" name=${`work-${m.id}`} checked=${work !== 'cards'} disabled=${busy} onChange=${() => setWorkSel('stages')} />
       <span><b>${t('팀 단계표대로')}</b> — ${t('팀에 짜 둔 단계를 순서대로 돌아.')}</span></label>
   </div>`;
+  // 호출 어림(결정 0019): 조사·회의 체크, 일하는 방식, 남기기를 바꾸면 바로 다시 더한다(옛 카드는 이 칸이 없어 안 보인다). 구독 한도는 받은 기록이 있을 때만
+  const estLine = (estShown || m.estimate) && html`<${EstimateLine} est=${estShown || m.estimate} pick=${{ work: work === 'cards' ? 'cards' : 'stages', research: !!prep?.research, meeting: !!prep?.meeting, kept }} />`;
+  const limLine = html`<${LimitLine} providers=${m.providers} />`;
   const openEdit = () => setEdit({ goal: v.goal, criteria: v.criteria.join('\n'), checks: checksOf(v).join('\n'), outOfScope: v.outOfScope.join('\n'), userDecides: v.userDecides.join('\n'), keep: (v.keep || []).join('\n') });
   const closeEdit = () => { setEdit(null); setTimeout(() => editBtn.current?.focus(), 0); };
   const cancel = () => send('cancel', { missionId: m.missionId });
@@ -360,11 +412,13 @@ export function GoalCard({ m }) {
         ${workLine}
         ${reviewLine}
         ${prepLine}
+        ${estLine}
+        ${limLine}
         <div class="hire-acts">
           <button class="btn primary sm" disabled=${busy || !canEdited} onClick=${startEdited}>${t('이 내용으로 시작')}</button>
           <button class="btn sm" disabled=${busy} onClick=${closeEdit}>${t('고치기 취소')}</button>
         </div>
-      </div>` : html`<${CardBody} v=${v} />${workLine}${reviewLine}${prepLine}`}
+      </div>` : html`<${CardBody} v=${v} />${workLine}${reviewLine}${prepLine}${estLine}${limLine}`}
     ${!editing && html`<div class="hire-acts">
       <button class="btn primary sm" disabled=${busy || stale || !v.goal || !v.criteria.length} onClick=${start}>${t('이대로 시작')}</button>
       <button class="btn sm" ref=${editBtn} disabled=${busy || stale} aria-expanded=${editing ? 'true' : 'false'} onClick=${openEdit}>${t('고쳐서 시작')}</button>
@@ -390,6 +444,30 @@ export function MissionGate({ s, run }) {
   const row = (k, label, desc, action) => html`<button type="button" class="ask-row" disabled=${busy} onClick=${() => ctl(action)}>
     <span class="ask-num" aria-hidden="true">${k}</span><span class="ask-row-text"><b>${label}</b>${desc && html`<span>${desc}</span>`}</span><span class="ask-go" aria-hidden="true">→</span>
   </button>`;
+  // 한도 대기(결정 0019): 이어받을 AI 없이 사용량 한도에 걸려 멈춤. 보기 순서: 그 시각 뒤 이어서(자동, 시각을 알 때만) · 지금 다시 · 건너뛰기(일 단계)/받아들이기(판정) · 그만
+  if (hold.reason === 'quota') {
+    const names = (hold.who || []).map((w) => w.name).join(', ');
+    const review = hold.phase === 'review';
+    const auto = !!hold.canAuto && !hold.autoAt;
+    let k = 0;
+    return html`<div class="ask-panel mission-gate" role="group" aria-label=${t('사용량 한도 대기')}>
+      <div class="ask-head"><span class="ask-who">⏳ ${t('사용량 한도 대기')}</span></div>
+      <div class="ask-question">${review ? t('검수자 {names}이(가) 사용량 한도에 걸려 기준 판정을 못 했어. 이어받을 다른 AI가 없어. 어떻게 할까?', { names }) : t('{names}이(가) 사용량 한도에 걸려 멈췄어. 이어받을 다른 AI가 없어. 어떻게 할까?', { names })}</div>
+      ${hold.until ? html`<div class="small">${t('한도는 {time}에 초기화돼(한도 기록이나 오류 문구로 안 시각).', { time: when(hold.until) })}</div>`
+        : hold.passed ? html`<div class="small">${t('한도 초기화 예정 시각({time})이 지났어. "지금 다시"를 눌러.', { time: when(hold.passed) })}</div>`
+          : html`<div class="small">${t('초기화 시각을 몰라. 한도가 풀리면 "지금 다시"를 눌러.')}</div>`}
+      ${!!hold.autoAt && html`<div class="notice" role="status">${t('{time}에 자동으로 이어서 해. 그 전에 "지금 다시"나 "그만"을 눌러도 돼.', { time: when(hold.autoAt) })}</div>`}
+      ${!!hold.until && !hold.canAuto && html`<div class="small muted">${t('자동 이어서는 목표 하나에 {n}번까지야. 이번엔 직접 골라 줘.', { n: hold.autoMax })}</div>`}
+      ${(hold.who || []).some((w) => w.error) && html`<ul class="small">${hold.who.filter((w) => w.error).map((w) => html`<li><b>${w.name}</b>${w.ai ? ` (${w.ai})` : ''}: ${w.error} <span class="muted">· ${t('AI가 보낸 오류 문구')}</span></li>`)}</ul>`}
+      <div class="ask-rows">
+        ${auto && row(++k, t('{time} 뒤 이어서(자동)', { time: when(hold.until) }), t('초기화 시각에 여유를 조금 두고 같은 단계를 다시 시작해(자동 이어서 {n}/{max}번째).', { n: (hold.autos || 0) + 1, max: hold.autoMax }), 'later')}
+        ${row(++k, t('지금 다시'), review ? t('같은 회차의 기준 판정을 지금 다시 해. 한도가 안 풀렸으면 또 멈춰.') : t('한도에 걸린 사람만 같은 단계를 지금 다시 해(끝낸 사람의 답은 그대로 써). 한도가 안 풀렸으면 또 멈춰.'), 'retry')}
+        ${review ? row(++k, t('받아들이기'), t('이번 검수는 판정 없이 끝내고, 기준은 "확인 못 함"인 채로 목표를 받아들여.'), 'accept')
+          : row(++k, t('건너뛰기'), t('한도에 걸린 일은 빼고 다음으로 넘어가(일 카드면 그 카드는 구멍으로 적어).'), 'skip')}
+      </div>
+      <div class="ask-foot"><span class="grow"></span><button type="button" class="btn sm danger" disabled=${busy} onClick=${() => ctl('stop')}>${t('그만')}</button></div>
+    </div>`;
+  }
   // 일 카드(결정 0018): 한 시간 안에 시작한 카드 수 상한
   if (hold.reason === 'cap' && hold.kind === 'rate') {
     return html`<div class="ask-panel mission-gate" role="group" aria-label=${t('카드 시작 수 상한')}>

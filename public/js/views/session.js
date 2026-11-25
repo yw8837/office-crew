@@ -447,7 +447,7 @@ class Message extends Component {
       <${Avatar} agent=${a} />
       <div style="min-width:0">
         <div class="msg-head">
-          <b>${a.name}</b>${m.stageLabel ? html`<span class="chip">${m.stageLabel}</span>` : ''}${m.meeting ? html`<span class=${`chip${m.meeting.phase === 'conclude' ? ' accent' : ''}`}>${meetLabel(m.meeting)}</span>` : ''}${m.meeting?.opposer ? html`<span class="chip">${t('반대편')}</span>` : ''}${m.verdict ? html`<span class=${`chip${m.verdict.verdict === 'agree' ? ' accent' : ''}`}>${m.verdict.verdict === 'agree' ? t('합의') : t('계속')}</span>` : ''}${m.handoff ? html`<span class="chip accent">${t('인수인계 메모')}</span>` : ''}${m.goalDraft ? html`<span class="chip accent">${t('목표 초안')}</span>` : ''}${m.review ? html`<span class="chip accent">${t('기준 판정 {n}회차', { n: m.review.round || 1 })}</span>` : ''}${m.review?.retried ? html`<span class="chip">${t('다시 요청')}</span>` : ''}${m.prep?.qid ? html`<span class="chip">${m.prep.qid}</span>` : ''}${m.prep?.retried ? html`<span class="chip">${t('다시 요청')}</span>` : ''}${m.once && !m.review ? html`<span class="chip" title=${t('세션의 CLI 대화를 이어 가지 않고 새 대화로 한 번 돈 차례야(목표의 조사·회의).')}>${t('새 대화')}</span>` : ''}${m.prep?.kind === 'plan' ? html`<span class="chip accent">${t('일 계획')}</span>` : ''}${m.card ? html`<span class="chip accent" title=${t('일 카드')}>${m.card.id}</span>` : ''}${m.cardTail ? html`<span class="chip">${t('끝의 두 칸 다시')}</span>` : ''}${m.flags ? html`<span class=${`chip${m.flags.suspect ? ' warn' : ''}`}>${t('지시처럼 보이는 줄 {n}개', { n: m.flags.suspect })}</span><span class=${`chip${m.flags.unsourced ? ' warn' : ''}`}>${t('출처 없는 줄 {n}개', { n: m.flags.unsourced })}</span>` : ''}${m.textOnly ? html`<span class="chip warn" title=${t('읽기 전용을 강제하는 장치가 없는 AI로 조사해서, 글 지시로만 묶였어.')}>${t('글 지시로만')}</span>` : ''}${m.noTools ? html`<span class="chip">${t('도구 없음')}</span>` : ''}
+          <b>${a.name}</b>${m.stageLabel ? html`<span class="chip">${m.stageLabel}</span>` : ''}${m.meeting ? html`<span class=${`chip${m.meeting.phase === 'conclude' ? ' accent' : ''}`}>${meetLabel(m.meeting)}</span>` : ''}${m.meeting?.opposer ? html`<span class="chip">${t('반대편')}</span>` : ''}${m.verdict ? html`<span class=${`chip${m.verdict.verdict === 'agree' ? ' accent' : ''}`}>${m.verdict.verdict === 'agree' ? t('합의') : t('계속')}</span>` : ''}${m.handoff ? html`<span class="chip accent">${t('인수인계 메모')}</span>` : ''}${m.goalDraft ? html`<span class="chip accent">${t('목표 초안')}</span>` : ''}${m.review ? (m.review.quota ? html`<span class="chip warn">${t('기준 판정 · 한도로 중단')}</span>` : html`<span class="chip accent">${t('기준 판정 {n}회차', { n: m.review.round || 1 })}</span>`) : ''}${m.review?.retried ? html`<span class="chip">${t('다시 요청')}</span>` : ''}${m.prep?.qid ? html`<span class="chip">${m.prep.qid}</span>` : ''}${m.prep?.retried ? html`<span class="chip">${t('다시 요청')}</span>` : ''}${m.once && !m.review ? html`<span class="chip" title=${t('세션의 CLI 대화를 이어 가지 않고 새 대화로 한 번 돈 차례야(목표의 조사·회의).')}>${t('새 대화')}</span>` : ''}${m.prep?.kind === 'plan' ? html`<span class="chip accent">${t('일 계획')}</span>` : ''}${m.card ? html`<span class="chip accent" title=${t('일 카드')}>${m.card.id}</span>` : ''}${m.cardTail ? html`<span class="chip">${t('끝의 두 칸 다시')}</span>` : ''}${m.flags ? html`<span class=${`chip${m.flags.suspect ? ' warn' : ''}`}>${t('지시처럼 보이는 줄 {n}개', { n: m.flags.suspect })}</span><span class=${`chip${m.flags.unsourced ? ' warn' : ''}`}>${t('출처 없는 줄 {n}개', { n: m.flags.unsourced })}</span>` : ''}${m.textOnly ? html`<span class="chip warn" title=${t('읽기 전용을 강제하는 장치가 없는 AI로 조사해서, 글 지시로만 묶였어.')}>${t('글 지시로만')}</span>` : ''}${m.noTools ? html`<span class="chip">${t('도구 없음')}</span>` : ''}
           <${ProviderChip} id=${m.provider} />
           ${m.model && html`<span class="chip mono">${m.model}${m.effort ? ` · ${EFFORT_LABEL[m.effort] || m.effort}` : ''}</span>`}
           ${streaming && html`<span class="spin"></span>`}
@@ -538,7 +538,7 @@ function Chat({ s, run }) {
         return;
       }
     }
-    const h = run && !run.endedAt && run.status === 'waiting' && (run.hold?.reason === 'mission' || run.hold?.reason === 'cap') ? run.hold : null;
+    const h = run && !run.endedAt && run.status === 'waiting' && (run.hold?.reason === 'mission' || run.hold?.reason === 'cap' || run.hold?.reason === 'quota') ? run.hold : null;
     if (el && h && gateAt.current !== h.at) {
       gateAt.current = h.at;
       const g = stick.current ? el.querySelector('.chat-inner .mission-gate') : null;
@@ -645,7 +645,7 @@ const cardTitles = (s, run, st) => {
 };
 
 // 목표의 판정 뒤 묻기·호출 상한으로 기다리는 단계면 단계 띠에 보일 표시(아니면 ''). 끝난 판정 단계가 ✓ 로 보여 다 끝난 것처럼 읽히지 않게(결정 0015)
-const goalWait = (run, i) => (run.status === 'waiting' && run.hold?.stageIndex === i ? { mission: '🎯', cap: '🔢' }[run.hold.reason] || '' : '');
+const goalWait = (run, i) => (run.status === 'waiting' && run.hold?.stageIndex === i ? { mission: '🎯', cap: '🔢', quota: '⏳' }[run.hold.reason] || '' : '');
 
 // ── 진행 바 + 승인/오류 카드 ──
 function RunBar({ s, run }) {
@@ -683,8 +683,8 @@ function Gate({ s, run }) {
       <div class="row"><button class="btn primary sm" onClick=${() => ctl('resume')}><${Icon} name="play" /> ${t('재개')}</button><button class="btn sm danger" onClick=${() => ctl('stop')}>${t('중지')}</button></div></div>`;
   }
   if (run.status !== 'waiting' || !hold) return null;
-  // 목표의 판정 뒤 묻기·호출 상한(결정 0015)은 질문 창 모양으로 따로 그린다
-  if (hold.reason === 'mission' || hold.reason === 'cap') return html`<${MissionGate} s=${s} run=${run} key=${hold.at} />`;
+  // 목표의 판정 뒤 묻기·호출 상한(결정 0015)·한도 대기(결정 0019)는 질문 창 모양으로 따로 그린다
+  if (hold.reason === 'mission' || hold.reason === 'cap' || hold.reason === 'quota') return html`<${MissionGate} s=${s} run=${run} key=${hold.at} />`;
   const st = run.stages[hold.stageIndex];
   if (hold.reason === 'approve') {
     const next = run.stages[hold.stageIndex + 1];
@@ -1007,7 +1007,7 @@ export function RightPanel({ s }) {
   </aside>`;
 }
 
-const WIN_LABEL = tmap(() => ({ five_hour: t('5시간'), seven_day: t('주간'), primary: t('기본 창'), secondary: t('보조 창') }));
+export const WIN_LABEL = tmap(() => ({ five_hour: t('5시간'), seven_day: t('주간'), primary: t('기본 창'), secondary: t('보조 창') })); // 목표 카드의 구독 한도 줄도 쓴다(결정 0019)
 export function Limits({ lim }) {
   const entries = Object.entries(lim || {});
   if (!entries.length) return html`<div class="muted small">${t('아직 관측된 한도가 없어. Claude·Codex로 한 번 실행하면 표시돼.')}</div>`;

@@ -103,6 +103,7 @@ export function stageModel(input = {}) {
   const mis = mission && ((run && run.missionId === mission.id) || ['draft', 'cut'].includes(mission.status)) ? mission : null;
   const drafted = mis?.status === 'draft';
   const cutGoal = mis?.status === 'cut';
+  const cutRun = cutGoal && run?.missionId === mis.id; // 끊긴 자리는 그 목표의 실행에서만 찾는다(그 뒤의 다른 실행이면 표시하지 않는다)
   // 역: 실행의 단계. 실행이 없으면(쉬는 세션) 팀 단계표를 흐린 역으로, 팀이 없으면 에이전트 하나의 역 하나.
   // 목표 카드 확인 대기면 아직 아무 단계도 시작하지 않았으니 팀 단계표를 할 일로 둔다
   const useRun = !!run && !(drafted && !active);
@@ -120,7 +121,7 @@ export function stageModel(input = {}) {
     const hk = useRun ? holdKind(run, i) : '';
     if (hk === 'mission') state = 'wait';
     if (hk === 'quota') state = quotaAuto ? 'limit' : 'wait';
-    if (cutGoal && useRun && state !== 'done' && (st.status === 'stopped' || i === mis.at?.stageIndex)) state = 'cut';
+    if (cutRun && useRun && state !== 'done' && (st.status === 'stopped' || i === mis.at?.stageIndex)) state = 'cut';
     const isCur = cur === i;
     const showLive = isCur || (!!hold && hold.stageIndex === i);
     const meet = isCur && st.meetingNow ? st.meetingNow : null;
@@ -257,7 +258,7 @@ export function stageModel(input = {}) {
   // ── 진행 한 줄(접은 띠·작은 모양): "3/4 만들기 ×2 · 기다림" ──
   const n = stations.length;
   const tail = (s) => ({ wait: ` · ${t('기다림')}`, error: ` · ${t('오류')}`, cut: ` · ${t('끊김')}`, limit: ` · ${t('한도 대기')}` }[s.state] || '');
-  const focus = curSt || (cutGoal && Number.isInteger(mis.at?.stageIndex) ? stations[mis.at.stageIndex] : null);
+  const focus = curSt || (cutRun && Number.isInteger(mis.at?.stageIndex) ? stations[mis.at.stageIndex] || null : null);
   const progress = focus ? `${focus.i + 1}/${n} ${focus.label}${focus.parallel > 1 ? ` ×${focus.parallel}` : ''}${focus.meeting ? ` · ${focus.meeting.label}` : ''}${tail(focus)}`
     : useRun && run && !active ? (run.status === 'done' ? `${n}/${n} ${t('끝')}` : end.text)
       : drafted ? t('시작 전') : t('쉬는 중');

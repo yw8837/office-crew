@@ -147,6 +147,8 @@ test('8. 오류 대기, 끊긴 목표, 서버 연결 끊김', () => {
   assert.ok(st(cut, 2).people.every((p) => p.st === 'off'));
   assert.ok(cut.links.every((l) => l.cut), '끊긴 목표는 길 전체가 점선');
   assert.equal(cut.progress, '3/4 만들기 ×2 · 끊김');
+  const later = model({ run: { ...runOf(['done', 'done', 'done', 'done'], { status: 'done', endedAt: 9, stageIndex: 3 }), id: 'mention' }, mission: M({ status: 'cut' }) });
+  assert.deepEqual([later.ask.kind, later.stations.map((s) => s.state)], ['cut', ['done', 'done', 'done', 'done']], '끊긴 목표 뒤의 다른 실행에는 끊긴 자리를 그리지 않는다(알약은 남는다)');
   const lost = model({ run: runOf(['running', 'pending', 'pending', 'pending']), conn: 'lost', live: { r: { state: 'thinking', at: 1 } } });
   assert.deepEqual([lost.lost, lost.now.icon, lost.now.text], [true, 'wifi', '서버 연결 끊김 — 다시 연결 중…']);
   assert.equal(who(st(lost, 0), 'r').st, 'think', '마지막으로 받은 상태는 그대로 둔다(흐리게 그린다)');

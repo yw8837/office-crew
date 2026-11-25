@@ -356,8 +356,9 @@ test('9. 묻고 할 일: 목표의 일 단계·카드 프롬프트에만 한 줄
   const work = ps.filter((p) => p.includes('[팀 작업]') && !p.includes('[회의 — ') && !p.includes('[기준 판정'));
   assert.equal(work.length, 3);
   assert.ok(work.every(has), '일 단계마다');
+  // 머리 줄은 줄 맨 앞에서 찾는다(새 대화의 첫 프롬프트에는 호출마다 달라지는 지시가 앞머리로 붙는다, 결정 0023)
   // 읽기 전용 대목은 종류마다 하나 이상 있었고(빈 목록이면 아래 검사가 저절로 통과한다) 어느 것에도 없다
-  const ro = { scan: /^\[조사 전 훑어보기\]/, questions: /^\[조사 질문 뽑기\]$/m, research: /^\[조사 — 질문 \d+\/\d+\]/, meeting: /\[회의 — /, review: /\[기준 판정 — / };
+  const ro = { scan: /^\[조사 전 훑어보기\]/m, questions: /^\[조사 질문 뽑기\]$/m, research: /^\[조사 — 질문 \d+\/\d+\]/m, meeting: /\[회의 — /, review: /\[기준 판정 — / };
   for (const [k, re] of Object.entries(ro)) {
     const got = ps.filter((p) => re.test(p));
     assert.ok(got.length >= 1, `${k} 프롬프트가 있다`);

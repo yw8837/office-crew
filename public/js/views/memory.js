@@ -74,7 +74,7 @@ export function MemoryPage() {
             <span class="chip">${t('기억 {n}', { n: i + 1 })}</span>
             <span>${when(h.at)}</span>
             <span>·</span>
-            <span>${h.role === 'user' ? t('사용자') : (h.who || 'AI')}</span>
+            <span>${h.role === 'user' ? t('사용자') : h.role === 'report' ? t('완주 보고') : (h.who || 'AI')}</span>
             <span>·</span>
             ${h.sessionExists
               ? html`<a href="#" onClick=${(e) => { e.preventDefault(); go('session', h.sessionId); }}>${h.sessionTitle || t('세션')}</a>`

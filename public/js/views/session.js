@@ -9,7 +9,7 @@ import { t, getLang, locale, tmap } from '../i18n/index.js';
 import { MemoryBadge } from './memory.js';
 import { DraftChip } from './rolenotes.js';
 import { continueList, findInMessages, hideAsks, hideCheck, hideGoal, hideReview, hideResearch, hidePlan, hideBlocked, routeTip, agentWrote, hideTeam } from '../chat-tools.js';
-import { GoalCard, MissionLog, MissionGate, ReviewTable, CutBox, ResearchCard, PlanCard } from './mission.js';
+import { GoalCard, MissionLog, MissionGate, ReviewTable, CutBox, ResearchCard, PlanCard, ReportCard } from './mission.js';
 import { TeamCard } from './teamdoc.js';
 import { researcherOf, meetingView, boardCards } from '../office/meeting.js';
 import { meetLabel, goalWait } from '../stage-model.js';
@@ -406,7 +406,7 @@ class Message extends Component {
           </span></div>
       </div></div>`;
     }
-    if (m.role === 'proposal') return m.kind === 'goal' ? html`<${GoalCard} m=${m} />` : m.kind === 'research' ? html`<${ResearchCard} m=${m} />` : m.kind === 'plan' ? html`<${PlanCard} m=${m} />` : m.kind === 'team' ? html`<${TeamCard} m=${m} />` : html`<${HireCard} m=${m} />`;
+    if (m.role === 'proposal') return m.kind === 'goal' ? html`<${GoalCard} m=${m} />` : m.kind === 'research' ? html`<${ResearchCard} m=${m} />` : m.kind === 'plan' ? html`<${PlanCard} m=${m} />` : m.kind === 'team' ? html`<${TeamCard} m=${m} />` : m.kind === 'report' ? html`<${ReportCard} m=${m} />` : html`<${HireCard} m=${m} />`;
     if (m.role === 'system') return html`<div class="msg system"><span>${m.text}</span></div>`;
     const a = agentById(m.agentId) || { name: t('삭제된 에이전트'), emoji: '❔' };
     const streaming = m.status === 'streaming';

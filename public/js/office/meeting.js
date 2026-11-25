@@ -26,8 +26,22 @@ export function researcherOf(now) {
   return now && now.phase === 'research' && now.speakerId ? String(now.speakerId) : null;
 }
 
-// 결론의 "결정" 줄: "- 결정: …", "- **결정**: …", "**Decision:** …", "1. 决定：…" (결론 프롬프트와 데모 결론이 네 언어로 쓰는 머리말)
-const DECISION = /^\s*(?:[-*+•]\s+|\d+[.)]\s+)?(?:\*\*|__)?\s*(?:결정|Decision|决定|決定)\s*(?:\*\*|__)?\s*[:：]\s*(?:\*\*|__)?\s*(.*)$/i;
+// 결론의 머리말 줄: "- 결정: …", "- **결정**: …", "**Decision:** …", "1. 决定：…" (결론 프롬프트와 데모 결론이 네 언어로 쓰는 머리말).
+// 결론 프롬프트가 부탁하는 다섯 칸(결정·근거·남은 이견·버린 안·다음 할 일)을 같은 꼴로 읽는다(결정 0025. 게시판 카드는 "결정" 줄만 쓴다)
+const HEADS = {
+  decision: ['결정', 'Decision', '决定', '決定'],
+  reasons: ['근거', 'Why', 'Reasons?', '依据', '根拠'],
+  dissent: ['남은 이견', 'Remaining disagreements?', '剩余分歧', '残った異論'],
+  dropped: ['버린 안', 'Dropped options?', '放弃的方案', '捨てた案'],
+  next: ['다음 할 일', 'Next steps?', '接下来要做的事', '次にやること'],
+};
+const headRe = (words) => new RegExp(`^\\s*(?:[-*+•]\\s+|\\d+[.)]\\s+)?(?:\\*\\*|__)?\\s*(?:${words.join('|')})\\s*(?:\\*\\*|__)?\\s*[:：]\\s*(?:\\*\\*|__)?\\s*(.*)$`, 'i');
+const HEAD_RE = Object.fromEntries(Object.entries(HEADS).map(([k, words]) => [k, headRe(words)]));
+const DECISION = HEAD_RE.decision;
+// 이 줄이 어느 칸의 머리말인가 → [칸, 같은 줄의 값] 또는 null
+const headOf = (line) => { for (const [k, re] of Object.entries(HEAD_RE)) { const m = line.match(re); if (m) return [k, m[1]]; } return null; };
+// "없음"(네 언어): 그 칸은 빈 목록
+const NONE = /^(?:없음|없어|없다|none|nothing|n\/a|-|—|なし|無し|ない|无|無|没有)[.。]?$/i;
 // 마크다운 표시를 뺀 한 줄 글
 const plain = (s) => String(s)
   .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
@@ -62,6 +76,35 @@ export function cardText(text, max = 30) {
   }
   const chars = [...pick];
   return chars.length > max ? `${chars.slice(0, max).join('').trimEnd()}…` : pick;
+}
+
+/**
+ * 회의 결론 글 → 다섯 칸 { decision, reasons[], dissent[], dropped[], next[] }(결정 0025). 머리말 줄의 값과, 그 아래 들여 쓴 줄(목록이면 항목마다).
+ * 들여 쓰지 않은 다른 줄이나 다음 머리말에서 끝난다. "없음"은 빈 목록. 머리말을 못 찾은 칸은 비운다(지어내지 않는다).
+ * 마크다운 표시는 빼고 글만(한 줄로 펴고 자르는 건 부르는 쪽이 한다)
+ */
+export function conclusionParts(text) {
+  const out = { decision: '', reasons: [], dissent: [], dropped: [], next: [] };
+  const got = {};
+  let cur = null;
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const h = headOf(line);
+    if (h) {
+      cur = got[h[0]] ? null : (got[h[0]] = { first: plain(h[1]), items: [] }); // 같은 칸이 두 번이면 첫 번째만
+      continue;
+    }
+    if (!cur) continue;
+    if (!line.trim()) continue;
+    if (!/^\s/.test(line)) { cur = null; continue; } // 들여 쓰지 않은 줄에서 그 칸이 끝난다
+    const item = /^\s*(?:[-*+•]\s+|\d+[.)]\s+)/.test(line);
+    const t = plain(line);
+    if (!t) continue;
+    if (item || !cur.items.length) cur.items.push(t); else cur.items[cur.items.length - 1] += ` ${t}`;
+  }
+  const vals = (k) => (got[k] ? [got[k].first, ...got[k].items].filter((x) => x && !NONE.test(x)) : []);
+  out.decision = vals('decision').join(' ');
+  for (const k of ['reasons', 'dissent', 'dropped', 'next']) out[k] = vals(k);
+  return out;
 }
 
 /** 게시판 카드: 메시지 목록에서 회의 결론(다 쓴 것) 최근 n개를 새것부터 [{ id, text }] */

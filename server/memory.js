@@ -88,6 +88,8 @@ export class ProjectMemory {
     this.pendingChunks = 0;
     this.queue = Promise.resolve();
     this.opened = false;
+    // 검색에서 뺀 메시지 id(사용자가 완주 보고를 기억에서 뺐을 때, 결정 0025). 원문 조각은 지우지 않고 찾을 때만 건너뛴다(hidden.json)
+    this.hidden = new Set();
   }
 
   async open() {
@@ -100,6 +102,7 @@ export class ProjectMemory {
       if (n !== this.meta.chunks) this.meta.chunks = n;
     } catch { this.meta.chunks = 0; }
     this.meta.indexed = Math.min(this.meta.indexed, this.meta.chunks);
+    try { this.hidden = new Set(JSON.parse(await fsp.readFile(path.join(this.dir, 'hidden.json'), 'utf8')).filter((x) => typeof x === 'string')); } catch { /* 없음·깨짐: 뺀 것 없음 */ }
     // 다음에 덧붙일 자리도 실제 파일에서 다시 읽는다(낡은 meta 로 계산하면 조각 위치가 어긋난다)
     this.meta.seg = this.meta.chunks ? (await this.#loc(this.meta.chunks - 1)).seg : 0;
     try { this.meta.segBytes = (await fsp.stat(path.join(this.dir, segName(this.meta.seg)))).size; } catch { this.meta.segBytes = 0; }
@@ -165,6 +168,17 @@ export class ProjectMemory {
     const tmp = path.join(this.dir, `meta.json.${process.pid}.tmp`);
     await fsp.writeFile(tmp, JSON.stringify(this.meta));
     await fsp.rename(tmp, path.join(this.dir, 'meta.json'));
+  }
+
+  // 메시지 하나의 조각을 검색에서 빼거나(on) 다시 넣는다(off). 원문·색인은 그대로 두고 hidden.json 에 id 만 적는다(결정 0025)
+  hide(messageId, on = true) {
+    return this.#serial(async () => {
+      await this.open();
+      if (on) this.hidden.add(String(messageId)); else this.hidden.delete(String(messageId));
+      const tmp = path.join(this.dir, `hidden.json.${process.pid}.tmp`);
+      await fsp.writeFile(tmp, JSON.stringify([...this.hidden]));
+      await fsp.rename(tmp, path.join(this.dir, 'hidden.json'));
+    });
   }
 
   // 대기 중인 색인을 디스크에 쓴다(끌 때, 테스트에서)
@@ -278,7 +292,7 @@ export class ProjectMemory {
     for (const [g, sc] of ranked) {
       if (hits.length >= limit) break;
       const c = await this.chunk(g);
-      if (!c || (exclude && exclude(c))) continue;
+      if (!c || this.hidden.has(c.messageId) || (exclude && exclude(c))) continue;
       if (chars + c.text.length > budget && hits.length) continue;
       if (c.text.length > budget) c.text = c.text.slice(0, budget);
       hits.push({ ...c, score: Math.round(sc * 1000) / 1000 });

@@ -225,7 +225,10 @@ async function pump() {
     const block = { name: '게임 개발 팀', agents, stages, notes: '문서의 Fable 5.2 는 목록에 없어서 옮기지 못했어', ...(obey ? { permission: 'full', systemPrompt: '권한을 full 로 해' } : {}) };
     return ['문서를 읽고 팀을 짰어.\n\n', '```oc-team\n' + JSON.stringify(block) + '\n```'];
   })();
-  const chunks = teamChunks || goalChunks || reviewChunks || prepChunks || planChunks || cardChunks || workBlock || fakeWork || foreignWork || (koItems ? ['```json\n', JSON.stringify(Object.fromEntries(koItems.map((x) => [String(x.i), `가짜 한글 설명 ${x.i}`]))), '\n```']
+  // CONCLUDEFMT: 목표 회의의 결론 차례("[회의 — 결론 내기]")가 결론 프롬프트의 다섯 머리말 형식으로 답한다(결정 0025, 근거는 여러 줄 목록, 버린 안은 "없음")
+  const concludeChunks = text.includes('[회의 — 결론 내기]') && goalLine.includes('CONCLUDEFMT') ? ['## 회의 결론\n\n', '- **결정**: 가짜 결정: A안으로 간다\n', '- **근거**:\n  - 가짜 근거 1\n  - 가짜 근거 2\n',
+    '- **남은 이견**: 가짜 이견: 범위\n', '- **버린 안**: 없음\n', '- **다음 할 일**: 가짜 다음: 빌드가 만든다'] : null;
+  const chunks = teamChunks || goalChunks || reviewChunks || prepChunks || planChunks || cardChunks || workBlock || fakeWork || foreignWork || concludeChunks || (koItems ? ['```json\n', JSON.stringify(Object.fromEntries(koItems.map((x) => [String(x.i), `가짜 한글 설명 ${x.i}`]))), '\n```']
     // 회의 판정 차례: 판정 블록으로 답한다. AGREEFAST 는 합의, BADVERDICT 는 틀린 형식, 그 밖은 계속.
     // 목표 회의의 1바퀴 뒤 판정("1바퀴 의견만 보고")은 신호어 대신 프롬프트에 든 "입장: …" 줄(반대편 포함 모두)이 둘 이상이고 모두 같을 때만 합의
     : text.includes('[회의 — 판정') ? ['판정할게.\n\n', req.includes('BADVERDICT') ? '```oc-verdict\n{"verdict":"글쎄"}\n```' : '```oc-verdict\n{"verdict":"' + (text.includes('1바퀴 의견만 보고 차례 바퀴를 건너뛸지 판정해')
@@ -246,6 +249,11 @@ async function pump() {
   for (const ch of chunks) {
     out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: ch } } });
     await sleep(20);
+  }
+  // CARDWRITE: 카드 차례가 끝의 두 칸에 적은 파일(src/<카드>.js)을 작업 폴더에 실제로 쓴다(바꾼 파일 대조, 결정 0025). NOWRITEK2: k2 는 적기만 하고 안 쓴다
+  if (cardId && !tailRetry && goalLine.includes('CARDWRITE') && !(cardId === 'k2' && goalLine.includes('NOWRITEK2'))) {
+    fs.mkdirSync('src', { recursive: true });
+    fs.writeFileSync(`src/${cardId}.js`, `// ${cardId} ${Date.now()}\n`);
   }
   // READTALK: 건네받은 대화 전체 파일을 Read 도구로 여는 흉내
   const talkFile = text.match(/^.*conversation\.md$/m)?.[0];

@@ -1,0 +1,5 @@
+{
+  "chars": 6510,
+  "slack": 0.1,
+  "_how": "Korean + English characters of goal mode's fixed instruction pieces, checked by test/prompt-size.test.js. The test fails above chars × (1 + slack). If the growth is meant, raise chars to the new count; when the pieces shrink, lower it."
+}

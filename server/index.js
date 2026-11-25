@@ -640,6 +640,8 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   route('POST', '/api/sessions/([\\w-]+)/mission/cancel', async (req, url, [id]) => { const b = await readJson(req); return orch.cancelMission(id, b); });
   route('POST', '/api/sessions/([\\w-]+)/mission/discard', async (req, url, [id]) => { const b = await readJson(req); return orch.discardMission(id, b); });
   route('POST', '/api/sessions/([\\w-]+)/mission/resume', async (req, url, [id]) => { const b = await readJson(req); return orch.resumeMission(id, b); });
+  // 완주 보고를 프로젝트 기억에 넣기({ on: true })·빼기({ on: false }). 결정 0025
+  route('POST', '/api/sessions/([\\w-]+)/report/([\\w-]+)/memory', async (req, url, [id, mid]) => { const b = await readJson(req); return orch.reportMemory(id, mid, b.on !== false); });
   route('POST', '/api/sessions/([\\w-]+)/open-folder', async (req, url, [id]) => {
     const s = store.getSession(id);
     if (!s) throw new HttpError(404, tr('세션 없음'));

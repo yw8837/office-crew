@@ -367,7 +367,8 @@ test('죽은 앱이 남긴 CLI는 끄고, 시작 시각이 다르면(PID 재사�
   ]));
   const aliveFile = path.join(dir, `${process.pid}.json`);
   fs.writeFileSync(aliveFile, JSON.stringify([{ pid: mine.pid, name: 'node', at: Date.now() }]));
-  assert.ok(procInfo(left.pid)?.cmd.toLowerCase().includes('node'), '프로세스 정보를 읽는다');
+  // 느린 PC(CI 의 Windows)에서는 첫 프로세스 조회가 제한 시간을 넘겨 빈 값이 올 수 있어서, 읽힐 때까지 다시 본다
+  await t.waitFor(() => procInfo(left.pid)?.cmd.toLowerCase().includes('node'), 60000, '프로세스 정보를 읽는다');
   assert.equal(reapLeftovers(dir), 1);
   await t.waitFor(() => !running(left.pid), 10000, '남은 CLI 종료');
   assert.ok(running(other.pid), '시작 시각이 다른 프로그램은 그대로');

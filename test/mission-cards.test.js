@@ -848,3 +848,49 @@ test('22. 끊김·이어서(대기와 다시 쓰기): 막힘 대기·되풀이 �
   await done(o1, h2.S, h2.idle);
   assert.deepEqual(h2.S(o1).mission.cards.map((c) => c.status), ['hole', 'done']);
 });
+
+test('23. 끊김·이어서와 진행 기록(결정 0022): 막힘 대기·오류 대기에서 끊겼다 이어서 같은 질문을 다시 물어도 넘겨받음·막힘·카드 요약·묻는 줄과 원인 모름 줄은 한 번만', async () => {
+  await app();
+  const { tm } = await team3('기록끊김');
+  const resumeFrom = async (h, sid) => {
+    const { h2 } = await crash(h, sid);
+    assert.equal((await h2.resume(sid, h2.S(sid).mission.id)).status, 200);
+    return h2;
+  };
+  // 이 테스트가 보는 줄: 넘겨받음(input)·막힘(blocked)·카드 요약(card)·묻는 줄(ask)·원인 모름(unknown)
+  const watched = (h, sid) => h.S(sid).mission.log.filter((x) => ['input', 'blocked', 'unknown'].includes(x.fail) || ['card', 'ask'].includes(x.kind)).map((x) => `${x.kind}|${x.fail || ''}|${x.text}`);
+  // (1) 막힘 대기: k1 막힘 → 받아들이기 → k1 을 기다린 k2 도 막힘(넘겨받음 줄 '막힘', 막힘 줄, 카드 요약 줄) → 그 대기에서 끊김 → 이어서 같은 질문(호출 없음)
+  let h = await reopen();
+  const b1 = await goal(tm.id, 'PLANDEP CARDBLOCK K2BLOCK', { h });
+  await t.waitFor(() => h.S(b1).runs.at(-1)?.hold?.kind === 'blocked', 30000, 'k1 막힘 대기');
+  await h.api('POST', `/api/sessions/${b1}/control`, { action: 'accept' });
+  await t.waitFor(() => h.S(b1).runs.at(-1)?.hold?.blocked?.[0]?.card === 'k2', 30000, 'k2 막힘 대기');
+  const before = watched(h, b1);
+  const input = before.filter((x) => x.startsWith('card|input|'));
+  assert.equal(input.length, 1, JSON.stringify(before));
+  assert.ok(input[0].includes('k2') && input[0].includes('k1') && input[0].includes('막힘'), input[0]);
+  assert.equal(before.filter((x) => x.startsWith('blocked|blocked|') && x.includes('k2')).length, 1);
+  let n = mark();
+  let h2 = await resumeFrom(h, b1);
+  await t.waitFor(() => h2.S(b1).runs.at(-1)?.hold?.blocked?.[0]?.card === 'k2', 30000, '이어서 같은 막힘 대기');
+  assert.equal(calls(n).length, 0, '같은 질문을 호출 없이');
+  assert.deepEqual(watched(h2, b1), before, '넘겨받음·막힘·카드 요약·묻는 줄을 다시 적지 않았다');
+  assert.ok(h2.S(b1).mission.log.some((x) => x.kind === 'resume'), '이어서 한 줄은 있다');
+  assert.deepEqual(h2.S(b1).mission.cards.map((c) => c.status), ['hole', 'blocked'], '끊기기 전에 정한 카드 상태 그대로');
+  await h2.api('POST', `/api/sessions/${b1}/control`, { action: 'accept' });
+  await done(b1, h2.S, h2.idle);
+  assert.deepEqual(h2.S(b1).mission.cards.map((c) => c.status), ['hole', 'hole']);
+  // (2) 오류 대기: k1 이 오류 → 원인 모름 줄 한 번 → 그 대기에서 끊김 → 이어서 같은 질문을 다시 물어도 그 줄은 한 번(fromCut)
+  h = await reopen();
+  const e1 = await goal(tm.id, 'CARDFAIL', { h });
+  await t.waitFor(() => h.S(e1).runs.at(-1)?.hold?.reason === 'error', 30000, '오류 대기');
+  const unknown = (hh) => hh.S(e1).mission.log.filter((x) => x.fail === 'unknown');
+  assert.equal(unknown(h).length, 1, JSON.stringify(h.S(e1).mission.log.map((x) => [x.text, x.fail])));
+  n = mark();
+  h2 = await resumeFrom(h, e1);
+  await t.waitFor(() => h2.S(e1).runs.at(-1)?.hold?.reason === 'error', 30000, '이어서 같은 오류 대기');
+  assert.equal(calls(n).length, 0, '같은 질문을 호출 없이');
+  assert.equal(unknown(h2).length, 1, '원인 모름 줄은 다시 적지 않았다');
+  await h2.api('POST', `/api/sessions/${e1}/control`, { action: 'stop' });
+  await done(e1, h2.S, h2.idle);
+});

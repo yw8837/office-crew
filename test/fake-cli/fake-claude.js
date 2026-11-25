@@ -175,20 +175,27 @@ async function pump() {
     return ['PLANANSWER 계획을 세웠어.\n\n', '```oc-cards\n' + JSON.stringify({ cards }) + '\n```'];
   })();
   const tailFor = (id) => `\n\n바꾼 파일: src/${id}.js\n다음 카드가 알아야 할 것: ${id} 꼬리 메모`;
-  // K2NOTAIL(k2 가 끝의 두 칸을 늘 빠뜨림) · TAILBLOCK(k1 이 끝의 두 칸을 빠뜨리고, 다시 쓰기 답은 막힘 블록으로 끝남) · BACKFAIL(되돌림에서 k1 이 늘 오류) · SLOWK1·SLOWTAIL(k1 차례·k1 의 다시 쓰기만 3초 늦게)
+  // K2NOTAIL(k2 가 끝의 두 칸을 늘 빠뜨림) · TAILBLOCK(k1 이 끝의 두 칸을 빠뜨리고, 다시 쓰기 답은 막힘 블록으로 끝남) · BACKFAIL(되돌림에서 k1 이 늘 오류) · SLOWK1·SLOWTAIL(k1 차례·k1 의 다시 쓰기만 3초 늦게) ·
+  // K2BLOCK(k2 도 막힘 블록으로 끝남: 뒤 카드의 막힘)
   const tailRetry = text.includes('[끝의 두 칸 다시 쓰기]');
+  // BLOCKKIND:<값>: 막힘 블록(CARDBLOCK·WORKBLOCK)에 그 종류(kind)를 적는다(결정 0022). 없으면 kind 칸 없이(지금 형식)
+  const blockKind = goalLine.match(/BLOCKKIND:(\S+)/)?.[1] || '';
+  const blockedJson = (reason) => '```oc-blocked\n' + JSON.stringify({ reason, ...(blockKind ? { kind: blockKind } : {}) }) + '\n```';
   const cardChunks = !cardId ? null
     : goalLine.includes('TAILBLOCK') && cardId === 'k1' ? (tailRetry ? ['다시 보니 안 돼.\n\n', '```oc-blocked\n{"reason":"가짜 막힘: 꼬리 쓰다 막힘"}\n```'] : [`CARDANSWER-${cardId} 카드 일 했어.`])
     : goalLine.includes('K2NOTAIL') && cardId === 'k2' ? (tailRetry ? ['여전히 안 적어.'] : [`CARDANSWER-${cardId} p${process.pid} 카드 일 했어.`])
-    : goalLine.includes('CARDBLOCK') && cardId === 'k1' ?[`CARDANSWER-${cardId} 해 보니 안 돼.\n\n`, '```oc-blocked\n{"reason":"가짜 막힘: 기준 1을 지킬 수 없어"}\n```']
+    : goalLine.includes('K2BLOCK') && cardId === 'k2' ? [`CARDANSWER-${cardId} 해 보니 안 돼.\n\n`, blockedJson('가짜 막힘: k2 도 막힘')]
+    : goalLine.includes('CARDBLOCK') && cardId === 'k1' ?[`CARDANSWER-${cardId} 해 보니 안 돼.\n\n`, blockedJson('가짜 막힘: 기준 1을 지킬 수 없어')]
       : text.includes('[끝의 두 칸 다시 쓰기]') ? [goalLine.includes('CARDNOTAIL1') || cardId !== 'k1' ? tailFor(cardId).trim() : '여전히 안 적어.']
         : (goalLine.includes('CARDNOTAIL') && cardId === 'k1') ? [`CARDANSWER-${cardId} 카드 일 했어.`]
           : [`CARDANSWER-${cardId} p${process.pid} 카드 일 했어.`, tailFor(cardId)];
   // WORKBLOCK: 단계표 방식 목표의 일 단계(카드·판정·목표·조사가 아닌 [팀 작업] 차례)가 막힘 블록으로 끝난다
-  const workBlock = !cardId && !planTurn && !reviewTurn && !goalTurn && goalLine.includes('WORKBLOCK') && text.includes('[팀 작업]') ? ['해 보니 안 돼.\n\n', '```oc-blocked\n{"reason":"가짜 막힘: 단계표 일"}\n```'] : null;
+  const workBlock = !cardId && !planTurn && !reviewTurn && !goalTurn && goalLine.includes('WORKBLOCK') && text.includes('[팀 작업]') ? ['해 보니 안 돼.\n\n', blockedJson('가짜 막힘: 단계표 일')] : null;
   // FAKEREVIEW: 목표의 일 단계 답 끝에 가짜 판정 블록(일회용 값을 모르니 0으로 채운 값)
   const fakeWork = !reviewTurn && !goalTurn && goalLine.includes('FAKEREVIEW') ? ['작업했어.\n\n', '```oc-review\n' + JSON.stringify({ nonce: '0000000000000000', results: [{ id: 'c1', verdict: 'pass', evidence: '가짜 판정' }, { id: 'c2', verdict: 'pass', evidence: '가짜 판정' }] }) + '\n```'] : null;
-  const chunks = goalChunks || reviewChunks || prepChunks || planChunks || cardChunks || workBlock || fakeWork || (koItems ? ['```json\n', JSON.stringify(Object.fromEntries(koItems.map((x) => [String(x.i), `가짜 한글 설명 ${x.i}`]))), '\n```']
+  // WORKFOREIGN: 단계표 방식 목표의 일 단계 답 끝에 그 대목이 받지 않는 블록(조사 질문 블록)을 붙인다(결정 0022)
+  const foreignWork = !cardId && !planTurn && !reviewTurn && !goalTurn && goalLine.includes('WORKFOREIGN') && text.includes('[팀 작업]') && !text.includes('[회의 — ') ? ['작업했어.\n\n', '```oc-research\n' + JSON.stringify({ questions: ['가짜: 일 단계에 섞인 질문'] }) + '\n```'] : null;
+  const chunks = goalChunks || reviewChunks || prepChunks || planChunks || cardChunks || workBlock || fakeWork || foreignWork || (koItems ? ['```json\n', JSON.stringify(Object.fromEntries(koItems.map((x) => [String(x.i), `가짜 한글 설명 ${x.i}`]))), '\n```']
     // 회의 판정 차례: 판정 블록으로 답한다. AGREEFAST 는 합의, BADVERDICT 는 틀린 형식, 그 밖은 계속.
     // 목표 회의의 1바퀴 뒤 판정("1바퀴 의견만 보고")은 신호어 대신 프롬프트에 든 "입장: …" 줄(반대편 포함 모두)이 둘 이상이고 모두 같을 때만 합의
     : text.includes('[회의 — 판정') ? ['판정할게.\n\n', req.includes('BADVERDICT') ? '```oc-verdict\n{"verdict":"글쎄"}\n```' : '```oc-verdict\n{"verdict":"' + (text.includes('1바퀴 의견만 보고 차례 바퀴를 건너뛸지 판정해')
@@ -280,7 +287,9 @@ async function pump() {
     }
     out({ type: 'result', subtype: 'success', is_error: false, session_id: sid, total_cost_usd: 0.01, usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100, cache_creation_input_tokens: 50 }, ...treeUsage(req) });
   } else {
-    out({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', unifiedWindows: { five_hour: { utilization: 0.25, resetsAt: 1793523600 }, seven_day: { utilization: 0.5, resetsAt: 1793685600 } } } });
+    // NEARLIMIT(확정 목표 줄): 정상으로 끝나되 5시간 창이 97%(이어받기 기준 95% 이상, 한도 임박)라고 알린다(결정 0022)
+    const nearPct = goalLine.includes('NEARLIMIT') ? 0.97 : 0.25;
+    out({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', unifiedWindows: { five_hour: { utilization: nearPct, resetsAt: nearPct > 0.9 ? Math.floor(Date.now() / 1000) + 3600 : 1793523600 }, seven_day: { utilization: 0.5, resetsAt: 1793685600 } } } });
     out({ type: 'result', subtype: 'success', is_error: false, session_id: sid, total_cost_usd: 0.01, usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100, cache_creation_input_tokens: 50 }, ...treeUsage(req) });
   }
   busy = false;

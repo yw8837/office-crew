@@ -234,9 +234,47 @@ export function reviewCard(team, agents, plan) {
   };
 }
 
+// ── 대목마다 받는 블록(결정 0022) ──
+// 목표 모드의 대목(답의 종류)마다 코드가 그 답에서 읽는 블록. 대목마다 블록을 읽는 곳(parseGoal·parseResearch·parseVerdict·parseCheck·parsePlan·parseBlocked·parseReview·parseAsk)은
+// 그대로 두고, 이 표가 "그 대목이 받는 블록"의 단일 근거다: 판정 답의 섞인 블록 거르기(OTHER_BLOCK)와, 표에 없는 블록이 답에 있을 때의 진행 기록 한 줄이 여기서 나온다.
+// 사용자에게 묻는 블록(oc-ask)은 물을 수 있는 차례(목표 잡기, 일 단계·일 카드)만 받는다. 한 번 실행(훑어보기·조사 질문·조사·회의 차례·계획·검수)은 묻지 못한다
+export const BLOCK_ACCEPTS = Object.freeze({
+  goal: ['oc-goal', 'oc-ask'], // 목표 잡기: 목표 카드, 사용자에게 묻기
+  scan: [], // 훑어보기
+  questions: ['oc-research'], // 조사 질문 뽑기
+  research: [], // 조사(질문 하나, 회의 중 조사 포함)
+  meeting: ['oc-verdict', 'oc-check'], // 회의 차례(준비 회의·목표의 팀 회의 단계): 진행자 판정, 차례 발언 끝의 조사 질문
+  plan: ['oc-cards'], // 일 카드의 계획
+  work: ['oc-blocked', 'oc-ask'], // 팀 단계표의 일 단계: 막힘 출구, 사용자에게 묻기
+  cards: ['oc-blocked', 'oc-ask'], // 일 카드: 막힘 출구, 사용자에게 묻기
+  review: ['oc-review'], // 기준 판정
+});
+export const BLOCK_NAMES = [...new Set(Object.values(BLOCK_ACCEPTS).flat())]; // 코드가 실제로 읽는 블록 이름 전부
+// 블록을 여는 줄: 줄 맨 앞의 백틱 정확히 세 개 + 이름 + 줄 끝(또는 공백). 줄 가운데 적은 이름(글이나 JSON 문자열 속 인용)은 블록이 아니다.
+// 이름은 끝까지 읽는다(oc-research-x 는 oc-research 가 아니라 그 이름)
+const BLOCK_AT = /^```(oc-[a-z][a-z0-9-]*)(?=[ \t]|\r?$)/gm;
+// 글에 든 블록 이름(여는 줄 기준, 같은 이름은 한 번, 나온 순서)
+export const blocksIn = (text) => [...new Set([...String(text || '').matchAll(BLOCK_AT)].map((m) => m[1]))];
+// 그 대목(part)이 받지 않는 블록 이름. 표에 없는 대목이면 빈 목록(보지 않는다)
+export const foreignBlocks = (part, text) => (Object.hasOwn(BLOCK_ACCEPTS, part) ? blocksIn(text).filter((b) => !BLOCK_ACCEPTS[part].includes(b)) : []);
+// 목표 실행의 답 메시지가 어느 대목인가(메시지에 코드가 단 표시로)
+export function blockPart(msg) {
+  if (msg?.goalDraft) return 'goal';
+  if (msg?.review) return 'review';
+  if (msg?.meeting) return msg.meeting.phase === 'research' ? 'research' : 'meeting';
+  const k = msg?.prep?.kind;
+  if (k === 'scan' || k === 'questions' || k === 'research' || k === 'plan') return k;
+  if (msg?.card) return 'cards';
+  return 'work';
+}
+// 진행 기록에 쓰는 대목 이름
+export const partName = (part) => ({ goal: tr('목표 잡기'), scan: tr('훑어보기'), questions: tr('조사 질문'), research: tr('조사'), meeting: tr('회의 차례'), plan: tr('계획'), work: tr('일 단계'), cards: tr('일 카드'), review: tr('기준 판정') }[part] || part);
+
 const REVIEW_OPEN = '```oc-review';
 const REVIEW_LAST = /^```oc-review[ \t]*\r?\n([\s\S]*?)```\s*$/; // 글의 맨 끝에 있는 블록만 판정이다
-const OTHER_BLOCK = /```oc-(?:ask|verdict|check|goal|plan|blocked)\b/; // 판정 답에 다른 글 블록이 섞이면 받지 않는다
+// 판정 답에 다른 블록(표의 블록 중 판정이 받지 않는 것)이 섞이면 받지 않는다(결정 0015·0022). 여는 줄은 BLOCK_AT 과 같은 규칙(줄 맨 앞, 이름이 정확히 같고 뒤는 줄 끝·공백)이라
+// 판정 블록의 근거 글(JSON 문자열)에 인용한 예시는 블록으로 세지 않는다: 맞는 JSON 안에는 백틱으로 시작하는 줄이 있을 수 없으니, 걸리는 것은 판정 블록 밖에서 따로 연 블록뿐이다
+const OTHER_BLOCK = new RegExp(`^\`\`\`(?:${BLOCK_NAMES.filter((b) => !BLOCK_ACCEPTS.review.includes(b)).join('|')})(?=[ \\t]|\\r?$)`, 'm');
 const VERDICTS = ['pass', 'fail', 'unknown'];
 const WORSE = { pass: 0, unknown: 1, fail: 2 }; // 같은 기준을 두 번 적었으면 나쁜 쪽
 
@@ -843,7 +881,10 @@ export function cardTail(text) {
   return [...lines.slice(headAt(lines, TAIL_HEADS())).slice(0, 12).join('\n').trim()].slice(0, TAIL_MAX).join('');
 }
 
-// 막힘 출구(결정 0018): 답 맨 끝의 ```oc-blocked 블록. JSON 이면 reason, 아니면 블록 글 전체를 이유로(한 줄, 300자). 이유가 비면 받지 않는다. → { reason, from, to } 또는 null
+// 막힘의 종류(결정 0022): 에이전트가 블록에 적는 선택 값. unclear 지시가 모호함 / input 넘겨받은 것이 틀림 / capability 권한·도구가 없음 / dependency 다른 일이 먼저 끝나야 함.
+// 모르는 값이나 없으면 unknown(코드가 지어내지 않는다)
+export const BLOCKED_KINDS = ['unclear', 'input', 'capability', 'dependency'];
+// 막힘 출구(결정 0018): 답 맨 끝의 ```oc-blocked 블록. JSON 이면 reason 과 kind, 아니면 블록 글 전체를 이유로(한 줄, 300자). 이유가 비면 받지 않는다. → { reason, kind, from, to } 또는 null
 export function parseBlocked(text) {
   const src = String(text || '');
   const from = src.lastIndexOf(BLOCKED_OPEN);
@@ -851,12 +892,25 @@ export function parseBlocked(text) {
   const m = src.slice(from).match(BLOCKED_LAST);
   if (!m) return null;
   let reason = '';
-  try { const d = JSON.parse(m[1]); reason = one(d && typeof d === 'object' ? d.reason : d, 300); } catch { reason = one(m[1], 300); }
+  let kind = 'unknown';
+  try {
+    const d = JSON.parse(m[1]);
+    reason = one(d && typeof d === 'object' ? d.reason : d, 300);
+    const k = d && typeof d === 'object' && typeof d.kind === 'string' ? d.kind.trim().toLowerCase() : '';
+    if (BLOCKED_KINDS.includes(k)) kind = k;
+  } catch { reason = one(m[1], 300); }
   if (!reason) return null;
-  return { reason, from, to: from + m[0].trimEnd().length };
+  return { reason, kind, from, to: from + m[0].trimEnd().length };
 }
-// 일 단계·카드 프롬프트에 붙는 막힘 출구 안내(코드가 쓴 지시)
-export const blockedRule = () => `${tr('기준이나 "바뀌면 안 되는 것"을 지킬 수 없으면 억지로 맞추지 말고, 답 맨 끝에 아래 블록으로 이유를 적어(그러면 기준 판정으로 넘기지 않고 사용자에게 물어).')}\n\`\`\`oc-blocked\n${JSON.stringify({ reason: tr('무엇 때문에 기준을 지킬 수 없는지 한 줄') })}\n\`\`\``;
+// 일 단계·카드 프롬프트에 붙는 막힘 출구 안내(코드가 쓴 지시). kind 는 고를 값을 보여 준다(그대로 베끼면 unknown 으로 읽힌다)
+export const blockedRule = () => `${tr('기준이나 "바뀌면 안 되는 것"을 지킬 수 없으면 억지로 맞추지 말고, 답 맨 끝에 아래 블록으로 이유를 적어(그러면 기준 판정으로 넘기지 않고 사용자에게 물어).')}\n${tr('kind 에는 막힌 까닭 하나를 적어: unclear(지시가 모호함) · input(넘겨받은 것이 틀림) · capability(권한·도구가 없음) · dependency(다른 일이 먼저 끝나야 함). 모르면 빼.')}\n\`\`\`oc-blocked\n${JSON.stringify({ reason: tr('무엇 때문에 기준을 지킬 수 없는지 한 줄'), kind: BLOCKED_KINDS.join('|') })}\n\`\`\``;
+// 묻고 할 일(결정 0022): 목표의 일 단계·일 카드 프롬프트에 붙는 한 줄(코드가 쓴 지시). 글 지시일 뿐 코드로 막지 못한다.
+// 묻는 형식은 시스템 지시의 질문 블록 안내(ask.js)에 있어서 여기서는 무엇을 묻는지만. canAsk: 이 차례가 질문 블록으로 물을 수 있는가(아니면 하지 말고 답에 남기게)
+export const outsideRule = (canAsk = true) => (canAsk
+  ? tr('밖으로 나가는 일(원격 저장소에 올리기·배포·메일·메시지 보내기·게시·결제)과 작업 폴더 밖의 파일 지우기는 하기 전에 질문 블록으로 물어. 작업 폴더 안에서 고치고 만드는 건 묻지 말고 해.')
+  : tr('밖으로 나가는 일(원격 저장소에 올리기·배포·메일·메시지 보내기·게시·결제)과 작업 폴더 밖의 파일 지우기는 하지 마. 필요하면 답에 적어 둬. 작업 폴더 안에서 고치고 만드는 건 그냥 해.'));
+// 끊긴 목표를 이어서 할 때 "[이어서]" 줄 뒤에 붙는 한 문장(결정 0022)
+export const resumeSent = () => tr('이미 밖으로 보낸 것은 다시 하지 마.');
 // 카드 프롬프트 끝의 꼬리 안내(코드가 쓴 지시)
 export const tailRule = () => tr('끝에 아래 두 칸을 5줄 안으로 적어(다음 카드 담당이 먼저 읽어):\n{a}: 만들거나 고친 파일 목록(없으면 없음)\n{b}: 다음 카드가 알아야 할 것', { a: tr('바꾼 파일'), b: tr('다음 카드가 알아야 할 것') });
 

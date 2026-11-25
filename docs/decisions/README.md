@@ -27,3 +27,4 @@ Keep a record under about 100 lines. When a decision changes, add a dated "Revis
 | [0019](0019-goal-mode-call-estimate-and-limit-wait.md) | Goal mode shows a rough call estimate before confirming, and waits for a usage-limit reset when no other AI can take over | Accepted |
 | [0020](0020-flow-stage-default-picture.md) | The split view shows a flow stage above the chat; the village stays in the Large office view | Accepted |
 | [0021](0021-no-demo-team.md) | No demo team; the simulated AI stays for tests and is hidden from the screens | Accepted |
+| [0022](0022-goal-mode-records-and-block-allow-list.md) | Goal mode keeps one table of the blocks each step takes, records who actually ran and why, and names failures only by facts the code knows | Accepted |

@@ -1,14 +1,14 @@
 // 세션 화면: 사무실(실시간) + 채팅 + 입력창 + 진행 바 + 승인/오류 카드 + 에이전트 상세
 import { Component } from 'preact';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { html, Icon, Avatar, ProviderChip, STATE_LABEL, EFFORT_LABEL, fmtTok, fmtCost, fmtDur, usageTotal, officeMod, agentModelText, PERM_LABEL, Toggle } from '../ui.js';
+import { html, Icon, Avatar, ProviderChip, PROVIDER_SHORT, STATE_LABEL, EFFORT_LABEL, fmtTok, fmtCost, fmtDur, usageTotal, officeMod, agentModelText, PERM_LABEL, Toggle } from '../ui.js';
 import { state, changed, toast, agentById, teamById, latestRun, onServerEvent, loadSession, uiLang } from '../state.js';
 import { post, patch, upload, uploadUrl } from '../api.js';
 import { renderMarkdown } from '../markdown.js';
 import { t, getLang, locale, tmap } from '../i18n/index.js';
 import { MemoryBadge } from './memory.js';
 import { DraftChip } from './rolenotes.js';
-import { continueList, findInMessages, hideAsks, hideCheck, hideGoal, hideReview, hideResearch, hidePlan, hideBlocked } from '../chat-tools.js';
+import { continueList, findInMessages, hideAsks, hideCheck, hideGoal, hideReview, hideResearch, hidePlan, hideBlocked, routeTip, agentWrote } from '../chat-tools.js';
 import { GoalCard, MissionLog, MissionGate, ReviewTable, CutBox, ResearchCard, PlanCard } from './mission.js';
 import { researcherOf, meetingView, boardCards } from '../office/meeting.js';
 import { meetLabel, goalWait } from '../stage-model.js';
@@ -82,7 +82,7 @@ function liveMeeting(s) {
 }
 // 회의 차례 글에 붙은 질문(msg.check)의 상태 칩: [글, 칩 모양]
 // low: 목표 실행에서 남은 호출이 상한의 4분의 1 아래라 회의 중 조사를 껐다(결정 0017)
-const checkChip = (status) => ({ asked: [t('조사 중'), ''], answered: [t('조사해 옴'), ' ok'], 'no-researcher': [t('조사할 사람 없음'), ' warn'], over: [t('조사 상한'), ' warn'], low: [t('호출이 적어 조사 끔'), ' warn'], failed: [t('확인 못 함'), ' warn'] }[status] || [status, '']);
+const checkChip = (status) => ({ asked: [t('조사 중'), ''], answered: [t('조사해 옴'), ' ok'], 'no-researcher': [t('조사할 사람 없음'), ' warn'], over: [t('조사 상한'), ' warn'], low: [t('호출이 적어 조사 끔'), ' warn'], near: [t('한도 임박이라 조사 끔'), ' warn'], failed: [t('확인 못 함'), ' warn'] }[status] || [status, '']);
 
 // ── 사무실 패널 ──
 // 나눠 보기는 흐름 무대(views/stage.js), "사무실 크게"는 마을·스킨 그림. 컴포넌트가 달라서 보기를 바꾸면 마을은 새로 만들어지고 나올 때 치워진다
@@ -425,6 +425,9 @@ class Message extends Component {
         : hideBlocked(hideCheck(hideAsks(hideGoal(m.text, m.goalBlock, streaming), m.asks, streaming), m.check, streaming), m.blockedBlock, streaming);
     // 조사 결과: 누구의 어떤 질문에 답했는지(질문이 든 차례 글에서 찾는다)
     const asker = m.checkOf ? state.sessionData[state.currentId]?.messages.find((x) => x.id === m.checkOf) : null;
+    // 배정 기록(결정 0022): 모델 칩에 마우스를 올리면 요청한 AI와 이유(모델을 기본값으로 둬서 모델 칩이 없으면 AI 칩에). 출처 표시: 목표 일 실행의 일 단계·일 카드 답과 회의 결론에 "에이전트가 씀"
+    const tip = routeTip(m.route, { t, label: (p) => PROVIDER_SHORT[p] || p });
+    const wrote = agentWrote(m, (state.sessionData[state.currentId]?.runs || []).find((r) => r.id === m.runId));
     const chip = m.check ? checkChip(m.check.status) : null;
     const long = !streaming && body.length > FOLD_CHARS;
     const folded = long && !(open ?? (!fold || this.seen));
@@ -439,8 +442,9 @@ class Message extends Component {
       <div style="min-width:0">
         <div class="msg-head">
           <b>${a.name}</b>${m.stageLabel ? html`<span class="chip">${m.stageLabel}</span>` : ''}${m.meeting ? html`<span class=${`chip${m.meeting.phase === 'conclude' ? ' accent' : ''}`}>${meetLabel(m.meeting)}</span>` : ''}${m.meeting?.opposer ? html`<span class="chip">${t('반대편')}</span>` : ''}${m.verdict ? html`<span class=${`chip${m.verdict.verdict === 'agree' ? ' accent' : ''}`}>${m.verdict.verdict === 'agree' ? t('합의') : t('계속')}</span>` : ''}${m.handoff ? html`<span class="chip accent">${t('인수인계 메모')}</span>` : ''}${m.goalDraft ? html`<span class="chip accent">${t('목표 초안')}</span>` : ''}${m.review ? (m.review.quota ? html`<span class="chip warn">${t('기준 판정 · 한도로 중단')}</span>` : html`<span class="chip accent">${t('기준 판정 {n}회차', { n: m.review.round || 1 })}</span>`) : ''}${m.review?.retried ? html`<span class="chip">${t('다시 요청')}</span>` : ''}${m.prep?.qid ? html`<span class="chip">${m.prep.qid}</span>` : ''}${m.prep?.retried ? html`<span class="chip">${t('다시 요청')}</span>` : ''}${m.once && !m.review ? html`<span class="chip" title=${t('세션의 CLI 대화를 이어 가지 않고 새 대화로 한 번 돈 차례야(목표의 조사·회의).')}>${t('새 대화')}</span>` : ''}${m.prep?.kind === 'plan' ? html`<span class="chip accent">${t('일 계획')}</span>` : ''}${m.card ? html`<span class="chip accent" title=${t('일 카드')}>${m.card.id}</span>` : ''}${m.cardTail ? html`<span class="chip">${t('끝의 두 칸 다시')}</span>` : ''}${m.flags ? html`<span class=${`chip${m.flags.suspect ? ' warn' : ''}`}>${t('지시처럼 보이는 줄 {n}개', { n: m.flags.suspect })}</span><span class=${`chip${m.flags.unsourced ? ' warn' : ''}`}>${t('출처 없는 줄 {n}개', { n: m.flags.unsourced })}</span>` : ''}${m.textOnly ? html`<span class="chip warn" title=${t('읽기 전용을 강제하는 장치가 없는 AI로 조사해서, 글 지시로만 묶였어.')}>${t('글 지시로만')}</span>` : ''}${m.noTools ? html`<span class="chip">${t('도구 없음')}</span>` : ''}
-          <${ProviderChip} id=${m.provider} />
-          ${m.model && html`<span class="chip mono">${m.model}${m.effort ? ` · ${EFFORT_LABEL[m.effort] || m.effort}` : ''}</span>`}
+          <${ProviderChip} id=${m.provider} title=${m.model ? '' : tip} />
+          ${m.model && html`<span class="chip mono" title=${tip || undefined}>${m.model}${m.effort ? ` · ${EFFORT_LABEL[m.effort] || m.effort}` : ''}</span>`}
+          ${wrote && html`<span class="small muted">${t('에이전트가 씀 · 사용자 확인 안 함')}</span>`}
           ${streaming && html`<span class="spin"></span>`}
         </div>
         ${(thinking || tools.length) ? html`<div class="blocks">

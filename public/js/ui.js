@@ -126,8 +126,9 @@ export const providerColor = (id = '') => PROVIDER_COLORS[id] || PROVIDER_COLORS
 export const PROVIDER_SHORT = tmap(() => ({ claude: 'Claude', codex: 'GPT·Codex', gemini: 'Gemini', hermes: 'Hermes', openai: 'API', local: t('로컬'), acp: 'ACP', mock: t('데모'),
   ...Object.fromEntries(Object.entries(ACCOUNT_NAMES).map(([id, name]) => [id, `GPT·${name}`])) }));
 
-export function ProviderChip({ id }) {
-  return html`<span class="chip" style=${`background:${providerColor(id)}1f;color:${providerColor(id)}`}><span class="pdot-inline" style=${`background:${providerColor(id)}`}></span>${PROVIDER_SHORT[id] || id}</span>`;
+// title: 마우스를 올리면 보일 글(없으면 안 단다)
+export function ProviderChip({ id, title = '' }) {
+  return html`<span class="chip" title=${title || undefined} style=${`background:${providerColor(id)}1f;color:${providerColor(id)}`}><span class="pdot-inline" style=${`background:${providerColor(id)}`}></span>${PROVIDER_SHORT[id] || id}</span>`;
 }
 
 export const STATE_LABEL = tmap(() => ({

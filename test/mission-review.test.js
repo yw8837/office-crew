@@ -760,3 +760,15 @@ test('18. 목표 대기(판정·상한) 중 일시정지와 앱 끄기(stopAll),
   await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(sent, ['목표 판정을 보고 답해 줘', '목표가 호출 상한에 닿았어', '결정이 필요해']);
 });
+
+test('19. 판정 답에 실제로 쓰이는 다른 블록(oc-cards·oc-research)이 섞여도 판정으로 받지 않는다(거르는 목록은 대목별 블록 표에서 만든다)', () => {
+  const ids = ['c1'];
+  const ok = '```oc-review\n' + JSON.stringify({ nonce: 'n0', results: [{ id: 'c1', verdict: 'pass', evidence: '파일:1 확인' }] }) + '\n```';
+  const mixed = (name, body) => parseReview(`앞 글\n\`\`\`${name}\n${body}\n\`\`\`\n\n판정했어.\n\n${ok}`, { nonce: 'n0', ids }).error;
+  assert.equal(parseReview(`판정했어.\n\n${ok}`, { nonce: 'n0', ids }).error, undefined, '판정 블록만 있으면 받는다');
+  assert.equal(mixed('oc-cards', JSON.stringify({ cards: [{ title: '가짜 카드' }] })), 'mixed', '일 계획 블록이 섞임');
+  assert.equal(mixed('oc-research', JSON.stringify({ questions: ['가짜 질문'] })), 'mixed', '조사 질문 블록이 섞임');
+  assert.equal(mixed('oc-blocked', JSON.stringify({ reason: '가짜 막힘' })), 'mixed', '막힘 블록이 섞임');
+  // 블록 표에 없는 이름(옛 코드가 보던 이름. 위생 검사의 계획 문서 이름 무늬에 걸리지 않게 조각을 잇는다)은 실제 블록이 아니라 거르지 않는다
+  assert.equal(mixed(['oc', 'plan'].join('-'), '{}'), undefined);
+});

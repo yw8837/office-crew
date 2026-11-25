@@ -8,12 +8,13 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createApp } from '../server/index.js';
 import { bindLang } from '../server/i18n.js';
-import { meetingRecord, recordMeeting, planEstimate, reviewPrompt, resumePoint, MEET_VALUE_MAX, MEET_ITEMS, MEETINGS_MAX } from '../server/mission.js';
+import { meetingRecord, recordMeeting, planEstimate, reviewPrompt, resumePoint, MEET_VALUE_MAX, MEET_ITEMS, MEETINGS_MAX, FILES_COUNT } from '../server/mission.js';
 import { sumEstimate } from '../public/js/mission-numbers.js';
 import { conclusionParts, cardText } from '../public/js/office/meeting.js';
-import { tailFiles, proofCheck, changedSet } from '../server/proof.js';
+import { tailFiles, tailClaims, proofCheck, changedSet, gitState, gitDiffNames } from '../server/proof.js';
 import { buildReport, reportText, reportLocal, REPORT_EVIDENCE } from '../server/report.js';
 import { stageModel, goalEndWord } from '../public/js/stage-model.js';
+import { ProjectMemory, projectKey } from '../server/memory.js';
 import { startTestApp, freePort } from './helpers.js';
 
 bindLang(() => 'ko'); // 순수 함수의 문구(한국어 원문)를 검사한다
@@ -135,6 +136,14 @@ test('1. 회의 결론 읽기(순수 함수): 네 언어의 다섯 머리말, �
   assert.deepEqual(conclusionParts(zh), { decision: 'A 方案', reasons: ['便宜'], dissent: [], dropped: ['B'], next: ['开发'] });
   // 형식을 따르지 않은 결론: 지어내지 않고 빈 구조
   assert.deepEqual(conclusionParts('그냥 이렇게 하자고 했어.\n다들 좋대.'), { decision: '', reasons: [], dissent: [], dropped: [], next: [] });
+  // 결론 앞 요약에 같은 머리말이 먼저 나와도 결론 형식의 마지막 묶음(머리말이 이어 나오는 곳)을 읽는다
+  const summary = ['요약:', '- 결정: 지난번에 미룬 것', '- 근거: 지난 회의', '', ...ko.split('\n')].join('\n');
+  assert.deepEqual(conclusionParts(summary), conclusionParts(ko));
+  assert.equal(cardText(summary), '합침. 작은 범위로 먼저 만든다.', '게시판 카드도 마지막 "결정" 줄');
+  // "없음"의 여러 꼴은 빈 값, 들여 쓴 항목 안의 "Why:"는 머리말이 아니다(목록이 끊기지 않게)
+  const en2 = '- Decision: pick A\n- Remaining disagreement: (none)\n- Dropped options: None.\n- Next steps:\n  - Bob builds it\n  - Why: it is cheap\n  - Ann reviews';
+  assert.deepEqual(conclusionParts(en2), { decision: 'pick A', reasons: [], dissent: [], dropped: [], next: ['Bob builds it', 'Why: it is cheap', 'Ann reviews'] });
+  for (const none of ['없습니다', '(없음)', 'none', '无', 'なし', '없음.', '特になし']) assert.deepEqual(conclusionParts(`- 결정: A\n- 남은 이견: ${none}`).dissent, [], none);
   // 게시판 카드 글(마을 그림)은 그대로
   assert.equal(cardText(ko), '합침. 작은 범위로 먼저 만든다.');
   // 저장 값: 한 줄, 하나에 MEET_VALUE_MAX 자, 목록은 MEET_ITEMS 개까지
@@ -159,6 +168,28 @@ test('2. 바꾼 파일 대조(순수 함수): 꼬리의 파일 목록 읽기, �
   assert.deepEqual(tailFiles('Changed files: none\nFor the next card: x'), []);
   assert.deepEqual(tailFiles('바꾼 파일: 없음\n다음 카드가 알아야 할 것: 없음'), []);
   assert.deepEqual(tailFiles(''), []);
+  // 네 언어의 흔한 꼴(검토에서 깨지던 것): 조사·괄호·링크·백틱·줄 번호가 붙어도 경로만. 경로로 확신하지 못한 항목이 하나라도 있으면 그 카드는 판단하지 않는다(unsure)
+  const claims = (x, next = '다음 카드가 알아야 할 것: 없음') => tailClaims(`바꾼 파일: ${x}\n${next}`);
+  const sure = (files) => ({ files, unsure: false });
+  assert.deepEqual(claims('src/app.js를 새로 만들었어'), sure(['src/app.js']), '한국어 조사');
+  assert.deepEqual(claims('docs/가이드.md를 고치고 README.md도 고침'), sure(['docs/가이드.md', 'README.md']), '한글 파일 이름·한 항목에 두 경로');
+  assert.deepEqual(claims('src/app.js（新建）、src/b.js (修改)'), sure(['src/app.js', 'src/b.js']), '중국어 전각 괄호·모점');
+  assert.deepEqual(claims('src/app.jsを新規作成'), sure(['src/app.js']), '일본어 꼬리');
+  assert.deepEqual(claims('「src/a.js」、src/b.js【新規】'), sure(['src/a.js', 'src/b.js']), '일본어 낫표로 감싼 경로·뒤에 붙은 꺾쇠 설명');
+  assert.deepEqual(claims('_config.yml, pkg/__init__.py'), sure(['_config.yml', 'pkg/__init__.py']), '밑줄로 시작하는 이름');
+  assert.deepEqual(claims('Updated src/app.js and README.md.'), sure(['src/app.js', 'README.md']), '영어 문장');
+  assert.deepEqual(claims('src/a.js:12, src/b.js:3-9, src/c.js#L4'), sure(['src/a.js', 'src/b.js', 'src/c.js']), '줄 번호');
+  assert.deepEqual(claims('[a.js](src/a.js), [b](src/b.js'), sure(['src/a.js', 'src/b.js']), '마크다운 링크(닫는 괄호가 빠져도)');
+  assert.deepEqual(claims('`src/(group)/page.tsx` (new), **lib/x.ts**'), sure(['src/(group)/page.tsx', 'lib/x.ts']), '백틱 안은 그대로, 굵은 글씨');
+  assert.deepEqual(claims('.env, Makefile, C:\\w\\a.js'), sure(['.env', 'Makefile', 'C:\\w\\a.js']));
+  for (const none of ['없음', '(없음)', '없습니다.', 'None.', 'n/a', '无', '没有', 'なし', '-']) assert.deepEqual(claims(none), sure([]), none);
+  assert.deepEqual(claims('i.e. 설정만 바꿈'), { files: [], unsure: true }, 'i.e 는 경로가 아니다');
+  assert.deepEqual(claims('v1.2 대응'), { files: [], unsure: true }, 'v1.2 는 경로가 아니다');
+  assert.deepEqual(claims('src/app.js, 설정 파일'), { files: ['src/app.js'], unsure: true }, '경로로 못 읽은 항목이 섞임');
+  assert.deepEqual(claims('https://example.com/a'), { files: [], unsure: true }, '주소');
+  assert.equal(tailClaims('바꾼 파일: src/a.js').unsure, true, '"다음 카드가 알아야 할 것"이 없으면 목록이 잘렸을 수 있다');
+  assert.equal(claims(Array.from({ length: FILES_COUNT + 1 }, (_, k) => `f${k}.js`).join(', ')).unsure, true, '상한보다 많이 적었으면 다 보지 못한다');
+  assert.equal(tailClaims('Changed files\n- src/a.js\nFor the next card: x').unsure, false, '머리 줄에 값이 없으면 머리말을 항목으로 읽지 않는다');
   const cwd = path.resolve('/w/proj');
   const changed = new Set(['src/a.js', 'docs/b.md']);
   const own = ['src'];
@@ -173,6 +204,8 @@ test('2. 바꾼 파일 대조(순수 함수): 꼬리의 파일 목록 읽기, �
   assert.equal(proofCheck({ claimed: ['lib/x.js'], changed, cwd, own, prefix: 'sub/' }), 'missing');
   assert.equal(proofCheck({ claimed: ['a.js'], changed: new Set(['sub/a.js']), cwd, own: [], prefix: 'sub/' }), 'ok', '작업 폴더가 저장소의 하위 폴더면 접두를 붙여 본다');
   assert.equal(proofCheck({ claimed: ['gone.js'], changed: new Set(), cwd, own: [], touched: (p) => p.endsWith('gone.js') }), 'ok', 'git 이 무시하는 파일이라도 그 사이에 고친 흔적(수정 시각)이 있으면 바뀐 것');
+  assert.equal(proofCheck({ claimed: ['Src/Gone.JS'], changed: new Set(), cwd, own: [], touched: (p) => p === path.join(cwd, 'Src', 'Gone.JS') }), 'ok', '고친 흔적은 적은 그대로의 대소문자로 본다');
+  assert.equal(proofCheck({ claimed: ['src/zzz.js'], changed, cwd, own, unsure: true }), 'skip', '경로로 못 읽은 항목이 있으면 판단하지 않는다');
   // 상태 차이: 새로 생김·없어짐·같은 파일이 다시 바뀜(수정 시각·크기)·커밋으로 넘어간 파일
   const before = { files: new Map([['a.js', ' M|1|10'], ['b.js', '??|1|3']]) };
   const after2 = { files: new Map([['a.js', ' M|2|12'], ['c.js', '??|5|1']]) };
@@ -255,6 +288,25 @@ test('4. 완주 보고 만들기(순수 함수): 코드가 아는 사실 먼저(
   assert.equal(reportLocal({ messages: [A('w', { provider: 'local' })], runs, m }), true);
   assert.equal(reportLocal({ messages: [A('w', { provider: 'claude' })], runs, m }), false);
   assert.equal(reportLocal({ messages: [A('w', { provider: 'claude' }), { role: 'user', id: 'q', local: true }], runs, m: { ...m, requestMsgId: 'q' } }), true);
+  // 사용자가 고른 것(by: 'user' 표시가 있는 기록): 표시가 있는 줄만, 코드가 쓴 안내 줄(검수자 안내·자동 이어서)은 빼고
+  const m2 = { ...m, log: [
+    { kind: 'confirm', text: '사용자가 목표를 확인했어(기준 3개).', by: 'user' },
+    { kind: 'confirm', text: '검수: 검수가 기준마다 판정해.' },
+    { kind: 'answer', text: '초기화 시각이 지나서 자동으로 이어서 해(1/3번째).' },
+    { kind: 'answer', text: '한도 대기에서 "지금 다시"를 골랐어.', by: 'user' },
+    // 판정이 사용량 한도로 끝나 받아들인 사건 하나: 한도 줄과 판정 줄 둘 다 outside → 한 번만
+    { kind: 'quota', text: '한도', fail: 'outside' },
+    { kind: 'answer', text: '한도 대기에서 받아들이기를 골랐어.', by: 'user' },
+    { kind: 'review', text: '검수 1회차: 검수가 오류로 끝나서 판정 없이 끝남', fail: 'outside' },
+  ] };
+  const r2 = buildReport({ m: m2, messages: [...messages, A('w', { status: 'error' }), A('w', { status: 'stopped', card: { id: 'k1' } })], runs, now: 185000 });
+  assert.deepEqual(r2.user.map((x) => x.text), ['사용자가 목표를 확인했어(기준 3개).', '한도 대기에서 "지금 다시"를 골랐어.', '한도 대기에서 받아들이기를 골랐어.']);
+  assert.deepEqual(r2.fails, { outside: 1 }, '한 사건은 한 번');
+  assert.equal(r2.unverified.quota, 1);
+  assert.deepEqual([r2.answers.work, r2.answers.cards, r2.answerFails], [2, 2, 2], '오류·중지로 끝난 답도 세고 그 수를 따로');
+  assert.equal(r.answerFails, 0);
+  assert.ok(reportText(r2).includes('오류·중지로 끝난 답 2개 포함'));
+  assert.ok(reportText(r).includes('에이전트가 적은 경로: src/a.js'), '에이전트가 적은 경로는 표시와 함께');
   // 끝 깃발과 같은 말(흐름 무대와 모순되지 않게)
   for (const st of ['done', 'accepted', 'stopped']) {
     const sm = stageModel({ run: { id: 'w', missionId: m.id, status: 'done', endedAt: 1, stages: [] }, mission: { ...m, status: st } });
@@ -463,4 +515,141 @@ test('11. 완주 보고를 기억에: 넣기를 눌러야 들어가고(출처·�
     const other = S(sid).messages.find((x) => x.role === 'agent');
     assert.equal((await t.api('POST', `/api/sessions/${sid}/report/${other.id}/memory`, { on: true })).status, 404);
   } finally { t.app.store.settings.memory = false; }
+});
+
+test('12. 바꾼 파일 대조의 git 쪽: 이름 바꾸기·복사는 옛 이름도 바뀐 것(상태와 커밋 둘 다), git 출력이 너무 크거나 수정 시각을 시간 안에 다 못 보면 까닭을 나눠 끈다', async () => {
+  await app();
+  if (!hasGit) return;
+  const dir = repo('proof-git');
+  const g = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.test', '-c', 'commit.gpgsign=false', ...a], { cwd: dir, stdio: 'ignore' });
+  fs.writeFileSync(path.join(dir, 'a.js'), 'a');
+  g('add', '-A');
+  g('commit', '-qm', 'x');
+  const before = await gitState(dir);
+  assert.equal(before.files.size, 0, '깨끗한 저장소');
+  g('mv', 'a.js', 'b.js');
+  const after = await gitState(dir);
+  assert.deepEqual([...changedSet(before, after)].sort(), ['a.js', 'b.js']);
+  assert.equal(proofCheck({ claimed: ['a.js'], changed: changedSet(before, after), cwd: dir }), 'ok', 'git mv 뒤에 옛 이름을 적은 카드');
+  g('commit', '-qm', 'y');
+  const d = await gitDiffNames(dir, before.head, (await gitState(dir)).head);
+  assert.deepEqual(d.names.sort(), ['a.js', 'b.js'], '커밋된 이름 바꾸기도 옛 이름·새 이름 둘 다');
+  fs.writeFileSync(path.join(dir, 'c.js'), 'c');
+  assert.deepEqual(await gitState(dir, { maxBuffer: 8 }), { off: 'big' }, '출력이 너무 크면 시간 초과와 따로');
+  assert.deepEqual(await gitState(dir, { statWithin: 0 }), { off: 'stat' }, '수정 시각을 시간 안에 다 못 보면');
+  assert.ok((await gitState(dir)).files.get('c.js').startsWith('??|'), '보통은 수정 시각·크기까지');
+});
+
+test('13. 한도 사건은 한 번: 판정이 한도로 끝나 받아들이면 실패 종류·한도 횟수가 1, 끊겼다 이어서 같은 한도 대기를 다시 물어도 한도 줄을 다시 쓰지 않는다. "사용자가 확정한 것"에 안내 줄은 없다', async () => {
+  await app();
+  const { tm } = await team3('한도한번');
+  t.app.store.settings.failover = false; // 이어받을 AI 가 없는 것과 같다(mission-estimate 와 같은 방식)
+  try {
+    const sid = await goal(tm.id, 'REVIEWQUOTA');
+    await waitHold(sid, 'quota');
+    await t.api('POST', `/api/sessions/${sid}/control`, { action: 'accept' });
+    await done(sid);
+    const m = S(sid).mission;
+    assert.equal(m.status, 'accepted');
+    assert.equal(m.log.filter((x) => x.fail === 'outside').length, 2, '기록에는 한도 줄과 판정 줄 둘(결정 0022 그대로)');
+    const [r] = reports(S(sid));
+    assert.deepEqual(r.fails, { outside: 1 }, '보고는 한 번');
+    assert.equal(r.unverified.quota, 1);
+    assert.ok(r.user.some((x) => x.text === '한도 대기에서 받아들이기를 골랐어. 이번 검수는 판정 없이 끝내.'), JSON.stringify(r.user));
+    assert.ok(!r.user.some((x) => x.text.startsWith('검수:')), '검수자 안내 줄은 사용자가 고른 것이 아니다');
+  } finally { t.app.store.settings.failover = true; }
+  // 끊겼다 이어서: 같은 대기를 호출 없이 다시 묻고, 한도 줄은 그대로 하나
+  const h = await reopen();
+  h.app.store.settings.failover = false;
+  const s2 = await goal(tm.id, 'REVIEWQUOTA', { h });
+  await waitHold(s2, 'quota', null, h.S);
+  assert.equal(h.S(s2).mission.log.filter((x) => x.kind === 'quota').length, 1);
+  const { h2 } = await crash(h, s2);
+  h2.app.store.settings.failover = false;
+  assert.equal((await h2.resume(s2, h2.S(s2).mission.id)).status, 200);
+  await waitHold(s2, 'quota', null, h2.S);
+  assert.equal(h2.S(s2).mission.log.filter((x) => x.kind === 'quota').length, 1, '이어서 다시 물을 때 한도 줄을 또 쓰지 않는다');
+  await h2.api('POST', `/api/sessions/${s2}/control`, { action: 'accept' });
+  await done(s2, h2.S, h2.idle);
+  const [r2] = reports(h2.S(s2));
+  assert.deepEqual([r2.fails, r2.unverified.quota], [{ outside: 1 }, 1]);
+  assert.ok(r2.user.some((x) => x.text.startsWith('이어서:')), '이어서 누른 것');
+});
+
+test('14. 보고를 만들다 던져도 목표는 끝난 그대로(대화에 한 줄, 세션 저장). 앱이 켜질 때 "물어보는 중"으로 남은 바뀐 파일은 정리한다', async () => {
+  await app();
+  const { tm } = await team3('보고실패');
+  const sid = await goal(tm.id, 'REVIEWFAIL2');
+  await waitHold(sid, 'mission', 'verdict');
+  S(sid).mission.meetings = 5; // 보고 만들기가 던지게(회의 기록이 목록이 아님)
+  await t.api('POST', `/api/sessions/${sid}/control`, { action: 'accept' });
+  await done(sid);
+  assert.equal(S(sid).mission.status, 'accepted');
+  assert.equal(reports(S(sid)).length, 0);
+  assert.ok(S(sid).messages.some((x) => x.role === 'system' && x.text.includes('완주 보고를 만들지 못했어')));
+  // 바뀐 파일을 묻는 중에 앱이 꺼진 보고
+  const h = await reopen();
+  const s2 = await goal(tm.id, '', { h });
+  await done(s2, h.S, h.idle);
+  await t.waitFor(() => reports(h.S(s2))[0]?.filesState !== 'pending', 10000, '바뀐 파일');
+  reports(h.S(s2))[0].filesState = 'pending';
+  h.app.store.saveSessionNow(h.S(s2));
+  await h.app.close();
+  const h2 = await reopen();
+  assert.equal(reports(h2.S(s2))[0].filesState, 'none');
+});
+
+test('15. 보고를 기억에: 목표가 돈 폴더의 기억으로(넣을 때 세션 폴더가 바뀌었어도), 두 곳에서 동시에 넣어도 조각은 한 번', async () => {
+  await app();
+  const { tm } = await team3('기억폴더');
+  const a = path.join(t.root, 'mem-a');
+  const b = path.join(t.root, 'mem-b');
+  fs.mkdirSync(a, { recursive: true });
+  fs.mkdirSync(b, { recursive: true });
+  const sid = await goal(tm.id, '', { cwd: a });
+  await done(sid);
+  const rep = reports(S(sid))[0];
+  assert.equal((await t.api('PATCH', `/api/sessions/${sid}`, { cwd: b })).status, 200);
+  t.app.store.settings.memory = true;
+  try {
+    const url = `/api/sessions/${sid}/report/${rep.id}/memory`;
+    const [x, y] = await Promise.all([t.api('POST', url, { on: true }), t.api('POST', url, { on: true })]);
+    assert.deepEqual([x.status, y.status], [200, 200]);
+    await t.app.orch.settled();
+    const memA = await t.app.memory.of(a);
+    const mine = [];
+    for (let g = 0; g < memA.stats().chunks; g++) { const c = await memA.chunk(g); if (c.messageId === rep.id) mine.push(c); }
+    assert.ok(mine.length >= 1, '목표가 돈 폴더의 기억에');
+    assert.equal(mine.length, mine[0].parts, '조각은 한 번만');
+    const memB = await t.app.memory.of(b);
+    for (let g = 0; g < memB.stats().chunks; g++) assert.notEqual((await memB.chunk(g)).messageId, rep.id, '지금 세션 폴더의 기억에는 없다');
+    assert.equal(reports(S(sid))[0].memory.key, projectKey(a), '보고에 적힌 기억도 목표가 돈 폴더의 것');
+  } finally { t.app.store.settings.memory = false; }
+});
+
+test('16. 기억의 검색에서 뺀 보고: 조각 수와 따로 "뺀 보고 n개"를 알리고, 뺀 목록 파일이 깨지면 덮어쓰지 않고 .bad 로 옮긴 뒤 새로 시작하며 알린다', async () => {
+  await app();
+  const dir = path.join(t.root, 'mem-hidden');
+  const m = new ProjectMemory(dir);
+  await m.add('완주 보고 하나', { messageId: 'r1', role: 'report' });
+  await m.add('보통 말', { messageId: 'u1', role: 'user' });
+  await m.hide('r1');
+  assert.deepEqual([m.stats().chunks, m.stats().hidden, m.stats().hiddenBad], [2, 1, undefined]);
+  await m.flush();
+  fs.writeFileSync(path.join(dir, 'hidden.json'), '["r1", 깨짐');
+  const m2 = new ProjectMemory(dir);
+  await m2.open();
+  assert.equal(m2.stats().hiddenBad, true);
+  assert.equal(m2.stats().hidden, 0);
+  assert.equal(fs.readFileSync(path.join(dir, 'hidden.json.bad'), 'utf8'), '["r1", 깨짐', '깨진 파일은 옮겨 둔다');
+  await m2.hide('r9');
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'hidden.json'), 'utf8')), ['r9']);
+  assert.equal(fs.readFileSync(path.join(dir, 'hidden.json.bad'), 'utf8'), '["r1", 깨짐', '새로 쓸 때 옮긴 파일은 그대로');
+  assert.ok(!fs.readdirSync(dir).some((f) => f.endsWith('.tmp')), '임시 파일을 남기지 않는다');
+  // 처음 여는 기억에 요청 둘이 동시에 와도 여는 일은 한 번(겹친 열기가 덧붙이는 중인 조각의 다음 자리를 덮어쓰지 않게)
+  const m3 = new ProjectMemory(path.join(t.root, 'mem-open'));
+  const p1 = m3.open();
+  assert.equal(m3.open(), p1, '여는 중에 또 부르면 같은 열기를 기다린다');
+  await Promise.all([p1, m3.add('첫 조각', { messageId: 'a' }), m3.add('둘째 조각', { messageId: 'b' })]);
+  assert.deepEqual([(await m3.chunk(0)).messageId, (await m3.chunk(1)).messageId, m3.stats().chunks], ['a', 'b', 2]);
 });

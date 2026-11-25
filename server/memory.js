@@ -92,8 +92,15 @@ export class ProjectMemory {
     this.hidden = new Set();
   }
 
-  async open() {
-    if (this.opened) return this;
+  // 여는 일은 한 번만 돈다: 여는 중에 또 부르면(처음 쓰는 기억에 요청 둘이 동시에 오면) 같은 열기를 기다린다.
+  // 두 열기가 겹치면 늦게 끝나는 쪽이 그사이 덧붙인 조각의 meta(조각 수·다음 자리)를 파일 크기로 덮어써 위치표가 어긋난다
+  open() {
+    if (this.opened) return Promise.resolve(this);
+    this.opening ||= this.#open().finally(() => { this.opening = null; });
+    return this.opening;
+  }
+
+  async #open() {
     await fsp.mkdir(this.idxDir, { recursive: true });
     try { this.meta = { ...this.meta, ...JSON.parse(await fsp.readFile(path.join(this.dir, 'meta.json'), 'utf8')) }; } catch { /* 처음 */ }
     // 위치표가 원문의 기준이다: meta 가 낡았으면(쓰다가 꺼짐) 위치표 크기로 맞춘다
@@ -102,13 +109,29 @@ export class ProjectMemory {
       if (n !== this.meta.chunks) this.meta.chunks = n;
     } catch { this.meta.chunks = 0; }
     this.meta.indexed = Math.min(this.meta.indexed, this.meta.chunks);
-    try { this.hidden = new Set(JSON.parse(await fsp.readFile(path.join(this.dir, 'hidden.json'), 'utf8')).filter((x) => typeof x === 'string')); } catch { /* 없음·깨짐: 뺀 것 없음 */ }
+    await this.#readHidden();
     // 다음에 덧붙일 자리도 실제 파일에서 다시 읽는다(낡은 meta 로 계산하면 조각 위치가 어긋난다)
     this.meta.seg = this.meta.chunks ? (await this.#loc(this.meta.chunks - 1)).seg : 0;
     try { this.meta.segBytes = (await fsp.stat(path.join(this.dir, segName(this.meta.seg)))).size; } catch { this.meta.segBytes = 0; }
     this.opened = true;
     if (this.meta.indexed < this.meta.chunks) await this.#reindexFrom(this.meta.indexed);
     return this;
+  }
+
+  // 검색에서 뺀 메시지 id 읽기(hidden.json). 없으면 뺀 것 없음. 깨졌으면(JSON 이 아니거나 목록이 아님) 덮어쓰지 않게 hidden.json.bad 로 옮겨 두고
+  // 빈 목록으로 새로 시작하며 hiddenBad 를 세운다(기억 화면과 넣기·빼기 응답이 알린다. 전에 뺀 보고가 검색에 다시 나올 수 있다)
+  async #readHidden() {
+    const file = path.join(this.dir, 'hidden.json');
+    let raw;
+    try { raw = await fsp.readFile(file, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') this.hiddenBad = true; return; }
+    let list = null;
+    try { list = JSON.parse(raw); } catch { /* 깨짐 */ }
+    if (Array.isArray(list)) { this.hidden = new Set(list.filter((x) => typeof x === 'string')); return; }
+    this.hiddenBad = true;
+    const bad = path.join(this.dir, 'hidden.json.bad');
+    let to = bad;
+    try { await fsp.access(bad); to = path.join(this.dir, `hidden.json.${Date.now()}.bad`); } catch { /* 처음 깨짐 */ }
+    try { await fsp.rename(file, to); } catch { await fsp.copyFile(file, to).catch(() => {}); } // 옮기지 못하면 사본이라도 남긴다(다음 쓰기가 원래 파일을 덮어쓴다)
   }
 
   // 한 번에 하나씩(파일을 덧붙이는 순서가 섞이지 않게)
@@ -302,7 +325,8 @@ export class ProjectMemory {
     return { hits, chars, terms: terms.length, scanned: score.size };
   }
 
-  stats() { return { chunks: this.meta.chunks, chars: this.meta.chars, indexed: this.meta.indexed, files: this.meta.seg + (this.meta.chunks ? 1 : 0) }; }
+  // 조각·글자 수는 디스크에 쌓인 전부(검색에서 뺀 보고의 조각도 들어 있다). hidden: 검색에서 뺀 메시지(보고) 수, hiddenBad: 뺀 목록 파일이 깨져서 새로 시작함
+  stats() { return { chunks: this.meta.chunks, chars: this.meta.chars, indexed: this.meta.indexed, files: this.meta.seg + (this.meta.chunks ? 1 : 0), hidden: this.hidden.size, ...(this.hiddenBad ? { hiddenBad: true } : {}) }; }
 
   close() { return this.flush(); }
 }

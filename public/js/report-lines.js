@@ -23,7 +23,8 @@ export function unverifiedLines(t, r) {
   if (u.open?.length) out.push(t('판정 안 된 기준: {ids}', { ids: u.open.join(', ') }));
   if (u.research?.missing) out.push(t('조사 질문 {n}개 중 {m}개는 확인 못 함(빈 답·오류·건너뜀)', { n: u.research.total, m: u.research.missing }));
   for (const c of u.cards || []) out.push(t('카드 {id}: {status}', { id: c.id, status: `${card[c.status] || c.status}${c.by ? ` (${by[c.by] || c.by})` : ''}` }));
-  for (const p of u.proof || []) out.push(t('카드 {id}: 바꿨다고 적은 파일이 실제로는 안 바뀌었어({files})', { id: p.id, files: (p.files || []).join(', ') }));
+  // 경로는 카드 담당(에이전트)이 꼬리에 적은 글이라 그렇다고 표시한다
+  for (const p of u.proof || []) out.push(t('카드 {id}: 바꿨다고 적은 파일이 실제로는 안 바뀌었어(에이전트가 적은 경로: {files})', { id: p.id, files: (p.files || []).join(', ') }));
   if (u.skipped?.length) out.push(t('건너뛴 단계: {labels}', { labels: u.skipped.join(', ') }));
   if (u.quota) out.push(t('사용량 한도에 걸려 멈춘 횟수: {n}', { n: u.quota }));
   return out;

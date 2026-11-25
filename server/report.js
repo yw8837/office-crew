@@ -37,13 +37,22 @@ export function reportLocal({ m, messages = [], runs = [] }) {
 export function buildReport({ m, messages = [], runs = [], now = Date.now() }) {
   const mine = runsOf(m, runs);
   const ids = new Set(mine.map((r) => r.id));
+  // 종류별 답 수는 오류·중지로 끝난 답도 센다(그 답에도 호출이 들었다). 그중 끝나지 못한 답의 수는 따로(answerFails)
   const answers = { goal: 0, research: 0, meeting: 0, plan: 0, cards: 0, work: 0, review: 0 };
-  for (const x of messages) if (x.role === 'agent' && ids.has(x.runId)) answers[answerKind(x)]++;
+  let answerFails = 0;
+  for (const x of messages) {
+    if (x.role !== 'agent' || !ids.has(x.runId)) continue;
+    answers[answerKind(x)]++;
+    if (x.status !== 'done') answerFails++;
+  }
   const log = m.log || [];
-  // 사용자가 누른 것: 목표 카드 확인, 묻는 창의 답(받아들이기·한 번 더·20번 더·건너뛰기·지금 다시…), 추가 지시(그 말 메시지가 있는 줄), 끊긴 목표 이어서(목표 카드를 가리키는 첫 줄)
-  const users = log.filter((x) => x.kind === 'confirm' || x.kind === 'answer' || ((x.kind === 'note' || x.kind === 'resume') && x.msgId)).map((x) => ({ at: x.at || 0, text: x.text }));
+  // 사용자가 고른 것: 사용자가 고른 것을 적는 곳이 단 표시(by: 'user')가 있는 줄만(목표 카드 확인, 묻는 창의 답, 추가 지시, 끊긴 목표 이어서).
+  // 표시가 하나도 없는 옛 기록은 예전처럼 줄 종류로 고른다(확인·답 줄, 메시지를 가리키는 추가 지시·이어서 줄)
+  const marked = log.some((x) => x.by);
+  const users = log.filter((x) => (marked ? x.by === 'user' : x.kind === 'confirm' || x.kind === 'answer' || ((x.kind === 'note' || x.kind === 'resume') && x.msgId))).map((x) => ({ at: x.at || 0, text: x.text }));
+  // 실패 종류: 줄마다 단 fail 을 센다. 판정이 사용량 한도로 끝난 사건은 한도(quota) 줄과 판정(review) 줄 두 줄로 남으니(둘 다 outside) 한도 줄로 한 번만 센다
   const fails = {};
-  for (const x of log) if (x.fail) fails[x.fail] = (fails[x.fail] || 0) + 1;
+  for (const x of log) if (x.fail && !(x.kind === 'review' && x.fail === 'outside')) fails[x.fail] = (fails[x.fail] || 0) + 1;
   const lastWork = mine.filter((r) => r.mission === 'work').at(-1);
   const qs = m.research?.questions || [];
   // 회의 결론(결정 0025의 구조): 회의마다(준비 회의, 팀 회의 단계 번호) 가장 최근 결론의 결정과 남은 이견만
@@ -54,7 +63,7 @@ export function buildReport({ m, messages = [], runs = [], now = Date.now() }) {
     from: m.confirmedAt || m.createdAt || now, to: now,
     calls: { used: Number(m.calls?.used) || 0, cap: Number(m.calls?.cap) || 0 },
     estimate: m.estimate ? { min: m.estimate.min, max: m.estimate.max } : null,
-    answers,
+    answers, answerFails,
     criteria: (m.criteria || []).map((c) => ({ id: c.id, text: c.text, status: c.status || 'open', evidence: cut(c.evidence, REPORT_EVIDENCE) })),
     user: users.slice(-REPORT_USER), userMore: Math.max(0, users.length - REPORT_USER),
     unverified: {
@@ -88,7 +97,7 @@ export function reportText(r, { missionId = '' } = {}) {
     tr('출처: 완주 보고(report) · 목표 {id} · {time} · 사용자가 확정하지 않은 기록', { id: missionId, time }),
     `${tr('목표')}: ${cut(r.goal, 200)}`,
     `${tr('끝 상태')}: ${endWord(r.end)} · ${tr('확인부터 끝까지 {t}', { t: durationWords(tr, (r.to || 0) - (r.from || 0)) })} · ${r.estimate ? tr('실제 호출 {k}번(어림 {min}~{max}번)', { k: r.calls?.used ?? 0, min: r.estimate.min, max: r.estimate.max }) : tr('실제 호출 {k}번', { k: r.calls?.used ?? 0 })} · ${tr('상한 {cap}번', { cap: r.calls?.cap ?? 0 })}`,
-    `${tr('종류별 답 수')}: ${Object.keys(names).map((k) => `${names[k]} ${a[k] || 0}`).join(' · ')}`,
+    `${tr('종류별 답 수')}: ${Object.keys(names).map((k) => `${names[k]} ${a[k] || 0}`).join(' · ')}${r.answerFails ? ` ${tr('(오류·중지로 끝난 답 {n}개 포함)', { n: r.answerFails })}` : ''}`,
     `${tr('기준별 결과')}:`,
     ...(r.criteria || []).map((c) => `- ${c.id} ${verdictWord(tr, c.status)}: ${cut(c.text, 300)}${c.evidence ? `\n  ${tr('근거(에이전트가 씀)')}: ${c.evidence}` : ''}`),
   ];

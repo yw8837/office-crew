@@ -284,7 +284,7 @@ export function ReportCard({ m }) {
   const remember = async (on) => {
     if (busy) return;
     setBusy(true);
-    try { await post(`/api/sessions/${sid}/report/${m.id}/memory`, { on }); } catch (e) { toast(e.message, 'error'); }
+    try { const r = await post(`/api/sessions/${sid}/report/${m.id}/memory`, { on }); if (r?.notice) toast(r.notice, 'error'); } catch (e) { toast(e.message, 'error'); }
     setBusy(false);
   };
   const files = m.filesState === 'pending' ? html`<div class="small muted">${t('git 에 물어보는 중…')}</div>`
@@ -303,11 +303,11 @@ export function ReportCard({ m }) {
           : html`<button type="button" class="btn sm" disabled=${busy} onClick=${() => remember(true)}>${m.memory?.added ? t('기억에 다시 넣기') : t('기억에 넣기')}</button>`}
     </div>
     ${memOn && html`<div class="small muted">${inMem ? t('빼면 기억 검색에서 빠져(원문은 디스크에 남아).') : t('넣으면 이 작업 폴더의 다음 실행들이 참고 자료로 찾을 수 있어. 코드가 모은 사실과 기준별 결과만 넣고, 회의 결론·조사 노트는 넣지 않아.')}${m.local ? ` ${t('내 PC 모델만 받은 목표라 내 PC 모델 전용으로 넣어(클라우드 AI 에게는 안 줘).')}` : ''}</div>`}
-    ${open && html`<div id=${bodyId} class="report-body" role="region" aria-label=${t('완주 보고 자세히')}>
+    <div id=${bodyId} class="report-body" role="region" aria-label=${t('완주 보고 자세히')} hidden=${!open}>
       <div class="goal-sec"><div class="small muted"><b>${t('호출')}</b></div>
         <div class="small">${calls} · ${t('상한 {cap}번', { cap: m.calls?.cap ?? 0 })}</div>
-        <div class="small">${t('종류별 답 수')}: ${Object.keys(names).map((k) => `${names[k]} ${m.answers?.[k] || 0}`).join(' · ')}</div>
-        <div class="small muted">${t('메시지 표시로 센 답 수야. 다시 요청·이어받기는 한 답 안에서 호출이 더 들 수 있어.')}</div></div>
+        <div class="small">${t('종류별 답 수')}: ${Object.keys(names).map((k) => `${names[k]} ${m.answers?.[k] || 0}`).join(' · ')}${m.answerFails > 0 ? ` ${t('(오류·중지로 끝난 답 {n}개 포함)', { n: m.answerFails })}` : ''}</div>
+        <div class="small muted">${t('메시지 표시로 센 답 수야(오류·중지로 끝난 답도 들어가). 다시 요청·이어받기는 한 답 안에서 호출이 더 들 수 있어.')}</div></div>
       <div class="goal-sec"><div class="small muted"><b>${t('기준별 최종 판정')}</b></div>
         ${crit.length ? html`<div class="crit-table" role="list" aria-label=${t('기준별 최종 판정')}>${crit.map((c, i) => html`<${CritRow} c=${c} n=${i + 1} />`)}</div>` : html`<div class="small muted">${t('없음')}</div>`}</div>
       <div class="goal-sec"><div class="small muted"><b>${t('사용자가 확정한 것')}</b></div>
@@ -329,7 +329,7 @@ export function ReportCard({ m }) {
           ${x.dissent?.length > 0 && html`<div class="small">${t('남은 이견')}: ${x.dissent.join(' · ')}</div>`}
           ${x.msgId && html`<button type="button" class="btn ghost sm" onClick=${() => jump(x.msgId)}>${t('그 메시지로 가기')}</button>`}
         </div>`)}</div>`}
-    </div>`}
+    </div>
   </div></div>`;
 }
 

@@ -198,6 +198,8 @@ export class Store {
       for (const st of r.stages || []) if (st.status === 'running' || st.status === 'review') st.status = 'stopped';
     }
     for (const m of s.messages || []) if (m.status === 'streaming' || m.status === 'queued') { if (m.status === 'queued') m.cut = true; m.status = 'stopped'; }
+    // 완주 보고(결정 0025)의 바뀐 파일을 git 에 묻는 중에 앱이 꺼졌으면 카드에 "물어보는 중"이 남지 않게 못 채운 것으로
+    for (const m of s.messages || []) if (m.kind === 'report' && m.filesState === 'pending') m.filesState = 'none';
     cutMission(s); // 도는 중이던 목표는 끊김으로(저절로 다시 시작하지 않는다. 결정 0014)
     return s;
   }

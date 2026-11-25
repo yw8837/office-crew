@@ -920,23 +920,62 @@ export function cardTail(text) {
   return [...lines.slice(headAt(lines, TAIL_HEADS())).slice(0, 12).join('\n').trim()].slice(0, TAIL_MAX).join('');
 }
 
-// 꼬리의 "바꾼 파일" 칸에 적은 경로(결정 0025의 바꾼 파일 대조). 머리말 줄의 값과 "다음 카드가 알아야 할 것" 앞까지의 줄을 쉼표·줄로 나눠,
-// 항목마다 앞의 목록 기호·따옴표를 떼고 첫 낱말만, 경로처럼 보이는 것(/ \ . 이 든 것)만 적은 그대로. "없음" 같은 말은 빈 목록. FILES_COUNT 개까지
-export function tailFiles(text) {
+// 꼬리의 "바꾼 파일" 칸 읽기(결정 0025의 바꾼 파일 대조). 경고가 "코드가 확인한 것"으로 검수 자료에 들어가니, 확신이 없으면 판단하지 않게 unsure 를 같이 준다.
+// 머리말 줄의 값과 "다음 카드가 알아야 할 것" 앞까지의 줄을 줄·쉼표(전각·모점 포함)로 나눈 항목마다: 마크다운 링크면 그 경로, 백틱이 있으면 그 안,
+// 아니면 여는 괄호(（(「【[) 앞까지를 낱말로 나눠, 낱말마다 경로 글자 뒤에 붙은 한글 조사·한자·가나·전각 문장부호 꼬리와 끝의 줄 번호(:12, :3-9, #L4)를 지운 뒤
+// 경로처럼 보이는 것(구분자가 있거나 확장자가 있거나 점 파일·흔한 이름)만 적은 그대로. "없음" 같은 말은 빈 항목.
+// unsure: 경로를 하나도 못 읽은 항목이 있음 · "다음 카드가 알아야 할 것"이 없음(목록이 잘렸을 수 있음) · FILES_COUNT 개보다 많이 적음
+const CJK_TAIL = /^(.*[A-Za-z0-9_~@+\-])[　-ヿ㐀-䶿一-鿿가-힯＀-￯]+$/;
+const OPEN_BR = /[（(「【[『〔]/;
+const NONE_ITEM = /^[(（[「]?\s*(?:없음|없어|없다|없습니다|없어요|해당\s*없음|none|nothing|no\s+files?|n\/a|-|—|–|なし|無し|ありません|特になし|无|無|没有|暂无)\s*[)）\]」]?[.。!]?$/i;
+const NOT_PATH = /^(?:i\.e|e\.g|etc|vs|cf|a\.k\.a)$/i;
+const BARE_NAMES = /^(?:Makefile|Dockerfile|Containerfile|Procfile|Gemfile|Rakefile|Jenkinsfile|Vagrantfile|Brewfile|LICENSE|README|CHANGELOG|NOTICE|AUTHORS|CODEOWNERS)$/;
+const cleanPath = (w) => {
+  let p = String(w).trim().replace(/^[`'"“”‘’「『【〈《<(（[]+/, '');
+  for (let k = 0; k < 3; k++) {
+    p = p.replace(/[`'"“”‘’」』】〉》>)）\],.;:!?*]+$/, '').replace(CJK_TAIL, '$1').replace(/(?::\d+(?::\d+)?(?:-\d+)?|#L\d+(?:-L?\d+)?)$/, '');
+  }
+  return p;
+};
+const looksPath = (p) => {
+  if (!p || /^[\\/.]+$/.test(p) || /^[a-z][a-z0-9+.-]*:\/\//i.test(p) || /^www\./i.test(p) || NOT_PATH.test(p)) return false;
+  if (/[\\/]/.test(p)) return /[A-Za-z0-9À-￿]/.test(p);
+  if (/^\.[A-Za-z][\w.-]*$/.test(p)) return true; // .env 같은 점 파일
+  if (BARE_NAMES.test(p)) return true;
+  const dot = p.lastIndexOf('.');
+  return dot > 0 && /\D/.test(p.slice(0, dot)) && /^[A-Za-z][A-Za-z0-9_-]{0,9}$/.test(p.slice(dot + 1)); // 이름.확장자(v1.2·3.5 같은 숫자 끝은 아님)
+};
+const itemPaths = (item) => {
+  const links = [...item.matchAll(/\[[^\]]*\]\(\s*<?([^)\s>]+)>?/g)].map((x) => x[1].replace(/#.*$/, ''));
+  if (links.length) return links.map(cleanPath).filter(looksPath);
+  const ticks = [...item.matchAll(/`([^`]+)`/g)].map((x) => x[1].trim());
+  if (ticks.length) return ticks.map(cleanPath).filter(looksPath);
+  const body = item.replace(/^[`'"“”‘’「『【〈《<(（[]+/, ''); // 경로를 감싼 여는 괄호는 떼고, 뒤에 붙은 여는 괄호(덧붙인 설명) 앞에서 자른다
+  const at = body.search(OPEN_BR);
+  return (at >= 0 ? body.slice(0, at) : body).split(/\s+/).map(cleanPath).filter(looksPath);
+};
+export function tailClaims(text) {
   const lines = noBlocked(text).split('\n');
   const a = headAt(lines, TAIL_HEADS());
-  if (a < 0) return [];
+  if (a < 0) return { files: [], unsure: false };
   const nexts = TAIL_NEXT();
   const b = lines.findIndex((l, k) => k > a && headAt([l], nexts) === 0);
-  const first = lines[a].replace(/^[\s#>*_-]+/, '').replace(/^[^:：]*[:：]/, '');
+  const first = /[:：]/.test(lines[a]) ? lines[a].replace(/^[^:：]*[:：]/, '') : ''; // 머리말 뒤에 쌍점이 없으면 그 줄에는 값이 없다
   const out = [];
+  let unsure = b < 0;
   for (const raw of [first, ...lines.slice(a + 1, b < 0 ? undefined : b)].join('\n').split(/[\n,，、;；]/)) {
-    const s = raw.trim().replace(/^(?:[-*•·]|\d+[.)])\s+/, '').replace(/^[`'"“‘([]+/, '');
-    const w = (s.split(/\s+/)[0] || '').replace(/[`'"”’)\]:：.,]+$/, '');
-    if (w && /[\\/.]/.test(w) && !/^\.+$/.test(w)) out.push(w);
+    const item = raw.replace(/\*\*/g, '').trim().replace(/^(?:[-*+•·]|\d+[.)])\s+/, '').replace(/^\*+|\*+$/g, '').trim(); // _ 는 이름의 일부일 수 있어 떼지 않는다(_config.yml)
+    if (!item || NONE_ITEM.test(item)) continue;
+    const found = itemPaths(item);
+    if (!found.length) unsure = true;
+    out.push(...found);
   }
-  return [...new Set(out)].slice(0, FILES_COUNT);
+  const files = [...new Set(out)];
+  if (files.length > FILES_COUNT) unsure = true;
+  return { files: files.slice(0, FILES_COUNT), unsure };
 }
+// 적은 경로만(화면·기록용). 판단할지는 tailClaims 의 unsure 로
+export const tailFiles = (text) => tailClaims(text).files;
 
 // 막힘의 종류(결정 0022): 에이전트가 블록에 적는 선택 값. unclear 지시가 모호함 / input 넘겨받은 것이 틀림 / capability 권한·도구가 없음 / dependency 다른 일이 먼저 끝나야 함.
 // 모르는 값이나 없으면 unknown(코드가 지어내지 않는다)
@@ -1027,6 +1066,8 @@ export function logLine(m, kind, text, msgId = null, now = Date.now()) {
   }
   return line;
 }
+// 사용자가 고른 것을 적는 줄(결정 0025): by: 'user' 표시. 완주 보고의 "사용자가 확정한 것"은 이 표시가 있는 줄만 뽑는다(코드가 쓴 안내 줄은 빼고)
+export const userLine = (m, kind, text, msgId = null) => Object.assign(logLine(m, kind, text, msgId), { by: 'user' });
 
 // ── 끊긴 목표 이어서(결정 0016) ──
 // 지금 팀으로 다시 만든 목표 일 실행의 단계표(a)가 끊긴 실행의 단계표(b)와 어디서 다른가. 같으면 null.

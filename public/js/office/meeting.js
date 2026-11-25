@@ -38,10 +38,10 @@ const HEADS = {
 const headRe = (words) => new RegExp(`^\\s*(?:[-*+•]\\s+|\\d+[.)]\\s+)?(?:\\*\\*|__)?\\s*(?:${words.join('|')})\\s*(?:\\*\\*|__)?\\s*[:：]\\s*(?:\\*\\*|__)?\\s*(.*)$`, 'i');
 const HEAD_RE = Object.fromEntries(Object.entries(HEADS).map(([k, words]) => [k, headRe(words)]));
 const DECISION = HEAD_RE.decision;
-// 이 줄이 어느 칸의 머리말인가 → [칸, 같은 줄의 값] 또는 null
-const headOf = (line) => { for (const [k, re] of Object.entries(HEAD_RE)) { const m = line.match(re); if (m) return [k, m[1]]; } return null; };
-// "없음"(네 언어): 그 칸은 빈 목록
-const NONE = /^(?:없음|없어|없다|none|nothing|n\/a|-|—|なし|無し|ない|无|無|没有)[.。]?$/i;
+// 이 줄이 어느 칸의 머리말인가 → [칸, 같은 줄의 값] 또는 null. 머리말은 들여 쓰지 않은 줄에서만(들여 쓴 항목 안의 "Why:" 같은 글은 그 칸의 항목이다)
+const headOf = (line) => { if (!/^\S/.test(line)) return null; for (const [k, re] of Object.entries(HEAD_RE)) { const m = line.match(re); if (m) return [k, m[1]]; } return null; };
+// "없음"(네 언어, 괄호로 감싸거나 끝에 마침표가 있어도): 그 칸은 빈 값
+const NONE = /^[(（]?\s*(?:없음|없어|없다|없습니다|없어요|해당\s*없음|none|nothing|n\/a|-|—|–|なし|無し|ない|ありません|特になし|无|無|没有|暂无)\s*[)）]?[.。!]?$/i;
 // 마크다운 표시를 뺀 한 줄 글
 const plain = (s) => String(s)
   .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
@@ -52,15 +52,15 @@ const plain = (s) => String(s)
   .trim();
 
 /**
- * 결론 메시지 글 → 게시판 카드 글. "결정" 줄의 글, 없으면 첫 글줄(제목 줄은 다른 글이 없을 때만).
+ * 결론 메시지 글 → 게시판 카드 글. 마지막 "결정" 줄(들여 쓰지 않은 줄. 결론 앞 요약에 나온 결정 줄보다 결론 형식의 것)의 글, 없으면 첫 글줄(제목 줄은 다른 글이 없을 때만).
  * max 글자(그림 글자도 한 글자)를 넘으면 잘라서 "…"를 붙인다. 쓸 글이 없으면 ''
  */
 export function cardText(text, max = 30) {
   const lines = String(text || '').split(/\r?\n/);
   let pick = '';
   for (const line of lines) {
-    const m = line.match(DECISION);
-    if (m && plain(m[1])) { pick = plain(m[1]); break; }
+    const m = /^\S/.test(line) && line.match(DECISION);
+    if (m && plain(m[1])) pick = plain(m[1]);
   }
   if (!pick) {
     let heading = '';
@@ -81,25 +81,30 @@ export function cardText(text, max = 30) {
 /**
  * 회의 결론 글 → 다섯 칸 { decision, reasons[], dissent[], dropped[], next[] }(결정 0025). 머리말 줄의 값과, 그 아래 들여 쓴 줄(목록이면 항목마다).
  * 들여 쓰지 않은 다른 줄이나 다음 머리말에서 끝난다. "없음"은 빈 목록. 머리말을 못 찾은 칸은 비운다(지어내지 않는다).
- * 마크다운 표시는 빼고 글만(한 줄로 펴고 자르는 건 부르는 쪽이 한다)
+ * 머리말은 들여 쓰지 않은 줄에서만 읽고, 결론 형식의 마지막 묶음(끝에서부터 거슬러 같은 칸이 다시 나오기 전까지 이어진 머리말들)만 쓴다
+ * (결론 앞 요약에 "결정:" 같은 줄이 먼저 있어도 그걸 가져오지 않게). 마크다운 표시는 빼고 글만(한 줄로 펴고 자르는 건 부르는 쪽이 한다)
  */
 export function conclusionParts(text) {
   const out = { decision: '', reasons: [], dissent: [], dropped: [], next: [] };
+  const lines = String(text || '').split(/\r?\n/);
+  const heads = [];
+  lines.forEach((line, i) => { const h = headOf(line); if (h) heads.push({ i, key: h[0], first: h[1] }); });
+  const seen = new Set();
+  let from = heads.length;
+  for (let k = heads.length - 1; k >= 0 && !seen.has(heads[k].key); k--) { seen.add(heads[k].key); from = k; }
   const got = {};
-  let cur = null;
-  for (const line of String(text || '').split(/\r?\n/)) {
-    const h = headOf(line);
-    if (h) {
-      cur = got[h[0]] ? null : (got[h[0]] = { first: plain(h[1]), items: [] }); // 같은 칸이 두 번이면 첫 번째만
-      continue;
+  for (let g = from; g < heads.length; g++) {
+    const cur = got[heads[g].key] = { first: plain(heads[g].first), items: [] };
+    const end = g + 1 < heads.length ? heads[g + 1].i : lines.length;
+    for (let j = heads[g].i + 1; j < end; j++) {
+      const line = lines[j];
+      if (!line.trim()) continue;
+      if (!/^\s/.test(line)) break; // 들여 쓰지 않은 줄에서 그 칸이 끝난다
+      const item = /^\s*(?:[-*+•]\s+|\d+[.)]\s+)/.test(line);
+      const t = plain(line);
+      if (!t) continue;
+      if (item || !cur.items.length) cur.items.push(t); else cur.items[cur.items.length - 1] += ` ${t}`;
     }
-    if (!cur) continue;
-    if (!line.trim()) continue;
-    if (!/^\s/.test(line)) { cur = null; continue; } // 들여 쓰지 않은 줄에서 그 칸이 끝난다
-    const item = /^\s*(?:[-*+•]\s+|\d+[.)]\s+)/.test(line);
-    const t = plain(line);
-    if (!t) continue;
-    if (item || !cur.items.length) cur.items.push(t); else cur.items[cur.items.length - 1] += ` ${t}`;
   }
   const vals = (k) => (got[k] ? [got[k].first, ...got[k].items].filter((x) => x && !NONE.test(x)) : []);
   out.decision = vals('decision').join(' ');

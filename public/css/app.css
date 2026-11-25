@@ -549,6 +549,7 @@ pre.raw { background: var(--code-bg); padding: 10px 12px; border-radius: 10px; f
 .prep-qs { margin: 2px 0 0; padding-left: 20px; }
 /* 완주 보고 카드(목표 카드와 같은 틀. 펼친 자리, 바뀐 파일 목록) */
 .report-body { display: flex; flex-direction: column; gap: 10px; }
+.report-body[hidden] { display: none; }
 .report-body ul { overflow-wrap: anywhere; }
 .report-files { margin: 2px 0 0; padding-left: 20px; max-height: 12em; overflow: auto; }
 

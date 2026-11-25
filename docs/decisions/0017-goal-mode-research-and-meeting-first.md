@@ -6,7 +6,7 @@
 
 ## Revision (2026-11-26, with [0025](0025-goal-report-and-evidence.md))
 
-When a goal meeting (the pre-work meeting or a team meeting stage in a goal's work run) concludes, the code reads the five lines the conclusion prompt already asks for (decision, reasons, remaining disagreement, dropped options, next steps) into `mission.meetings`; a conclusion without them is kept as it is with empty fields. What the work stages get is unchanged (the whole conclusion as reference), the prompts are unchanged, and the conclusion still doesn't go into project memory: the goal report that can go there carries only the decision and the remaining disagreement on its card, not in its memory text.
+When a goal meeting (the pre-work meeting or a team meeting stage in a goal's work run) concludes, the code reads the five lines the conclusion prompt already asks for (decision, reasons, remaining disagreement, dropped options, next steps) into `mission.meetings`; a conclusion without them is kept as it is with empty fields. What the work stages get is unchanged (the whole conclusion as reference), the prompts are unchanged, and what goes into project memory is unchanged: the pre-work meeting's answers stay out (they are marked `prep`), while a team meeting stage's turns and conclusion in a goal's work run go in as before. The goal report, which goes into memory only when the user adds it, shows the decision and the remaining disagreement on its card, not in its memory text.
 
 ## Revision (2026-11-25, with [0022](0022-goal-mode-records-and-block-allow-list.md))
 

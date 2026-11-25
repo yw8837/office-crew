@@ -2205,7 +2205,7 @@ export default {
   "이유: {why}": "Why: {why}",
   "기록된 이유 없음": "no recorded reason",
   "한도 임박이라 조사 끔": "Research off: near the limit",
-  "넘겨받음": "Handed over",
+  "넘겨받음": "Missing input",
   "원인 모름": "Cause unknown",
   "지시가 모호함": "Unclear instruction",
   "넘겨받은 것이 틀림": "Wrong input",
@@ -2228,4 +2228,8 @@ export default {
   "{name}의 답에 이 대목({part})이 받지 않는 블록 {blocks}이(가) 있어서 그 블록은 읽지 않았어.": "{name}'s answer had a block this step ({part}) doesn't take, {blocks}, so that block was not read.",
   "{name}: 요청한 AI는 {asked}인데 {ran}(으)로 돌았어(이유: {why}).": "{name}: asked for {asked} but ran on {ran} (why: {why}).",
   "{name}의 AI({ai}) 사용량 한도가 거의 다 차서 인수인계 메모 먼저 쓰기를 건너뛰었어. 한도가 줄면 부가 일부터 멈춰.": "{name}'s AI ({ai}) is near its usage limit, so writing the handoff note first was skipped. When limits run low, side work stops first.",
+  "하루 예산 다 씀": "Daily budget used up",
+  "지운 계정": "Removed account",
+  "{name}: 요청한 AI({asked}) 그대로 돌았어(이유: {why}).": "{name}: ran on the AI asked for ({asked}) (why: {why}).",
+  "회의 중 조사를 끈 까닭이 풀려서 \"{label}\" 단계에서 다시 켰어.": "What turned research during the meeting off has cleared, so it is back on in the \"{label}\" stage.",
 };

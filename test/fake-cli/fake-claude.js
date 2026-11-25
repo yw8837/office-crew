@@ -175,7 +175,8 @@ async function pump() {
     return ['PLANANSWER 계획을 세웠어.\n\n', '```oc-cards\n' + JSON.stringify({ cards }) + '\n```'];
   })();
   const tailFor = (id) => `\n\n바꾼 파일: src/${id}.js\n다음 카드가 알아야 할 것: ${id} 꼬리 메모`;
-  // K2NOTAIL(k2 가 끝의 두 칸을 늘 빠뜨림) · TAILBLOCK(k1 이 끝의 두 칸을 빠뜨리고, 다시 쓰기 답은 막힘 블록으로 끝남) · BACKFAIL(되돌림에서 k1 이 늘 오류) · SLOWK1·SLOWTAIL(k1 차례·k1 의 다시 쓰기만 3초 늦게)
+  // K2NOTAIL(k2 가 끝의 두 칸을 늘 빠뜨림) · TAILBLOCK(k1 이 끝의 두 칸을 빠뜨리고, 다시 쓰기 답은 막힘 블록으로 끝남) · BACKFAIL(되돌림에서 k1 이 늘 오류) · SLOWK1·SLOWTAIL(k1 차례·k1 의 다시 쓰기만 3초 늦게) ·
+  // K2BLOCK(k2 도 막힘 블록으로 끝남: 뒤 카드의 막힘)
   const tailRetry = text.includes('[끝의 두 칸 다시 쓰기]');
   // BLOCKKIND:<값>: 막힘 블록(CARDBLOCK·WORKBLOCK)에 그 종류(kind)를 적는다(결정 0022). 없으면 kind 칸 없이(지금 형식)
   const blockKind = goalLine.match(/BLOCKKIND:(\S+)/)?.[1] || '';
@@ -183,6 +184,7 @@ async function pump() {
   const cardChunks = !cardId ? null
     : goalLine.includes('TAILBLOCK') && cardId === 'k1' ? (tailRetry ? ['다시 보니 안 돼.\n\n', '```oc-blocked\n{"reason":"가짜 막힘: 꼬리 쓰다 막힘"}\n```'] : [`CARDANSWER-${cardId} 카드 일 했어.`])
     : goalLine.includes('K2NOTAIL') && cardId === 'k2' ? (tailRetry ? ['여전히 안 적어.'] : [`CARDANSWER-${cardId} p${process.pid} 카드 일 했어.`])
+    : goalLine.includes('K2BLOCK') && cardId === 'k2' ? [`CARDANSWER-${cardId} 해 보니 안 돼.\n\n`, blockedJson('가짜 막힘: k2 도 막힘')]
     : goalLine.includes('CARDBLOCK') && cardId === 'k1' ?[`CARDANSWER-${cardId} 해 보니 안 돼.\n\n`, blockedJson('가짜 막힘: 기준 1을 지킬 수 없어')]
       : text.includes('[끝의 두 칸 다시 쓰기]') ? [goalLine.includes('CARDNOTAIL1') || cardId !== 'k1' ? tailFor(cardId).trim() : '여전히 안 적어.']
         : (goalLine.includes('CARDNOTAIL') && cardId === 'k1') ? [`CARDANSWER-${cardId} 카드 일 했어.`]

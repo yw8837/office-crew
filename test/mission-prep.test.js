@@ -394,6 +394,7 @@ test('4. 조사 한 갈래가 실패·빈 답이어도 나머지는 계속하고
   assert.deepEqual([note.total, note.missing, note.questions[0].excerpt, note.questions[0].status], [3, 1, '', 'failed']);
   assert.equal(S(sid).runs.at(-1).stages[2].note, '확인 못 함 1개');
   assert.ok(m.log.some((x) => x.text === '조사 노트: 질문 3개 · 확인 못 함 1개'));
+  assert.equal(m.log.find((x) => x.text === '조사 노트: 질문 3개 · 확인 못 함 1개').fail, 'unknown', '한도가 아닌 오류로 못 한 질문: 원인 모름(결정 0022)');
   const work = workPrompt(from, '빌드');
   assert.ok(work.includes('질문 3개 중 1개 확인 못 함.') && work.includes('질문: 가짜 질문 1: 요강과 조건은?\n\n확인 못 함: 조사가 오류로 끝났어.') && work.includes('가짜 조사 q2: 찾은 사실이야'));
   assert.equal(m.calls.used, FULL, '실패한 갈래도 호출 1번');
@@ -403,6 +404,7 @@ test('4. 조사 한 갈래가 실패·빈 답이어도 나머지는 계속하고
   await done(e);
   const me = S(e).mission;
   assert.deepEqual([me.status, me.research.questions.map((q) => q.status)], ['done', ['empty', 'done', 'done']]);
+  assert.equal(me.log.find((x) => x.kind === 'prep' && x.text.startsWith('조사 노트:')).fail, undefined, '빈 답은 오류가 아니라 종류를 붙이지 않는다');
   assert.equal(me.calls.used, FULL + 1);
   const retry = calls(from2).find((c) => c.texts[0]?.startsWith('[조사 — 질문 1/3]') && c.texts[0].includes('[중요] 도구를 더 쓰지 말고'));
   assert.ok(retry && !retry.args.includes('--resume'), '빈 답 다시 요청도 같은 한 번 실행 프롬프트로');

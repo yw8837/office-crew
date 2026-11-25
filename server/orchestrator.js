@@ -49,7 +49,7 @@ const notTalk = (m, s = null) => !!m.prep || (!!m.once && !!m.meeting) || (!!m.c
 const aiOf = (a) => ({ provider: String(a?.provider || ''), model: String(a?.model || ''), effort: String(a?.effort || '') });
 const sameAi = (a, b) => a.provider === b.provider && a.model === b.model && a.effort === b.effort;
 const aiText = (r) => (r.provider === 'auto' ? tr('자동 라우팅') : [PROVIDERS[r.provider]?.label || r.provider, r.model, r.effort].filter(Boolean).join(' · '));
-const WHY = () => ({ auto: tr('자동 라우팅'), 'near-limit': tr('한도 임박'), 'daily-pace': tr('하루 예산 속도'), takeover: tr('이어받기'), 'wait-reset': tr('한도 풀림 기다림') });
+const WHY = () => ({ auto: tr('자동 라우팅'), 'near-limit': tr('한도 임박'), 'daily-budget': tr('하루 예산 다 씀'), 'daily-pace': tr('하루 예산 속도'), takeover: tr('이어받기'), 'wait-reset': tr('한도 풀림 기다림'), 'account-gone': tr('지운 계정') });
 
 // 회의 단계 설정 정리: 참석자가 둘 이상일 때만 회의다. 바퀴 1~3(기본 2), 진행자는 참석자 중 한 명(기본 첫 번째),
 // 사용량 상한은 토큰(기본 1,000,000, 0 = 없음). 값이 없거나 숫자가 아니면 기본값을 쓴다.
@@ -593,7 +593,9 @@ export class Orchestrator {
       const base = at.back && st.meeting ? [st.agentIds.includes(String(m.leadId)) ? String(m.leadId) : st.agentIds[0]] : st.agentIds;
       const quotaCap = at.wait?.reason === 'cap' && at.wait.quota;
       const again = quotaCap && at.wait.failed ? at.wait.failed.map((f) => f.agentId).filter((id) => base.map(String).includes(id)) : base;
-      stage = { ids: again.filter((id) => !doneIds.has(String(id))), keep: kept, ...(quotaCap ? { quota: true } : {}) };
+      // blockedCut: 막힘 대기(결정 0018)에서 끊겼다. 끝낸 답은 이미 판정해서 진행 기록에 적었다(같은 줄을 다시 적지 않게, 결정 0022)
+      const blockedCut = at.wait?.reason === 'mission' && at.wait.kind === 'blocked';
+      stage = { ids: again.filter((id) => !doneIds.has(String(id))), keep: kept, ...(quotaCap ? { quota: true } : {}), ...(blockedCut ? { blockedCut: true } : {}) };
     }
     // 다시 돌지 않는 단계의 표시: 끊긴 실행에서 끝났거나 건너뛴 그대로, 아니면 결과를 찾았는지로(준비 대목은 끝난 것으로). 판정 뒤 묻기에서 끊겼으면 기준 판정 단계도
     const keepStatus = (k) => (['done', 'skipped'].includes(cutRun.stages[k]?.status) ? cutRun.stages[k].status : isPrep(plan.stages[k]) || outputs[k]?.length ? 'done' : 'skipped');
@@ -1208,7 +1210,7 @@ export class Orchestrator {
     st.status = ok ? 'done' : 'skipped';
     const line = logLine(m, 'prep', ok ? tr('훑어보기 끝.') : r.error ? tr('훑어보기가 오류로 끝났어. 훑어본 글 없이 조사 질문을 뽑아.')
       : r.stopped ? tr('훑어보기를 건너뛰었어. 훑어본 글 없이 조사 질문을 뽑아.') : tr('훑어보기가 빈 답이었어. 훑어본 글 없이 조사 질문을 뽑아.'), msg?.id || null);
-    if (r.error && isQuotaError(r.error)) line.fail = 'outside';
+    if (r.error) line.fail = isQuotaError(r.error) ? 'outside' : 'unknown'; // 실패의 종류(결정 0022): 한도 오류는 바깥 장애, 그 밖 오류는 원인 모름
     this.#emitRun(ctx);
     this.emitMission(ctx.s);
   }
@@ -1228,9 +1230,10 @@ export class Orchestrator {
     const scan = scanMsg ? { name: name(scanMsg.agentId), text: scanMsg.text } : null;
     let got = null;
     let quota = false;
+    let erred = false; // 한도가 아닌 오류로 끝났다(진행 기록의 원인 모름, 결정 0022)
     for (let n = 0; n < 2 && !ctx.stopped; n++) {
       const { r, msg } = await this.#prepOnce(ctx, i, lead, questionsPrompt({ ...this.#prepArgs(ctx), scan, retry: n > 0 }), { kind: 'questions', ...(n ? { retried: true } : {}) });
-      if (ctx.stopped || r.error || r.stopped) { quota = !!r.error && isQuotaError(r.error); break; }
+      if (ctx.stopped || r.error || r.stopped) { quota = !!r.error && isQuotaError(r.error); erred = !!r.error && !quota; break; }
       const p = msg ? parseResearch(msg.text) : null;
       if (p && !p.error) {
         got = p.questions;
@@ -1257,6 +1260,7 @@ export class Orchestrator {
     const line = logLine(m, 'prep', got ? tr('조사 질문 {n}개를 뽑았어.', { n: qs.length }) : tr('조사 질문을 받지 못해서 질문 하나("이 목표를 이루려면 먼저 알아야 할 사실")로 조사해.'),
       s.messages.findLast((x) => x.role === 'agent' && x.runId === run.id && x.stageIndex === i)?.id || null);
     if (quota) line.fail = 'outside';
+    else if (erred) line.fail = 'unknown';
     this.#emitRun(ctx);
     this.emitMission(s);
   }
@@ -1335,7 +1339,9 @@ export class Orchestrator {
     m.research.noteMsgId = card.id;
     this.bus.emit('message', { sessionId: s.id, message: card });
     const line = logLine(m, 'prep', tr('조사 노트: 질문 {n}개 · 확인 못 함 {m}개', { n: qs.length, m: miss }), card.id);
+    // 실패의 종류(결정 0022): 한 줄에 하나라서 한도로 못 한 질문이 있으면 바깥 장애, 그 밖 오류로 못 한 질문만 있으면 원인 모름
     if (qs.some((q) => q.outside)) line.fail = 'outside';
+    else if (qs.some((q) => q.status === 'failed')) line.fail = 'unknown';
     this.store.saveSession(s, 50);
     this.emitMission(s);
   }
@@ -1408,11 +1414,12 @@ export class Orchestrator {
     let retry = '';
     let missing = [];
     let quota = false;
+    let erred = false; // 한도가 아닌 오류로 끝났다(진행 기록의 원인 모름, 결정 0022)
     let lastMsg = null;
     for (let n = 0; n < 2 && !ctx.stopped; n++) {
       const { r, msg } = await this.#prepOnce(ctx, i, lead, planPrompt({ ...this.#prepArgs(ctx), roster, refs, retry, missing }), { kind: 'plan', ...(n ? { retried: true } : {}) });
       if (msg) lastMsg = msg;
-      if (ctx.stopped || r.error || r.stopped) { quota = !!r.error && isQuotaError(r.error); break; }
+      if (ctx.stopped || r.error || r.stopped) { quota = !!r.error && isQuotaError(r.error); erred = !!r.error && !quota; break; }
       const p = msg ? parsePlan(msg.text) : null;
       if (p && !p.error) {
         msg.planBlock = { from: p.from, to: p.to }; // 화면이 그 자리를 감추고 계획 카드로 보여 준다
@@ -1462,6 +1469,7 @@ export class Orchestrator {
     if (!got) st.note = tr('카드 하나로');
     const line = logLine(m, 'plan', got ? tr('계획: 일 카드 {n}장 · {w}', { n: m.cards.length, w: wavesLine(waves) }) : tr('계획 블록을 받지 못해서 카드 하나("목표를 이루는 일")로 일해.'), card.id);
     if (quota) line.fail = 'outside';
+    else if (erred) line.fail = 'unknown';
     for (const x of reassigned) logLine(m, 'plan', tr('{id}의 담당 "{from}"이(가) 팀 명단에 없어서 {to}에게 맡겼어.', { id: x.id, from: x.from || '?', to: x.to }));
     const solo = m.cards.filter((c) => soloCard(c) && m.cards.length > 1).map((c) => c.id);
     if (solo.length) logLine(m, 'plan', tr('파일을 안 적은 만들기·글 카드라 혼자 돌아: {ids}', { ids: solo.join(', ') }));
@@ -1589,8 +1597,9 @@ export class Orchestrator {
 
   // 카드 단계 결과 정리: 카드마다 상태(끝·막힘·구멍·건너뜀)와 답 메시지. 끝의 두 칸(바꾼 파일·다음 카드가 알아야 할 것)이 없으면 한 번 다시 요청하고,
   // 그래도 없으면 "구멍"(통과로 세지 않는다. 결과는 뒤 카드와 검수에 그대로 간다). 다시 쓴 답이 막힘 블록으로 끝나면 그 카드는 막힘이다.
-  // 넘겨 쓰는 결과(carried: "한 번 더"로 다시 돌지 않은 카드, limited: 되풀이 상한을 받아들인 카드)는 정해진 상태 그대로 둔다(다시 검사하지 않는다)
-  async #cardsAfter(ctx, i, back = false) {
+  // 넘겨 쓰는 결과(carried: "한 번 더"로 다시 돌지 않은 카드, limited: 되풀이 상한을 받아들인 카드)는 정해진 상태 그대로 둔다(다시 검사하지 않는다).
+  // cut: 막힘 대기에서 끊겼다 이어서 할 때 끊기기 전에 판정한 답의 메시지 id(결정 0022). 그 카드도 정해진 상태 그대로(진행 기록에 이미 적었다)
+  async #cardsAfter(ctx, i, back = false, cut = null) {
     const { s, run } = ctx;
     const m = ctx.mission;
     const st = run.stages[i];
@@ -1603,7 +1612,7 @@ export class Orchestrator {
       const c = (m.cards || []).find((x) => x.id === id);
       if (!c) continue;
       const mine = res.filter((r) => String(r.agent?.id) === c.ownerId);
-      if (!mine.length || mine.some((r) => r.limited || r.carried)) continue;
+      if (!mine.length || mine.some((r) => r.limited || r.carried || cut?.has(r.msgId))) continue;
       judged.add(c.id);
       const r = mine.at(-1);
       const msg = findMsg(r.msgId) || s.messages.findLast((x) => x.role === 'agent' && x.runId === run.id && x.stageIndex === i && String(x.agentId) === c.ownerId && !x.cardTail);
@@ -1688,16 +1697,18 @@ export class Orchestrator {
   }
 
   // 막혔다(oc-blocked): 기준 판정으로 넘기지 않고 묻는다(판정 질문 틀, 이유를 같이 보여 준다). 받아들이기 = 막힌 담당·카드만 빼고(카드는 구멍, 사유 막힘) 나머지 결과로 검수까지 /
-  // 한 번 더 = 막힌 사람만 다시 / 그만
-  async #blockedAsk(ctx, i, items, back = false) {
+  // 한 번 더 = 막힌 사람만 다시 / 그만.
+  // seen: 막힘 대기에서 끊겼다 이어서 같은 질문을 다시 물을 때 끊기기 전에 판정한 답의 메시지 id(그 막힘 줄과 묻는 줄은 이미 적었다. 결정 0022)
+  async #blockedAsk(ctx, i, items, back = false, seen = null) {
     const m = ctx.mission;
     m.status = 'waiting';
-    for (const b of items) {
+    const fresh = items.filter((b) => !seen?.has(b.msgId));
+    for (const b of fresh) {
       const line = logLine(m, 'blocked', b.card ? tr('막힘: {id}({name}) — {reason}', { id: b.card, name: b.name, reason: b.reason }) : tr('막힘: {name} — {reason}', { name: b.name, reason: b.reason }), b.msgId || null);
       line.fail = 'blocked';
       line.agentKind = b.kind || 'unknown'; // 에이전트가 블록에 적은 종류(화면이 "에이전트가 적음"으로 보인다. 결정 0022)
     }
-    logLine(m, 'ask', tr('기준을 지킬 수 없다는 답이 와서 기준 판정으로 넘기지 않고 물어봤어.'));
+    if (fresh.length) logLine(m, 'ask', tr('기준을 지킬 수 없다는 답이 와서 기준 판정으로 넘기지 않고 물어봤어.'));
     this.emitMission(ctx.s);
     this.#missionAt(ctx, { ...m.at, stageIndex: i, phase: 'work', back, working: [], wait: { reason: 'mission', kind: 'blocked' } });
     const d = await this.#hold(ctx, 'waiting', { reason: 'mission', kind: 'blocked', stageIndex: i, blocked: items, left: this.#leftCriteria(m) });
@@ -1732,6 +1743,8 @@ export class Orchestrator {
     const st = run.stages[i];
     let ids = back && st.meeting ? [st.agentIds.includes(String(m.leadId)) ? String(m.leadId) : st.agentIds[0]] : null;
     let first = resume;
+    // 막힘 대기에서 끊겼다 이어서 하는 첫 바퀴(결정 0022): 끊기기 전에 판정한 답(메시지 id). 그 카드는 다시 판정하지 않고, 그 막힘은 진행 기록에 다시 적지 않는다(질문만 다시)
+    let cut = resume?.blockedCut ? new Set((resume.keep || []).flatMap((o) => [o.msgId, o.tailMsgId]).filter(Boolean)) : null;
     // 막혀서(oc-blocked, 결정 0018) "한 번 더"를 고르면 막힌 사람만 다시 돈다(나머지 답은 넘겨 쓰는 결과로 그대로)
     for (let pass = 0; ; pass++) {
       // 일 카드 단계: 이번에 돌릴 카드의 되풀이 상한·시간당 시작 수를 먼저 본다(돌리지 않는 카드는 이전 결과 그대로). 시작 수는 호출 상한까지 통과한 뒤에 센다
@@ -1756,12 +1769,14 @@ export class Orchestrator {
       if (ctx.resumeAt?.stageIndex === i) ctx.resumeAt = null; // [이어서] 한 줄은 끊긴 단계에만(뒤 단계에는 안 붙인다)
       if (ctx.stopped) { st.status = st.status === 'done' ? 'done' : 'stopped'; return; }
       if (st.mission === 'cards') {
-        await this.#cardsAfter(ctx, i, back);
+        await this.#cardsAfter(ctx, i, back, cut);
         if (ctx.stopped) { st.status = st.status === 'done' ? 'done' : 'stopped'; return; }
       }
       const blocked = this.#blockedOf(ctx, i);
+      const seen = cut;
+      cut = null; // 다시 도는 바퀴("한 번 더")부터는 새 판정이다
       if (!blocked.length) break;
-      const d = await this.#blockedAsk(ctx, i, blocked, back);
+      const d = await this.#blockedAsk(ctx, i, blocked, back, seen);
       if (d === 'stop') { st.status = st.status === 'done' ? 'done' : 'stopped'; return; }
       if (d === 'accept') break; // 막힌 일만 빼고 다음 단계·판정으로(받아들인 막힘은 그 답 메시지에 표시돼 있다)
       const again = blocked.map((b) => b.agentId);
@@ -2069,6 +2084,7 @@ export class Orchestrator {
         : why === 'skipped' ? tr('검수 {n}회차: 검수자를 건너뛰어서 판정 없이 끝남', words) : tr('검수 {n}회차: 검수가 오류로 끝나서 판정 없이 끝남', words), last?.id || null);
     if (got && t.fail) line.fail = 'review';
     else if (why === 'outside') line.fail = 'outside';
+    else if (why === 'error') line.fail = 'unknown'; // 한도가 아닌 오류로 판정 없이 끝남(결정 0022)
     else if (why === 'format') line.fail = 'hole'; // 형식을 두 번 놓친 판정은 구멍(통과로 세지 않는다. 기준은 모두 확인 못 함)
     for (const x of m.extras) logLine(m, 'extra', tr('남은 일(기준 밖, 막지 않음): {text}', { text: x }), last?.id || null);
     for (const x of m.keepBroken) logLine(m, 'keep', tr('지키기로 한 것을 어김: {text}', { text: x }), last?.id || null).fail = 'keep';
@@ -2125,25 +2141,24 @@ export class Orchestrator {
     const progress = (now) => { st.meetingNow = opposer ? { ...now, opposerId: opposer } : now; this.#emitRun(ctx); };
     const said = []; // 이번 회의에서 나온 글 [{ agent, text, round, phase, question? }](조사 결과는 phase 'research')
     let checks = 0; // 이번 회의에서 조사하러 간 수
-    // 목표 실행(결정 0017): 남은 호출이 상한의 4분의 1 아래면 회의 중 조사를 끈다(부가 일부터 멈춘다). 진행 기록에는 회의마다 한 줄.
-    // 조사 담당의 AI(직접 정한 AI. 자동 라우팅이면 어디로 갈지 몰라서 보지 않는다)의 구독 한도가 임박이어도 끈다(결정 0022, 실행 전에 다른 AI 로 피하는 기준과 같다)
+    // 목표 실행(결정 0017): 남은 호출이 상한의 4분의 1 아래면 회의 중 조사를 끈다(부가 일부터 멈춘다).
+    // 조사 담당의 AI(직접 정한 AI. 자동 라우팅이면 어디로 갈지 몰라서 보지 않는다)의 구독 한도가 임박이어도 끈다(결정 0022, 실행 전에 다른 AI 로 피하는 기준과 같다).
+    // 차례를 시작할 때와 질문이 올 때마다 다시 판단하고, 끈 이유가 바뀌거나 다시 켜지면 진행 기록에 한 줄(같은 이유가 이어지면 줄을 더하지 않는다)
     const mission = ctx.missionTurn === 'work' && ctx.mission?.calls ? ctx.mission : null;
-    let lowSaid = false;
-    let lowWhy = ''; // 'low' 남은 호출이 적음 | 'near' 조사 담당 AI 한도 임박
+    let lowWhy = ''; // 지금 끈 이유: 'low' 남은 호출이 적음 | 'near' 조사 담당 AI 한도 임박 | '' 켜짐
     const low = () => {
       if (!mission) return false;
       const ra = researcher ? agentsById[researcher] : null;
       const rpv = ra && ra.routing !== 'auto' ? ra.provider : '';
       const why = (mission.calls.cap - mission.calls.used) * 4 < mission.calls.cap ? 'low' : this.#nearLimit(rpv) ? 'near' : '';
-      if (!why) return false;
-      if (!lowSaid) {
-        lowSaid = true;
-        lowWhy = why;
+      if (why !== lowWhy) {
         logLine(mission, 'note', why === 'low' ? tr('남은 호출이 상한의 4분의 1 아래라서 "{label}" 단계에서는 회의 중 조사를 껐어(호출 {used} / {cap}).', { label: st.label, used: mission.calls.used, cap: mission.calls.cap })
-          : tr('조사 담당 {name}의 AI({ai}) 사용량 한도가 거의 다 차서 "{label}" 단계에서는 회의 중 조사를 껐어.', { name: ra?.name || researcher, ai: PROVIDERS[rpv]?.label || rpv, label: st.label }));
+          : why === 'near' ? tr('조사 담당 {name}의 AI({ai}) 사용량 한도가 거의 다 차서 "{label}" 단계에서는 회의 중 조사를 껐어.', { name: ra?.name || researcher, ai: PROVIDERS[rpv]?.label || rpv, label: st.label })
+            : tr('회의 중 조사를 끈 까닭이 풀려서 "{label}" 단계에서 다시 켰어.', { label: st.label }));
+        lowWhy = why;
         this.emitMission(s);
       }
-      return true;
+      return !!why;
     };
     ctx.meet = new Map();
     ctx.meetSeen = new Set(); // 이번 회의의 앞 차례를 자기 CLI 대화로 기억하는 참석자
@@ -2542,14 +2557,14 @@ export class Orchestrator {
     if (agent.routing !== 'auto') {
       // 직접 설정한 AI가 쉬는 중이거나 한도가 거의 찼으면, 이번 실행만 같은 역할의 다른 AI에게 맡긴다(대안이 없으면 그대로 시도)
       let opts = this.#foOpts(budgetOpt);
-      const near = this.cooldown.active(agent.provider) || nearLimit(opts.limits[agent.provider], opts.threshold);
+      let near = this.cooldown.active(agent.provider) || nearLimit(opts.limits[agent.provider], opts.threshold);
       if (!fo || !PROVIDERS[agent.provider] || !(near || opts.overBudget?.has(agent.provider))) return { agent, note: null, error: null };
       // 한도가 설정한 시간 안에 풀리면 넘기지 않고 그때까지 기다렸다가 같은 AI로 한다(실행을 시작할 때 한 번만).
       // 중지면 실행하지 않고, 회의 끝내기·이 에이전트 건너뛰기면 이 차례를 건너뛴다. 일시정지는 기다림을 끝내지 않는다(지금처럼 단계 경계에서 걸린다).
       // 기다린 뒤에도 막혀 있으면 아래처럼 다른 AI에게
       const until = near ? this.#resetSoon(ctx, agent.provider, opts) : 0;
-      // why: 배정 기록의 이유 코드(결정 0022). 코드가 한 일만: 곧 풀려서 기다림(wait-reset), 한도 임박으로 다른 AI(near-limit).
-      // 하루 예산을 다 써서 다른 AI 로 바꾼 경우는 정해 둔 이유 코드가 없어 넣지 않는다
+      // why: 배정 기록의 이유 코드(결정 0022). 코드가 한 일만: 곧 풀려서 기다림(wait-reset), 한도 임박으로 다른 AI(near-limit),
+      // 하루 예산을 다 써서 다른 AI(daily-budget, 쉬는 AI 목록의 이유와 같은 이름). 둘 다 맞으면 둘 다 적는다
       const waitedFor = [];
       if (until) {
         const m = Math.max(1, Math.ceil((until - Date.now()) / 60000));
@@ -2561,13 +2576,16 @@ export class Orchestrator {
         if (!this.cooldown.active(agent.provider) && !knownReset(opts.limits[agent.provider], opts.threshold) && !opts.overBudget?.has(agent.provider)) {
           return { agent, note: null, error: null, why: waitedFor, waited: `⏳ ${tr('{name}의 한도가 {m}분 뒤에 풀려서 기다렸다가 같은 AI로 이어 갔어.', { name: PROVIDERS[agent.provider]?.label || agent.provider, m })}` };
         }
+        // 기다린 뒤에도 막혀 있다: 왜 막혔는지는 기다린 뒤의 값으로 본다(바로 위와 같은 기준. 한도는 풀리고 하루 예산만 남았으면 한도 임박이 아니다)
+        near = !!this.cooldown.active(agent.provider) || !!knownReset(opts.limits[agent.provider], opts.threshold);
       }
+      const budget = !!opts.overBudget?.has(agent.provider);
       try {
         const fb = pickFallback(agent, await this.providers.catalog(), opts);
         if (!fb) return { agent, note: null, error: null, why: waitedFor };
         const from = PROVIDERS[agent.provider]?.label || agent.provider;
         const words = { from, to: PROVIDERS[fb.provider]?.label || fb.provider, model: fb.modelLabel };
-        return { agent: { ...agent, provider: fb.provider, model: fb.model, effort: fb.effort }, why: [...waitedFor, ...(near ? ['near-limit'] : [])], note: `⚡ ${near ? tr('{from} 사용량이 거의 다 차서 이번엔 {to}({model})가 맡아.', words) : tr('{from}의 오늘 예산을 다 써서 이번엔 {to}({model})가 맡아.', words)}`, error: null };
+        return { agent: { ...agent, provider: fb.provider, model: fb.model, effort: fb.effort }, why: [...waitedFor, ...(near ? ['near-limit'] : []), ...(budget ? ['daily-budget'] : [])], note: `⚡ ${near ? tr('{from} 사용량이 거의 다 차서 이번엔 {to}({model})가 맡아.', words) : tr('{from}의 오늘 예산을 다 써서 이번엔 {to}({model})가 맡아.', words)}`, error: null };
       } catch { return { agent, note: null, error: null, why: waitedFor }; }
     }
     this.#state(ctx.s.id, agent.id, 'thinking', tr('자동 라우팅 중…'));
@@ -2637,8 +2655,11 @@ export class Orchestrator {
     const researchTurn = ['scan', 'research'].includes(given?.prep?.kind) || (goalMeetTurn && ctx.meet.get(agentId).phase === 'research');
     // 일 카드의 계획 대목(결정 0018)도 조사 질문처럼 그 실행만 읽기 전용
     if (base && (researchTurn || goalMeetTurn || given?.prep?.kind === 'questions' || given?.prep?.kind === 'plan')) base = { ...base, permission: 'plan', readOnlyRun: researchTurn ? 'research' : 'talk' };
-    // 뺀 Codex 계정을 가리키는 에이전트는 기본 Codex 로 실행한다
-    if (base && /^codex-[a-z0-9]+$/.test(base.provider || '') && !PROVIDERS[base.provider]) base = { ...base, provider: 'codex' };
+    // 배정 기록의 "요청한 AI"(결정 0022)는 아래에서 바꾸기 전의 설정으로 적는다
+    const asked = base;
+    // 뺀 Codex 계정을 가리키는 에이전트는 기본 Codex 로 실행한다(배정 기록의 이유: 지운 계정 account-gone)
+    const gone = !!base && /^codex-[a-z0-9]+$/.test(base.provider || '') && !PROVIDERS[base.provider];
+    if (gone) base = { ...base, provider: 'codex' };
     const routed = await this.#route(ctx, stageIdx, base, once?.phase || null);
     // 라우팅(모델 목록 읽기·한도가 풀리길 기다리기)을 기다리는 사이에 중지됐으면 시작하지 않는다. 회의 끝내기·건너뛰기로 기다림이 끝났으면 이 차례를 건너뛴다
     if (ctx.stopped || routed.cut) {
@@ -2650,7 +2671,7 @@ export class Orchestrator {
     const { agent, note: budgetNote } = routed.error ? { agent: routed.agent, note: null } : this.#pace(routed.agent, once?.phase || ctx.meet?.get(agentId)?.phase);
     const prov = agent && !routed.error && PROVIDERS[agent.provider];
     // 배정 기록(결정 0022): 에이전트 설정이 요청한 AI(자동 라우팅이면 auto), 실제로 돈 AI, 코드가 한 일의 이유 코드. 이어받으면 고친다(돌지 못한 답에는 없다)
-    const route = agent && prov ? { asked: base.routing === 'auto' ? { provider: 'auto', model: '', effort: '' } : aiOf(base), ran: aiOf(agent), why: [...(routed.why || []), ...(budgetNote ? ['daily-pace'] : [])] } : null;
+    const route = agent && prov ? { asked: asked.routing === 'auto' ? { provider: 'auto', model: '', effort: '' } : aiOf(asked), ran: aiOf(agent), why: [...(gone ? ['account-gone'] : []), ...(routed.why || []), ...(budgetNote ? ['daily-pace'] : [])] } : null;
     const msg = {
       id: newId('m'), role: 'agent', agentId, runId: run.id, stageIndex: stageIdx, stageLabel: run.stages[stageIdx].label,
       text: '', blocks: [], status: 'streaming', provider: agent?.provider, model: agent?.model, effort: agent?.effort,
@@ -2917,7 +2938,8 @@ export class Orchestrator {
 
   // 목표 실행(목표 차례·일 실행)의 답 하나가 끝났을 때 진행 기록에 남길 것(결정 0022):
   // (1) 그 대목(blockPart)이 받지 않는 블록이 답에 있으면 한 줄. 블록을 읽는 곳은 그대로라 그 블록은 읽히지 않는다(답의 나머지는 지금처럼 처리)
-  // (2) 요청한 AI와 실제로 돈 AI가 다르면 한 줄(이유 코드와 같이)
+  // (2) 배정에 "평소와 다른 일"이 있으면 한 줄(이유 코드와 같이): 이유에 auto 말고 다른 코드(한도 임박·하루 예산·하루 몫·이어받기·기다림·지운 계정)가 있을 때.
+  //     자동 라우팅으로 고른 것만으로는 적지 않는다(답의 route 와 모델 칩 title 에만 남는다. 저장소 주인 결정)
   #missionMsgLines(ctx, msg) {
     const m = ctx.mission;
     if (!m || ctx.s.mission !== m) return;
@@ -2930,9 +2952,10 @@ export class Orchestrator {
       added = true;
     }
     const r = msg.route;
-    if (r && !sameAi(r.asked, r.ran)) {
-      const why = r.why.length ? r.why.map((w) => WHY()[w] || w).join(', ') : tr('기록된 이유 없음');
-      logLine(m, 'route', tr('{name}: 요청한 AI는 {asked}인데 {ran}(으)로 돌았어(이유: {why}).', { name, asked: aiText(r.asked), ran: aiText(r.ran), why }), msg.id);
+    if (r && r.why.some((w) => w !== 'auto')) {
+      const words = { name, asked: aiText(r.asked), ran: aiText(r.ran), why: r.why.map((w) => WHY()[w] || w).join(', ') };
+      // 같은 AI 로 돈 경우(한도가 풀리길 기다렸다가 그대로)는 "요청한 그대로"로 적는다
+      logLine(m, 'route', sameAi(r.asked, r.ran) ? tr('{name}: 요청한 AI({asked}) 그대로 돌았어(이유: {why}).', words) : tr('{name}: 요청한 AI는 {asked}인데 {ran}(으)로 돌았어(이유: {why}).', words), msg.id);
       added = true;
     }
     if (added) this.emitMission(ctx.s);
@@ -3507,8 +3530,12 @@ export class Orchestrator {
     if (multi && i < run.stages.length - 1 && !meet) parts.push(tr('결과는 다음 단계 담당이 바로 쓸 수 있게 핵심 위주의 마크다운으로 정리해.'));
     // 목표의 일 단계(결정 0018): 카드는 끝의 두 칸, 모든 일 단계는 막힘 출구(기준을 지킬 수 없으면 억지로 맞추지 말고 oc-blocked). 회의 차례에는 붙이지 않는다
     if (cardStage) parts.push(tailRule());
-    // 묻고 할 일(결정 0022): 밖으로 나가는 일과 작업 폴더 밖 지우기는 하기 전에 질문 블록으로 묻게(물을 수 없는 실행이면 하지 말게). 일 단계·카드에만(읽기 전용 대목에는 안 붙인다)
-    if (ctx.missionTurn === 'work' && ctx.goalCard && workStage && !meet && !st.meeting) parts.push(outsideRule(this.store.settings.agentAsks !== false && !s.scheduleId && !userMsg?.handoffAsk && !s.agentOverride), blockedRule());
+    // 묻고 할 일(결정 0022): 밖으로 나가는 일과 작업 폴더 밖 지우기는 하기 전에 질문 블록으로 묻게(물을 수 없는 실행이면 하지 말게). 자기 권한으로 도는 일 차례에만(읽기 전용 대목·회의 차례에는 안 붙인다).
+    // 회의 단계의 되돌림은 진행자 혼자 회의 없이 자기 권한으로 고치니 붙인다. 막힘 출구는 회의 단계에서 읽지 않으니(#blockedOf) 거기엔 안 붙인다
+    if (ctx.missionTurn === 'work' && ctx.goalCard && workStage && !meet) {
+      parts.push(outsideRule(this.store.settings.agentAsks !== false && !s.scheduleId && !userMsg?.handoffAsk && !s.agentOverride));
+      if (!st.meeting) parts.push(blockedRule());
+    }
     if (ctx.missionTurn === 'goal') parts.push(this.#goalPrompt(ctx));
     return parts.join('\n\n');
   }

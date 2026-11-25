@@ -250,7 +250,9 @@ export const BLOCK_ACCEPTS = Object.freeze({
   review: ['oc-review'], // 기준 판정
 });
 export const BLOCK_NAMES = [...new Set(Object.values(BLOCK_ACCEPTS).flat())]; // 코드가 실제로 읽는 블록 이름 전부
-const BLOCK_AT = /```(oc-[a-z][a-z0-9-]*)/g;
+// 블록을 여는 줄: 줄 맨 앞의 백틱 정확히 세 개 + 이름 + 줄 끝(또는 공백). 줄 가운데 적은 이름(글이나 JSON 문자열 속 인용)은 블록이 아니다.
+// 이름은 끝까지 읽는다(oc-research-x 는 oc-research 가 아니라 그 이름)
+const BLOCK_AT = /^```(oc-[a-z][a-z0-9-]*)(?=[ \t]|\r?$)/gm;
 // 글에 든 블록 이름(여는 줄 기준, 같은 이름은 한 번, 나온 순서)
 export const blocksIn = (text) => [...new Set([...String(text || '').matchAll(BLOCK_AT)].map((m) => m[1]))];
 // 그 대목(part)이 받지 않는 블록 이름. 표에 없는 대목이면 빈 목록(보지 않는다)
@@ -270,8 +272,9 @@ export const partName = (part) => ({ goal: tr('목표 잡기'), scan: tr('훑어
 
 const REVIEW_OPEN = '```oc-review';
 const REVIEW_LAST = /^```oc-review[ \t]*\r?\n([\s\S]*?)```\s*$/; // 글의 맨 끝에 있는 블록만 판정이다
-// 판정 답에 다른 블록(표의 블록 중 판정이 받지 않는 것)이 섞이면 받지 않는다(결정 0015·0022)
-const OTHER_BLOCK = new RegExp(`\`\`\`(?:${BLOCK_NAMES.filter((b) => !BLOCK_ACCEPTS.review.includes(b)).join('|')})\\b`);
+// 판정 답에 다른 블록(표의 블록 중 판정이 받지 않는 것)이 섞이면 받지 않는다(결정 0015·0022). 여는 줄은 BLOCK_AT 과 같은 규칙(줄 맨 앞, 이름이 정확히 같고 뒤는 줄 끝·공백)이라
+// 판정 블록의 근거 글(JSON 문자열)에 인용한 예시는 블록으로 세지 않는다: 맞는 JSON 안에는 백틱으로 시작하는 줄이 있을 수 없으니, 걸리는 것은 판정 블록 밖에서 따로 연 블록뿐이다
+const OTHER_BLOCK = new RegExp(`^\`\`\`(?:${BLOCK_NAMES.filter((b) => !BLOCK_ACCEPTS.review.includes(b)).join('|')})(?=[ \\t]|\\r?$)`, 'm');
 const VERDICTS = ['pass', 'fail', 'unknown'];
 const WORSE = { pass: 0, unknown: 1, fail: 2 }; // 같은 기준을 두 번 적었으면 나쁜 쪽
 

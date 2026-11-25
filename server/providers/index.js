@@ -11,6 +11,8 @@ import mock from './mock.js';
 import { tr } from '../i18n.js';
 
 export const PROVIDERS = { claude, codex, gemini, hermes, openai, local, acp, mock };
+// 화면에 보이지 않는 프로바이더: 가상 AI(mock)는 테스트용으로만 남는다(결정 0021). 저장·실행은 되지만 화면에 주는 목록(list·catalog)에는 없다
+export const HIDDEN_PROVIDERS = new Set(['mock']);
 
 // 추가 계정 id 규칙(폴더 이름·프로바이더 id 에 들어가므로 영문·숫자만)
 export const ACCOUNT_ID = /^[a-z0-9]{4,16}$/;
@@ -60,7 +62,7 @@ export class ProviderRegistry {
     });
   }
 
-  list() { return Object.values(PROVIDERS).map((p) => providerInfo(p, this.detected[p.id] || { checking: true })); }
+  list() { return Object.values(PROVIDERS).filter((p) => !HIDDEN_PROVIDERS.has(p.id)).map((p) => providerInfo(p, this.detected[p.id] || { checking: true })); }
 
   get(id) { return PROVIDERS[id] || null; }
 
@@ -91,9 +93,9 @@ export class ProviderRegistry {
     return list;
   }
 
-  // 자동 라우팅에 쓰는 전체 카탈로그(로그인된 프로바이더만)
+  // 자동 라우팅에 쓰는 전체 카탈로그(로그인된 프로바이더만. 숨긴 프로바이더는 list 에서 이미 빠진다)
   async catalog({ force = false } = {}) {
-    const providers = this.list().filter((p) => p.id !== 'mock');
+    const providers = this.list();
     const ready = providers.filter((p) => p.loggedIn);
     const models = {};
     await Promise.all(ready.map(async (p) => { models[p.id] = await this.models(p.id, { force }); }));

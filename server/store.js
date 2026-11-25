@@ -11,6 +11,9 @@ export function newId(prefix = 'id') {
 }
 
 const COLLECTIONS = ['agents', 'teams', 'connectors', 'skills', 'skins', 'plugins', 'schedules', 'tasks'];
+// 예전 첫 실행 데이터에 있던 데모 팀과 데모 에이전트(결정 0021에서 없앴다. 이미 깔린 데이터는 #dropDemo 가 정리한다)
+export const DEMO_TEAM_ID = 'team-demo';
+export const DEMO_AGENT_IDS = ['demo-researcher', 'demo-organizer', 'demo-analyst', 'demo-builder'];
 const MAX_CACHE = Number(process.env.OFFICE_CREW_SESSION_CACHE || 12); // 메모리에 올려둘 세션 본문 수
 
 export function writeAtomic(file, text) {
@@ -100,6 +103,43 @@ export class Store {
       team.description = seedData().teams.find((x) => x.id === 'team-default').description;
       this.#saveCol('teams');
     }
+    this.#dropDemo();
+  }
+
+  // 없앤 데모 팀과 데모 에이전트(결정 0021). 데모 팀은 사용자가 고쳤어도 지운다.
+  // 데모 에이전트는 아직 가상 AI(mock)로 직접 설정된 것만 지우고(진짜 AI로 바꿨거나 자동 라우팅으로 돌린 건 남긴다), 다른 팀의 단계에서도 뺀다.
+  // 단계 정리는 에이전트 삭제(DELETE /api/agents/:id)와 같다: 비게 된 단계는 빠지고, 단계가 하나도 안 남은 팀도 지우지 않는다.
+  // 역할 노트는 앱이 켜질 때 index.js 가 이름을 바꿔 둔다(에이전트 삭제와 같게). 데모 팀으로 하던 세션은 기록으로 그대로 둔다
+  #dropDemo() {
+    const gone = new Set(DEMO_AGENT_IDS.filter((id) => { const a = this.get('agents', id); return a && a.provider === 'mock' && a.routing !== 'auto'; }));
+    if (gone.size) {
+      this.cols.agents = this.cols.agents.filter((a) => !gone.has(a.id));
+      this.#saveCol('agents');
+    }
+    let teamsDirty = false;
+    if (this.get('teams', DEMO_TEAM_ID)) { this.cols.teams = this.cols.teams.filter((t) => t.id !== DEMO_TEAM_ID); teamsDirty = true; }
+    if (gone.size) {
+      this.cols.teams = this.cols.teams.map((t) => {
+        const stages = (t.stages || []).map((s) => ({ ...s, agentIds: (s.agentIds || []).filter((x) => !gone.has(x)) })).filter((s) => s.agentIds.length);
+        if (stages.length === (t.stages || []).length && stages.every((s, i) => s.agentIds.length === (t.stages[i].agentIds || []).length)) return t;
+        teamsDirty = true;
+        return { ...t, stages, updatedAt: Date.now() };
+      });
+    }
+    if (teamsDirty) this.#saveCol('teams');
+    // 기본 팀·기본 에이전트가 지운 것을 가리키면 기본 팀(없으면 남은 첫 팀)과 그 팀의 첫 에이전트(없으면 남은 첫 에이전트)로
+    let settingsDirty = false;
+    if (this.settings.defaultTeamId === DEMO_TEAM_ID && !this.get('teams', DEMO_TEAM_ID)) {
+      this.settings.defaultTeamId = (this.get('teams', 'team-default') || this.cols.teams[0])?.id || null;
+      settingsDirty = true;
+    }
+    if (DEMO_AGENT_IDS.includes(this.settings.defaultAgentId) && !this.get('agents', this.settings.defaultAgentId)) {
+      const t = this.get('teams', this.settings.defaultTeamId);
+      const first = (t?.stages || []).flatMap((s) => s.agentIds || []).find((id) => this.get('agents', id));
+      this.settings.defaultAgentId = first || this.cols.agents[0]?.id || '';
+      settingsDirty = true;
+    }
+    if (settingsDirty) this.saveSettings();
   }
 
   #file(name) { return path.join(this.dirs.home, `${name}.json`); }

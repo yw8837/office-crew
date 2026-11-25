@@ -20,7 +20,7 @@
 ```
 bin/office-crew.js            실행기(서버 + 앱 창)
 server/index.js             HTTP 라우팅, 정적 파일, 보안
-server/store.js             JSON 저장소(원자적 쓰기, 디바운스)
+server/store.js             JSON 저장소(원자적 쓰기, 디바운스). 켤 때 옛 데이터 이전 처리(없앤 데모 팀·데모 에이전트 정리, 결정 0021)
 server/bus.js               SSE 이벤트 허브
 server/orchestrator.js      실행(run) 엔진: 단계 진행, 병렬, 승인 게이트, 개입
 server/ask.js               에이전트가 사용자에게 묻기: 답 끝의 oc-ask 블록 읽기, 답을 돌려주는 글(결정 0009)
@@ -35,7 +35,7 @@ server/failover.js          자동 이어받기(한도 오류 판별, 쉬는 시
 server/importer.js          Claude Code·Codex 기록(jsonl) 목록·읽기(원본은 읽기만)
 server/storage.js           저장공간 보고·정리
 server/providers/index.js   프로바이더 레지스트리(각 어댑터의 detect: 설치·로그인 탐지, models: 모델 목록)
-server/providers/*.js       어댑터: claude, codex, gemini, hermes, openai(호환 API), local(내 PC 모델), acp(ACP 표준 에이전트), mock
+server/providers/*.js       어댑터: claude, codex, gemini, hermes, openai(호환 API), local(내 PC 모델), acp(ACP 표준 에이전트), mock(가상 AI, 테스트용. 화면에 주는 프로바이더 목록에는 없다, 결정 0021)
 server/providers/util.js    셸 없이 CLI 실행(.cmd 래퍼 해석), 줄 단위 읽기, 프로세스 트리 종료
 server/providers/feeder.js  stdin 스트림 JSON 다중 턴(작업 중 지시 주입)
 public/index.html           앱 셸(import map)

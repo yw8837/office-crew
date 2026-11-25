@@ -1,18 +1,18 @@
 // 사이드바 "기다리는 일": 세션 요약의 attention 이 실행 상태(승인·결정 대기, 끝남)를 따라간다(가짜 모델, 실제 AI 사용량 0)
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startTestApp } from './helpers.js';
+import { startTestApp, addMockTeam, MOCK } from './helpers.js';
 import { attentionOf } from '../server/store.js';
 
 let t;
-before(async () => { t = await startTestApp(); });
+before(async () => { t = await startTestApp(); await addMockTeam(t.api); });
 after(async () => { try { await t.close(); } catch { /* 윈도우 파일 잠금 무시 */ } });
 
 const metaOf = async (id) => (await t.api('GET', '/api/bootstrap')).json.sessions.find((s) => s.id === id);
 const sessionEvent = (id, kind) => t.events.find((e) => e.type === 'session' && e.data.id === id && e.data.attention?.kind === kind);
 
 test('승인 대기에 들어가면 세션 요약이 "승인 필요"가 되고, 승인 뒤 끝나면 "결과 확인"이 된다', async () => {
-  const s = (await t.api('POST', '/api/sessions', { teamId: 'team-demo' })).json;
+  const s = (await t.api('POST', '/api/sessions', { teamId: MOCK.team })).json;
   await t.api('POST', `/api/sessions/${s.id}/messages`, { text: '시장 조사해줘' });
   await t.waitFor(() => sessionEvent(s.id, 'approve'), 15000, '승인 필요 요약');
   const waiting = await metaOf(s.id);

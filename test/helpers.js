@@ -53,6 +53,30 @@ export async function waitFor(cond, { timeout = 15000, interval = 25, what = '�
   }
 }
 
+// 가상 AI(mock, 사용량 0) 에이전트 넷과 그 팀을 API로 만든다. 첫 실행 데이터에는 이제 가상 에이전트가 없어서(결정 0021) 필요한 테스트가 직접 만든다.
+// 모양은 예전 데모 팀과 같다: 조사 → 정리·분석(둘이 병렬, 끝나면 승인 대기) → 빌드. id 는 고정이라 테스트가 이름 대신 id 로 가리킨다
+export const MOCK = { team: 'team-mock', researcher: 'mock-researcher', organizer: 'mock-organizer', analyst: 'mock-analyst', builder: 'mock-builder' };
+export async function addMockTeam(api) {
+  const agent = async (id, name, role, effort, permission = 'plan') => {
+    const r = await api('POST', '/api/agents', { id, name, role, provider: 'mock', model: 'mock-fast', effort, permission, routing: 'manual', skills: [], connectors: [] });
+    if (r.status !== 200 || r.json?.id !== id) throw new Error(`가상 에이전트 ${id} 를 만들지 못했어: ${r.status} ${r.text}`);
+  };
+  await agent(MOCK.researcher, '가상 조사봇', '조사', 'medium');
+  await agent(MOCK.organizer, '가상 정리봇', '정리', 'medium');
+  await agent(MOCK.analyst, '가상 분석봇', '분석', 'high');
+  await agent(MOCK.builder, '가상 빌드봇', '빌드', 'xhigh', 'edit');
+  const r = await api('POST', '/api/teams', {
+    id: MOCK.team, name: '가상 팀 (사용량 0)',
+    stages: [
+      { label: '조사', agentIds: [MOCK.researcher] },
+      { label: '정리·분석', agentIds: [MOCK.organizer, MOCK.analyst], approve: true },
+      { label: '빌드', agentIds: [MOCK.builder] },
+    ],
+  });
+  if (r.status !== 200 || r.json?.id !== MOCK.team) throw new Error(`가상 팀을 만들지 못했어: ${r.status} ${r.text}`);
+  return MOCK;
+}
+
 export async function startTestApp() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'office-crew-test-'));
   const bin = path.join(root, 'bin');

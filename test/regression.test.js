@@ -4,12 +4,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { startTestApp } from './helpers.js';
+import { startTestApp, addMockTeam, MOCK } from './helpers.js';
 import { Store } from '../server/store.js';
 import { dataDirs, ensureDirs } from '../server/config.js';
 
 let t;
-before(async () => { t = await startTestApp(); });
+before(async () => { t = await startTestApp(); await addMockTeam(t.api); });
 after(async () => { try { await t.close(); } catch { /* 윈도우 파일 잠금 무시 */ } });
 
 const runs = (sid) => [...new Set(t.events.filter((e) => e.type === 'run' && e.data.sessionId === sid).map((e) => e.data.run.id))];
@@ -17,7 +17,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 test('#1 삭제한 세션의 대기열 메시지는 다시 실행되지 않는다', async () => {
   t.app.store.settings.mockSpeed = 1;
-  const s = (await t.api('POST', '/api/sessions', { teamId: 'team-demo' })).json;
+  const s = (await t.api('POST', '/api/sessions', { teamId: MOCK.team })).json;
   await t.api('POST', `/api/sessions/${s.id}/messages`, { text: '첫 번째' });
   const q = await t.api('POST', `/api/sessions/${s.id}/messages`, { text: '대기열' });
   assert.equal(q.json.queued, true);
@@ -54,21 +54,21 @@ test('#3 업로드 원본이 사라져도 404 로 답하고 서버는 살아 있
 });
 
 test('#5 승인 대기 중 에이전트 지정 건너뛰기는 승인으로 처리되지 않는다', async () => {
-  const s = (await t.api('POST', '/api/sessions', { teamId: 'team-demo' })).json;
+  const s = (await t.api('POST', '/api/sessions', { teamId: MOCK.team })).json;
   await t.api('POST', `/api/sessions/${s.id}/messages`, { text: '승인 테스트' });
   await t.waitFor(() => t.events.find((e) => e.type === 'run' && e.data.sessionId === s.id && e.data.run.hold?.reason === 'approve'), 15000, '승인 대기');
-  const r = await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'skip', agentId: 'demo-organizer' });
+  const r = await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'skip', agentId: MOCK.organizer });
   assert.equal(r.json.ok, false);
   const r2 = await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'resume' });
   assert.equal(r2.json.ok, true); // resume 자체는 받되 승인 대기를 풀지 않음
   await sleep(500);
   assert.equal(t.app.orch.ctx.get(s.id).run.status, 'waiting', '여전히 승인 대기');
-  assert.ok(!t.app.store.getSession(s.id).messages.some((m) => m.agentId === 'demo-builder'), '빌드 단계가 시작되면 안 됨');
+  assert.ok(!t.app.store.getSession(s.id).messages.some((m) => m.agentId === MOCK.builder), '빌드 단계가 시작되면 안 됨');
   await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'stop' });
 });
 
 test('#6 준비 단계(작업 폴더 생성) 예외에도 메시지가 작성 중으로 굳지 않는다', async () => {
-  const s = (await t.api('POST', '/api/sessions', { teamId: null, agentId: 'demo-researcher' })).json;
+  const s = (await t.api('POST', '/api/sessions', { teamId: null, agentId: MOCK.researcher })).json;
   // 검증을 우회해 "폴더 자리에 파일"이 있는 상황을 만든다
   const file = path.join(t.root, 'not-a-dir.txt');
   fs.writeFileSync(file, 'x');
@@ -113,10 +113,10 @@ test('검증#1 플러그인을 가져와도 에이전트의 앱 스킬 연결이
 
 test('검증#5·#6 중지된 에이전트는 대기+사유, 전원 건너뛴 단계는 skipped', async () => {
   t.app.store.settings.mockSpeed = 1;
-  const s = (await t.api('POST', '/api/sessions', { teamId: null, agentId: 'demo-researcher' })).json;
+  const s = (await t.api('POST', '/api/sessions', { teamId: null, agentId: MOCK.researcher })).json;
   await t.api('POST', `/api/sessions/${s.id}/messages`, { text: '건너뛰기 표시' });
   await t.waitFor(() => t.events.find((e) => e.type === 'agentState' && e.data.sessionId === s.id && ['searching', 'reading', 'typing'].includes(e.data.state)), 8000, '작업 시작');
-  await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'skip', agentId: 'demo-researcher' });
+  await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'skip', agentId: MOCK.researcher });
   await t.waitFor(() => t.app.store.getSession(s.id).runs.at(-1)?.endedAt, 8000, '실행 종료');
   t.app.store.settings.mockSpeed = 0.05;
   const last = t.events.filter((e) => e.type === 'agentState' && e.data.sessionId === s.id).at(-1).data;

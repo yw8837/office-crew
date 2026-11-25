@@ -26,3 +26,4 @@ Keep a record under about 100 lines. When a decision changes, add a dated "Revis
 | [0018](0018-goal-mode-task-cards.md) | Goal mode can split the work into task cards the lead plans and the code orders | Accepted |
 | [0019](0019-goal-mode-call-estimate-and-limit-wait.md) | Goal mode shows a rough call estimate before confirming, and waits for a usage-limit reset when no other AI can take over | Accepted |
 | [0020](0020-flow-stage-default-picture.md) | The split view shows a flow stage above the chat; the village stays in the Large office view | Accepted |
+| [0021](0021-no-demo-team.md) | No demo team; the simulated AI stays for tests and is hidden from the screens | Accepted |

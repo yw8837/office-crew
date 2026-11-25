@@ -1,16 +1,17 @@
-// 예약 작업: 정해진 요일·시각에 데모 팀(가짜 AI)으로 실행 — 실제 AI 사용량 0
+// 예약 작업: 정해진 요일·시각에 가상 AI(mock) 팀으로 실행 — 실제 AI 사용량 0
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { startTestApp } from './helpers.js';
+import { startTestApp, addMockTeam, MOCK } from './helpers.js';
 import { cleanSchedule, lastOccurrence, nextOccurrence, GRACE_MS, Scheduler } from '../server/scheduler.js';
 
 let t;
-// 데모 팀은 2단계에서 사람 승인을 기다리므로, 끝까지 도는 승인 없는 가짜 팀을 따로 쓴다
+// 가상 팀(addMockTeam)은 2단계에서 사람 승인을 기다리므로, 끝까지 도는 승인 없는 가짜 팀을 따로 쓴다
 before(async () => {
   t = await startTestApp();
-  base.teamId = (await t.api('POST', '/api/teams', { name: '예약 테스트 팀', stages: [{ label: '조사', agentIds: ['demo-researcher'] }] })).json.id;
+  await addMockTeam(t.api);
+  base.teamId = (await t.api('POST', '/api/teams', { name: '예약 테스트 팀', stages: [{ label: '조사', agentIds: [MOCK.researcher] }] })).json.id;
 });
 after(async () => { try { await t.close(); } catch { /* 윈도우 파일 잠금 무시 */ } });
 
@@ -50,7 +51,7 @@ test('입력 검사: 이름·지시·시각·요일·맡길 대상이 필요', (
   assert.equal(c.catchUp, false);
 });
 
-test('제때: 예정 시각이 되면 새 세션을 만들어 데모 팀이 일하고, 다음 회차가 보인다', async () => {
+test('제때: 예정 시각이 되면 새 세션을 만들어 가상 팀이 일하고, 다음 회차가 보인다', async () => {
   const s = await create();
   assert.ok(s.nextAt > Date.now());
   const boot = await t.api('GET', '/api/bootstrap');
@@ -121,14 +122,14 @@ test('저장할 때 검사: 없는 팀·에이전트, 없는·상대 경로 폴�
 });
 
 test('에이전트 한 명에게 맡기기, 팀·폴더가 실행 전에 없어지면 오류로 남긴다', async () => {
-  const a = await create({ name: '혼자 조사', teamId: null, agentId: 'demo-researcher' });
+  const a = await create({ name: '혼자 조사', teamId: null, agentId: MOCK.researcher });
   const r = (await t.api('POST', `/api/schedules/${a.id}/run`)).json;
   assert.equal(r.status, 'started');
   const sess = t.app.store.getSession(r.sessionId);
   assert.equal(sess.teamId, null);
-  assert.equal(sess.agentId, 'demo-researcher');
+  assert.equal(sess.agentId, MOCK.researcher);
   await runEnded(r.sessionId);
-  const team = (await t.api('POST', '/api/teams', { name: '임시팀', stages: [{ label: '1', agentIds: ['demo-researcher'] }] })).json;
+  const team = (await t.api('POST', '/api/teams', { name: '임시팀', stages: [{ label: '1', agentIds: [MOCK.researcher] }] })).json;
   const s = await create({ name: '사라진 팀', teamId: team.id });
   await t.api('DELETE', `/api/teams/${team.id}`);
   const e1 = (await t.api('POST', `/api/schedules/${s.id}/run`)).json;
@@ -161,7 +162,7 @@ test('수정 직후엔 이미 지난(놓친) 회차를 catchUp 이어도 실행�
 });
 
 test('같은 세션 모드에서 맡길 대상을 바꾸면 새 세션에서 새 대상이 일한다', async () => {
-  const other = (await t.api('POST', '/api/teams', { name: '두 번째 팀', stages: [{ label: '1', agentIds: ['demo-researcher'] }] })).json;
+  const other = (await t.api('POST', '/api/teams', { name: '두 번째 팀', stages: [{ label: '1', agentIds: [MOCK.researcher] }] })).json;
   const s = await create({ name: '대상 변경', session: 'same' });
   const r1 = (await t.api('POST', `/api/schedules/${s.id}/run`)).json;
   await runEnded(r1.sessionId);

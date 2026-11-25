@@ -127,7 +127,7 @@ Office Crew 是一个在本地同时运行多个 AI 智能体的工作台。它�
 
 ## 🚀 快速开始
 
-**环境要求：** [Node.js](https://nodejs.org) 20 或更高版本，以及你想用的 AI CLI。只体验演示的话，一个 CLI 都不需要。
+**环境要求：** [Node.js](https://nodejs.org) 20 或更高版本，以及至少一个用来干活的 AI：已登录的 AI CLI、API 密钥或本地模型（见下方支持的 AI）。
 
 ```bash
 git clone https://github.com/yw8837/office-crew.git
@@ -137,7 +137,7 @@ npm start
 
 - 服务器在 `http://127.0.0.1:4317` 启动，并打开 Edge/Chrome 应用窗口；两者都找不到时，会用默认浏览器打开。
 - **Windows：** 也可以直接双击 `오피스크루 실행.cmd`（"运行 Office Crew"），或用 `오피스크루 실행 (창 없이).vbs` 在不显示命令行窗口的情况下启动。退出时请用 设置 → 关于 → 退出 Office Crew。
-- **首次运行：** 默认选中内置的**演示**团队。演示智能体是模拟的，不消耗任何 AI 额度，可以在接入 AI 之前先体验办公室、审批和介入功能。
+- **首次运行：** 新会话默认使用**默认团队**（调研 → 整理 → 分析 → 构建）。请先在 设置 → AI 账号 中确认智能体要用的 AI 已经接好。
 - 数据保存在 `~/.office-crew`。
 
 | 选项 | 说明 |
@@ -162,7 +162,6 @@ npm start
 | **ACP 智能体** | Agent Client Protocol（stdio） | Gemini CLI、Hermes、OpenCode、Goose、Qwen Code 等 | 设置 → API 密钥·本地模型 → ACP 智能体（预设按钮） |
 | **OpenAI 兼容 API** | HTTPS API | 无 | 设置 → API 密钥·本地模型：OpenAI、OpenRouter、Nous Portal、xAI、Gemini API |
 | **本地模型** | 本机 HTTP 服务 | Ollama、LM Studio、llama.cpp、vLLM 或 Jan | 无需登录。服务运行时自动检测，其他地址可在设置中添加 |
-| **演示** | 内置 | 无 | 无需登录，用量为 0 |
 
 在设置 → **AI 账号**中可以查看每个 CLI 的安装状态、版本、登录账号和支持的推理强度。
 
@@ -230,7 +229,7 @@ Office Crew 的设计目标是在各服务商的规则范围内使用。简而�
 Office Crew 不会替你登录、代理你的账号或共享凭据。它只是在你自己的电脑上启动你已安装并登录的官方 CLI，和你在终端里手动运行一样。遵守各服务的条款（包括关于自动化或第三方工具的规定）仍是你自己的责任。用于组织或商业场景时，更推荐使用 API 密钥。Office Crew 遵守的原则见[账号使用原则](#-账号使用原则)。Office Crew 与 Anthropic、OpenAI、Google、Nous Research 没有任何关联。
 
 **要花多少钱？**
-Office Crew 本身依据 AGPL 免费使用。用量由各服务商从你的订阅或 API 密钥中扣除，和你直接使用其 CLI 完全一样。用量面板会实时显示 token 和账号额度；把路由配置档设为**经济**会选择更便宜的模型；演示服务商不产生任何费用。
+Office Crew 本身依据 AGPL 免费使用。用量由各服务商从你的订阅或 API 密钥中扣除，和你直接使用其 CLI 完全一样。用量面板会实时显示 token 和账号额度；把路由配置档设为**经济**会选择更便宜的模型。
 
 **可以离线或只用本地模型吗？**
 可以。Ollama、LM Studio、llama.cpp、vLLM 和 Jan 运行时会被自动检测。界面所用的 Preact 和 htm 也已随仓库附带，不会从 CDN 加载任何内容。

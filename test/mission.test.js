@@ -10,11 +10,14 @@ import { bindLang } from '../server/i18n.js';
 import { parseGoal, cleanGoal, sameCard, pickLead, mixedLocal, logLine, cutMission, alive, newMission, goalWarn, LOG_MAX } from '../server/mission.js';
 import { hideGoal } from '../public/js/chat-tools.js';
 import { suspicious } from '../server/notes.js';
-import { startTestApp, freePort } from './helpers.js';
+import { startTestApp, freePort, addMockTeam, MOCK } from './helpers.js';
 
 bindLang(() => 'ko'); // 순수 함수의 문구(한국어 원문)를 검사한다
 let t = null;
-const app = async () => (t ||= await startTestApp());
+const app = async () => {
+  if (!t) { t = await startTestApp(); await addMockTeam(t.api); }
+  return t;
+};
 after(async () => { if (t) { try { await t.close(); } catch { /* 윈도우 파일 잠금 무시 */ } } });
 
 const blk = (json) => `정리했어.\n\n\`\`\`oc-goal\n${json}\n\`\`\``;
@@ -738,25 +741,25 @@ test('10. 끊김: 다시 켜면 도는 중·대기 목표는 cut, 초안 쓰던 
   } finally { try { await app2.close(); } catch { /* 윈도우 파일 잠금 무시 */ } }
 });
 
-test('11. 데모 팀(사용량 0): 데모 진행자가 목표 카드를 쓰고, 확인하면 승인 단계까지 지금처럼 돈 뒤 데모 검수자가 기준을 판정해 done', async () => {
+test('11. 가상 팀(사용량 0): 가상 진행자가 목표 카드를 쓰고, 확인하면 승인 단계까지 지금처럼 돈 뒤 가상 검수자가 기준을 판정해 done', async () => {
   const t = await app();
-  const sid = await mkSession('team-demo');
+  const sid = await mkSession(MOCK.team);
   await say(sid, '작은 출시 계획 세워 줘');
   await waitDraft(sid);
   const c = cardOf(sid);
-  assert.equal(c.leadId, 'demo-analyst', '분석 역할 첫 팀원');
+  assert.equal(c.leadId, MOCK.analyst, '분석 역할 첫 팀원');
   assert.equal(c.criteria.length, 3);
   assert.match(c.goal, /작은 출시 계획 세워 줘/);
   assert.equal(c.fallback, undefined);
   assert.equal((await confirm(sid, { missionId: S(sid).mission.id, expected: shown(c) })).status, 200);
-  // 데모 팀의 둘째 단계는 승인 단계: 지금처럼 기다린다
+  // 가상 팀의 둘째 단계는 승인 단계: 지금처럼 기다린다
   await t.waitFor(() => S(sid).runs.at(-1).hold?.reason === 'approve', 20000, '승인 대기');
   assert.equal(S(sid).mission.status, 'active');
   await t.api('POST', `/api/sessions/${sid}/control`, { action: 'approve' });
   await waitRuns(sid, 2);
-  // 2a-2: 데모 팀에는 검수 단계가 없어서 진행자(분석)도 마지막 일 단계(빌드) 담당도 아닌 첫 팀원(조사)이 검수자. 데모 흉내가 판정 블록을 쓴다
+  // 2a-2: 가상 팀에는 검수 단계가 없어서 진행자(분석)도 마지막 일 단계(빌드) 담당도 아닌 첫 팀원(조사)이 검수자. 가상 AI 흉내가 판정 블록을 쓴다
   assert.deepEqual(S(sid).runs[1].stages.map((x) => x.status), ['done', 'done', 'done', 'done']);
-  assert.deepEqual([S(sid).mission.reviewerId, S(sid).mission.status, S(sid).mission.criteria.map((c) => c.status)], ['demo-researcher', 'done', ['pass', 'pass', 'pass']]);
+  assert.deepEqual([S(sid).mission.reviewerId, S(sid).mission.status, S(sid).mission.criteria.map((c) => c.status)], [MOCK.researcher, 'done', ['pass', 'pass', 'pass']]);
 });
 
 test('12. 목표 초안 답은 프로젝트 기억에 넣지 않는다(요청과 추가 지시는 넣는다). 대화를 비우면 목표도 버린다', async () => {
@@ -933,7 +936,7 @@ test('15. 추가 지시는 보낼 때가 아니라 목표 실행이 끝날 때 �
   }
 });
 
-test('16. 그 밖: 추가 지시는 목표 하나에 50개까지(넘으면 400). 영입 카드의 "그대로 보내기"는 목표 모드면 목표 차례로(살아 있는 목표가 있으면 409). 데모는 요청 글의 "[목표 잡기]"를 목표 차례로 착각하지 않는다', async () => {
+test('16. 그 밖: 추가 지시는 목표 하나에 50개까지(넘으면 400). 영입 카드의 "그대로 보내기"는 목표 모드면 목표 차례로(살아 있는 목표가 있으면 409). 가상 AI 는 요청 글의 "[목표 잡기]"를 목표 차례로 착각하지 않는다', async () => {
   const t = await app();
   const a = await mk('그밖정리', '정리');
   const tm = await mkTeam('그밖팀', [{ label: '정리', agentIds: [a.id] }]);
@@ -970,9 +973,9 @@ test('16. 그 밖: 추가 지시는 목표 하나에 50개까지(넘으면 400).
   assert.match(busy.json.error, /살아 있는 목표/);
   assert.deepEqual([S(h).messages.find((x) => x.id === p2.messageId).status, S(h).runs.length], ['open', 1]);
 
-  // 데모(사용량 0): 목표 모드가 아닌 요청 글에 "[목표 잡기]"가 들어 있어도 목표 카드 블록으로 답하지 않는다
-  const d = await mkSession('team-demo', false);
-  await say(d, '@demo-analyst [목표 잡기] 이건 그냥 요청이야');
+  // 가상 AI(사용량 0): 목표 모드가 아닌 요청 글에 "[목표 잡기]"가 들어 있어도 목표 카드 블록으로 답하지 않는다
+  const d = await mkSession(MOCK.team, false);
+  await say(d, `@${MOCK.analyst} [목표 잡기] 이건 그냥 요청이야`);
   await waitRuns(d, 1);
   const ans = S(d).messages.filter((x) => x.role === 'agent');
   assert.equal(ans.length, 1);

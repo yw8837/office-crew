@@ -1,6 +1,7 @@
 import { tr } from './i18n.js';
 
-// 첫 실행 기본 데이터(첫 실행 때의 화면 언어로 만든다): 기본 팀(조사-소네트 → 정리-솔 → 분석-오푸스 하이 → 빌드-오푸스 X하이), 자동 라우팅 팀, 사용량 0인 데모 팀
+// 첫 실행 기본 데이터(첫 실행 때의 화면 언어로 만든다): 기본 팀(조사-소네트 → 정리-솔 → 분석-오푸스 하이 → 빌드-오푸스 X하이), 자동 라우팅 팀.
+// 예전에 있던 데모 팀·데모 에이전트는 없앴다(이미 깔린 데이터는 store.js 의 이전 처리가 정리한다. 결정 0021)
 
 export function defaultSettings() {
   return {
@@ -8,8 +9,8 @@ export function defaultSettings() {
     skin: 'village',            // 오피스 스킨 id(기본: 크루 마을)
     reducedMotion: false,
     viewMode: 'split',          // chat | office | split
-    defaultTeamId: 'team-demo',
-    defaultAgentId: 'demo-researcher',
+    defaultTeamId: 'team-default',
+    defaultAgentId: 'researcher',
     defaultCwd: '',             // 비우면 세션마다 ~/.office-crew/workspaces/<세션id>
     agentAsks: true,            // 에이전트가 사용자에게 선택지를 띄워 물을 수 있게 할지(질문마다 AI를 한 번 더 부른다)
     autoHandoff: false,         // 다른 AI가 처음 맡기 전에 인수인계 메모를 자동으로 쓰게 할지(AI 호출 1번이 든다)
@@ -71,22 +72,6 @@ export function seedData() {
       systemPrompt: tr('너는 빌드 담당이야. 분석·계획을 바탕으로 작업 폴더에 실제 결과물을 만들고, 만든 파일과 확인 결과를 보고해.'),
       skills: [], connectors: [], avatar: av('#d9a77f', '#3a2a1e', 'spiky', '#8b5cf6'),
     },
-    {
-      id: 'demo-researcher', name: tr('데모 조사봇'), role: tr('조사'), emoji: '🔎', provider: 'mock', model: 'mock-fast', effort: 'medium',
-      permission: 'plan', systemPrompt: tr('데모용 가상 에이전트(사용량 0).'), skills: [], connectors: [], avatar: av('#f2c9a6', '#6b4226', 'ponytail', '#0ea5e9'),
-    },
-    {
-      id: 'demo-organizer', name: tr('데모 정리봇'), role: tr('정리'), emoji: '🗂️', provider: 'mock', model: 'mock-fast', effort: 'medium',
-      permission: 'plan', systemPrompt: tr('데모용 가상 에이전트(사용량 0).'), skills: [], connectors: [], avatar: av('#e3b38f', '#222', 'short', '#22c55e'),
-    },
-    {
-      id: 'demo-analyst', name: tr('데모 분석봇'), role: tr('분석'), emoji: '🧠', provider: 'mock', model: 'mock-fast', effort: 'high',
-      permission: 'plan', systemPrompt: tr('데모용 가상 에이전트(사용량 0).'), skills: [], connectors: [], avatar: av('#f6d5bd', '#b04a2f', 'long', '#f97316', 'glasses'),
-    },
-    {
-      id: 'demo-builder', name: tr('데모 빌드봇'), role: tr('빌드'), emoji: '🛠️', provider: 'mock', model: 'mock-fast', effort: 'xhigh',
-      permission: 'edit', systemPrompt: tr('데모용 가상 에이전트(사용량 0).'), skills: [], connectors: [], avatar: av('#c98f68', '#111', 'spiky', '#a855f7', 'headset'),
-    },
   ];
   // 자동 라우팅 에이전트: 실행할 때마다 로그인된 AI 중에서 역할에 맞는 모델·노력을 고른다(언제든 직접 설정으로 바꿀 수 있음)
   const auto = (id, name, role, emoji, permission, systemPrompt, a) => ({
@@ -118,14 +103,6 @@ export function seedData() {
         { id: 'st-a3', label: tr('분석'), agentIds: ['auto-analysis'], instruction: '', approve: true },
         { id: 'st-a4', label: tr('빌드'), agentIds: ['auto-build'], instruction: '', approve: false },
         { id: 'st-a5', label: tr('검수'), agentIds: ['auto-review'], instruction: '', approve: false },
-      ],
-    },
-    {
-      id: 'team-demo', name: tr('데모 팀 (사용량 0)'), description: tr('가상 에이전트로 화면·애니메이션·개입 기능을 체험'),
-      stages: [
-        { id: 'st-d1', label: tr('조사'), agentIds: ['demo-researcher'], instruction: '', approve: false },
-        { id: 'st-d2', label: tr('정리·분석'), agentIds: ['demo-organizer', 'demo-analyst'], instruction: '', approve: true },
-        { id: 'st-d3', label: tr('빌드'), agentIds: ['demo-builder'], instruction: '', approve: false },
       ],
     },
   ];

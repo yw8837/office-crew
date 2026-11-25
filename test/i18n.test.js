@@ -101,10 +101,11 @@ test('첫 실행 기본 데이터는 OS 언어로 만들어지고, 번역된 역
       assert.equal(roleKind(a.role), kind);
       assert.equal(roleKind(app.store.get('agents', 'builder').role), 'build', `${lang} 빌드 역할`);
       assert.equal(roleKind(app.store.get('agents', 'auto-review').role), 'review', `${lang} 검수 역할`);
-      // 데모 에이전트는 역할이 번역돼 저장돼도 도구 단계를 밟는다(마을에서 도서관·작업장으로 걸어가는 장면이 여기서 나온다)
+      // 가상 AI(mock)는 역할이 번역돼 저장돼도 도구 단계를 밟는다(마을에서 도서관·작업장으로 걸어가는 장면이 여기서 나온다).
+      // 첫 실행 데이터에는 가상 에이전트가 없어서(결정 0021) 번역된 역할로 만들어진 기본 에이전트를 가상 AI로 돌려 본다
       const { default: mock } = await import('../server/providers/mock.js');
-      for (const [id, min] of [['demo-researcher', 2], ['demo-organizer', 1], ['demo-analyst', 1], ['demo-builder', 3]]) {
-        const agent = app.store.get('agents', id);
+      for (const [id, min] of [['researcher', 2], ['organizer', 1], ['analyst', 1], ['builder', 3]]) {
+        const agent = { ...app.store.get('agents', id), provider: 'mock', model: 'mock-fast' };
         const tools = new Set();
         let text = '';
         const run = mock.run({ agent, prompt: 'plan a small launch', settings: { mockSpeed: 0.001 } }, (ev) => {

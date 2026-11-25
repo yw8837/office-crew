@@ -2,10 +2,10 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { startTestApp } from './helpers.js';
+import { startTestApp, addMockTeam, MOCK } from './helpers.js';
 
 let t;
-before(async () => { t = await startTestApp(); });
+before(async () => { t = await startTestApp(); await addMockTeam(t.api); });
 after(async () => { try { await t.close(); } catch { /* 윈도우 파일 잠금 무시 */ } });
 
 const sessionOf = async (id) => (await t.api('GET', `/api/sessions/${id}`)).json;
@@ -32,18 +32,18 @@ test('부트스트랩: 기본 에이전트·팀이 들어 있다', async () => {
   const r = await t.api('GET', '/api/bootstrap');
   assert.equal(r.status, 200);
   const ids = r.json.agents.map((a) => a.id);
-  for (const id of ['researcher', 'organizer', 'analyst', 'builder', 'demo-researcher']) assert.ok(ids.includes(id), id);
+  for (const id of ['researcher', 'organizer', 'analyst', 'builder']) assert.ok(ids.includes(id), id);
   const team = r.json.teams.find((x) => x.id === 'team-default');
   assert.deepEqual(team.stages.map((s) => s.label), ['조사', '정리', '분석', '빌드']);
   assert.equal(r.json.agents.find((a) => a.id === 'builder').effort, 'xhigh');
 });
 
-test('데모 팀: 단계 순서·병렬·승인 게이트·핸드오프·사용량', async () => {
-  const s = (await t.api('POST', '/api/sessions', { teamId: 'team-demo' })).json;
+test('가상 팀: 단계 순서·병렬·승인 게이트·핸드오프·사용량', async () => {
+  const s = (await t.api('POST', '/api/sessions', { teamId: MOCK.team })).json;
   const r = await t.api('POST', `/api/sessions/${s.id}/messages`, { text: '시장 조사해줘' });
   assert.equal(r.json.started, true);
   await t.waitFor(() => t.events.find((e) => e.type === 'run' && e.data.sessionId === s.id && e.data.run.status === 'waiting' && e.data.run.hold?.reason === 'approve'), 15000, '승인 대기');
-  assert.ok(t.events.some((e) => e.type === 'handoff' && e.data.sessionId === s.id && e.data.from === 'demo-researcher'));
+  assert.ok(t.events.some((e) => e.type === 'handoff' && e.data.sessionId === s.id && e.data.from === MOCK.researcher));
   const states = t.events.filter((e) => e.type === 'agentState' && e.data.sessionId === s.id).map((e) => e.data.state);
   for (const st of ['thinking', 'searching', 'typing', 'done', 'waiting']) assert.ok(states.includes(st), `상태 ${st}`);
   const ok = await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'approve' });
@@ -51,11 +51,11 @@ test('데모 팀: 단계 순서·병렬·승인 게이트·핸드오프·사용�
   await runDone(s.id);
   const full = await sessionOf(s.id);
   const agents = full.messages.filter((m) => m.role === 'agent');
-  assert.deepEqual(agents.map((m) => m.agentId).sort(), ['demo-analyst', 'demo-builder', 'demo-organizer', 'demo-researcher'].sort());
+  assert.deepEqual(agents.map((m) => m.agentId).sort(), [MOCK.analyst, MOCK.builder, MOCK.organizer, MOCK.researcher].sort());
   assert.ok(agents.every((m) => m.status === 'done' && m.text.length > 10));
   assert.equal(full.runs.at(-1).status, 'done');
-  // 빌드 단계 프롬프트에는 이전 단계 결과가 들어가야 한다(데모 응답에 주제가 반영됨)
-  assert.match(agents.find((m) => m.agentId === 'demo-builder').text, /시장 조사해줘/);
+  // 빌드 단계 프롬프트에는 이전 단계 결과가 들어가야 한다(가상 AI 응답에 주제가 반영됨)
+  assert.match(agents.find((m) => m.agentId === MOCK.builder).text, /시장 조사해줘/);
   const usage = (await t.api('GET', '/api/usage')).json;
   assert.ok(usage.byProvider.mock.output > 0);
 });
@@ -133,14 +133,14 @@ test('Codex 어댑터 + 실제 기본 팀(조사→정리→분석→빌드) 흐
 });
 
 test('중지·건너뛰기·대기열', async () => {
-  const s = (await t.api('POST', '/api/sessions', { teamId: 'team-demo' })).json;
+  const s = (await t.api('POST', '/api/sessions', { teamId: MOCK.team })).json;
   t.app.store.settings.mockSpeed = 1;
   await t.api('POST', `/api/sessions/${s.id}/messages`, { text: '첫 번째' });
   const q = await t.api('POST', `/api/sessions/${s.id}/messages`, { text: '두 번째(대기열)' });
   assert.equal(q.json.queued, true);
-  await t.waitFor(() => t.events.find((e) => e.type === 'agentState' && e.data.sessionId === s.id && e.data.agentId === 'demo-researcher' && ['searching', 'reading', 'typing'].includes(e.data.state)), 10000, '조사 시작');
-  await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'skip', agentId: 'demo-researcher' });
-  await t.waitFor(() => t.events.find((e) => e.type === 'agentState' && e.data.sessionId === s.id && e.data.agentId === 'demo-organizer'), 10000, '다음 단계로 진행');
+  await t.waitFor(() => t.events.find((e) => e.type === 'agentState' && e.data.sessionId === s.id && e.data.agentId === MOCK.researcher && ['searching', 'reading', 'typing'].includes(e.data.state)), 10000, '조사 시작');
+  await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'skip', agentId: MOCK.researcher });
+  await t.waitFor(() => t.events.find((e) => e.type === 'agentState' && e.data.sessionId === s.id && e.data.agentId === MOCK.organizer), 10000, '다음 단계로 진행');
   await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'stop' });
   await t.waitFor(() => t.events.find((e) => e.type === 'run' && e.data.sessionId === s.id && e.data.run.status === 'stopped'), 10000, '중지');
   t.app.store.settings.mockSpeed = 0.05;
@@ -149,7 +149,7 @@ test('중지·건너뛰기·대기열', async () => {
   await t.api('POST', `/api/sessions/${s.id}/control`, { action: 'stop' });
   const full = await sessionOf(s.id);
   assert.equal(full.runs[0].status, 'stopped');
-  assert.equal(full.messages.find((m) => m.agentId === 'demo-researcher').status, 'stopped');
+  assert.equal(full.messages.find((m) => m.agentId === MOCK.researcher).status, 'stopped');
 });
 
 test('오류 시 결정 대기 → 재시도/중지, 이어하기 실패 시 새 대화로 복구', async () => {
@@ -175,7 +175,7 @@ test('업로드 이미지가 Claude에 base64 이미지로 전달된다 + @멘�
   const up = await t.api('POST', '/api/uploads', png, { 'Content-Type': 'image/png', 'X-File-Name': encodeURIComponent('캡처.png') });
   assert.equal(up.status, 200);
   const a = (await t.api('POST', '/api/agents', { name: '눈', role: '분석', provider: 'claude', model: 'opus' })).json;
-  const s = (await t.api('POST', '/api/sessions', { teamId: 'team-demo' })).json;
+  const s = (await t.api('POST', '/api/sessions', { teamId: MOCK.team })).json;
   await t.api('POST', `/api/sessions/${s.id}/messages`, { text: '@눈 이 그림 봐줘', attachments: [up.json.id] });
   await runDone(s.id);
   const full = await sessionOf(s.id);

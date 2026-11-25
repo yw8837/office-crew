@@ -288,6 +288,33 @@ test('메모 자동 작성(설정, 기본 꺼짐): 다른 AI가 처음 맡기 �
   await t.api('PUT', '/api/settings', { autoHandoff: false });
 });
 
+test('메모 자동 작성은 부가 일이라 한도가 줄면 먼저 멈춘다: 메모를 쓸 AI(원래 대화를 만든 AI)의 구독 한도가 임박이면 건너뛰고 알림 한 줄, 요청은 메모 없이 바로 돈다(결정 0022)', async () => {
+  assert.equal((await t.api('PUT', '/api/settings', { autoHandoff: true })).status, 200);
+  try {
+    // 이어받기 기준(95%) 이상인 창: 실행 전에 다른 AI 로 피하는 것과 같은 "한도 임박"
+    t.app.store.usage.limits = { codex: { windows: { primary: { pct: 97, resetsAt: Math.floor(Date.now() / 1000) + 3600 } }, observedAt: Date.now() } };
+    const b = await importX2();
+    const on = (await t.api('POST', '/api/agents', { name: '임박때담당', role: '검토', provider: 'claude', model: 'claude-sonnet-5-5', permission: 'plan', routing: 'manual' })).json;
+    const before = t.fakeLog().filter((l) => l.cli === 'codex').length;
+    const r = await t.api('POST', `/api/sessions/${b.sessionId}/messages`, { text: `@${on.name} 이어서 검토해줘` });
+    assert.equal(r.json.started, true, '메모 뒤에 줄 서지 않고 바로 돈다');
+    await t.waitFor(() => { const s = t.app.store.getSession(b.sessionId); return s.runs.length === 1 && s.runs[0].endedAt && !t.app.orch.ctx.has(b.sessionId); }, 20000, '요청 끝');
+    const s = t.app.store.getSession(b.sessionId);
+    assert.equal(s.messages.filter((m) => m.handoff || m.handoffAsk).length, 0, '메모를 시키지 않았다');
+    assert.equal(t.fakeLog().filter((l) => l.cli === 'codex').length, before, '원래 AI(Codex)를 부르지 않았다');
+    assert.ok(s.messages.some((m) => m.role === 'system' && /사용량 한도가 거의 다 차서 인수인계 메모 먼저 쓰기를 건너뛰었어/.test(m.text)), JSON.stringify(s.messages.filter((m) => m.role === 'system').map((m) => m.text)));
+    // 한도 기록이 풀리면 다시 쓴다
+    t.app.store.usage.limits = {};
+    const c = await importX2();
+    const r2 = await t.api('POST', `/api/sessions/${c.sessionId}/messages`, { text: `@${on.name} 이어서 검토해줘` });
+    assert.equal(r2.json.queued, true, '한도가 넉넉하면 메모가 먼저');
+    await t.waitFor(() => { const x = t.app.store.getSession(c.sessionId); return x.runs.length === 2 && x.runs[1].endedAt && !t.app.orch.ctx.has(c.sessionId); }, 20000, '메모 → 요청');
+  } finally {
+    t.app.store.usage.limits = {};
+    await t.api('PUT', '/api/settings', { autoHandoff: false });
+  }
+});
+
 test('불러온 대화는 프로젝트 기억에 들어간다(나중에 켜도 다음 실행 때), 다른 세션에서 앞부분 결정을 찾는다', async () => {
   assert.notEqual(t.app.store.getSession(sid).importedFrom.remembered, true, '기억이 꺼져 있을 땐 넣지 않는다');
   await t.api('PUT', '/api/settings', { memory: true });

@@ -95,3 +95,23 @@ export function hideReview(text, block = null, streaming = false) {
   const out = ok ? src.slice(0, block.from) + src.slice(block.to) : src;
   return streaming ? out.replace(/```oc-review[\s\S]*$/, '') : out;
 }
+
+// 답 머리 모델 칩의 툴팁(결정 0022): 요청한 AI(에이전트 설정, 자동 라우팅이면 그렇다고)와 실제로 돈 AI 가 다르거나 이유 코드가 있으면 "요청: …"과 "이유: …" 두 줄.
+// 같고 이유가 없으면 ''. 이유 코드는 서버가 코드가 한 일만 적는다. t: 화면 번역 함수, label: 프로바이더 id → 이름(화면이 넘긴다)
+export function routeTip(route, { t = (s) => s, label = (p) => p } = {}) {
+  const a = route?.asked;
+  const r = route?.ran;
+  if (!a || !r) return '';
+  const why = Array.isArray(route.why) ? route.why : [];
+  if (a.provider === r.provider && a.model === r.model && a.effort === r.effort && !why.length) return '';
+  const ai = (x) => (x.provider === 'auto' ? t('자동 라우팅') : [label(x.provider), x.model, x.effort].filter(Boolean).join(' · '));
+  const W = { auto: t('자동 라우팅'), 'near-limit': t('한도 임박'), 'daily-pace': t('하루 예산 속도'), takeover: t('이어받기'), 'wait-reset': t('한도 풀림 기다림') };
+  return [t('요청: {ai}', { ai: ai(a) }), t('이유: {why}', { why: why.length ? why.map((w) => W[w] || w).join(', ') : t('기록된 이유 없음') })].join('\n');
+}
+
+// 답 머리에 "에이전트가 씀 · 사용자 확인 안 함"을 붙일 답인가(결정 0022): 목표 일 실행의 일 단계·일 카드 답과 회의 결론만.
+// 조사·계획·검수·회의 차례, 목표 차례, 목표가 아닌 실행의 답은 아니다. run: 그 답의 실행(실행 기록이 잘렸으면 없고, 그때는 일 카드 답만 안다)
+export function agentWrote(m, run) {
+  if (!m || (!m.card && run?.mission !== 'work')) return false;
+  return m.meeting ? m.meeting.phase === 'conclude' : !m.review && !m.prep && !m.once;
+}

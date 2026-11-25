@@ -220,6 +220,7 @@ test('2. 일 단계 중 끊김 → 이어서: 끊긴 사람만 새 대화로(--r
   const [cb, cc, cr] = cs;
   assert.ok(cb.texts[0].includes('"분석"를 네가 맡았어') && !cb.args.includes('--resume'), '끊긴 사람은 새 대화');
   assert.ok(cb.texts[0].includes('[이어서] 이 단계는 앱이 꺼져서 중간에 끊겼어. 작업 폴더에 이미 해 둔 것이 있는지 먼저 확인하고, 있으면 거기서 이어서 해.'));
+  assert.ok(cb.texts[0].includes('거기서 이어서 해. 이미 밖으로 보낸 것은 다시 하지 마.'), '끊기기 전에 밖으로 보낸 것은 다시 하지 말라고(결정 0022)');
   assert.ok(cb.texts[0].indexOf('[이어서]') < cb.texts[0].indexOf('[확정된 목표와 합격 기준'), '그 단계 프롬프트의 맨 앞');
   assert.ok(cb.texts[0].includes('[이전 단계 결과]') && cb.texts[0].includes(aDone.text), '다시 모은 앞 단계 결과');
   assert.ok(cc.texts[0].includes('"빌드"를 네가 맡았어') && !cc.texts[0].includes('[이어서]'), '뒤 단계에는 안 붙인다');

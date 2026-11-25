@@ -567,9 +567,11 @@ export function MissionLog({ s }) {
   const time = (at) => new Date(at).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).slice(-8);
   const L = (m.log || []).slice().reverse();
   const left = (m.criteria || []).filter((c) => c.status !== 'pass').length;
-  // 실패 줄의 종류(결정 0015): 검수에서 걸림 / 한도·바깥 장애
-  const FAIL = { review: t('검수에서 걸림'), outside: t('바깥 장애'), blocked: t('막힘'), hole: t('구멍'), keep: t('지킬 것 어김') };
-  const text = (x) => html`<span>${x.text}${x.fail && FAIL[x.fail] ? html` <span class="chip warn">${FAIL[x.fail]}</span>` : ''}</span>`;
+  // 실패 줄의 종류(결정 0015·0022): 코드가 아는 사실로 붙인 종류. 넘겨받음은 기다린 앞 카드에 결과가 없었다는 것, 원인 모름은 보통 오류
+  const FAIL = { review: t('검수에서 걸림'), outside: t('바깥 장애'), blocked: t('막힘'), hole: t('구멍'), keep: t('지킬 것 어김'), input: t('넘겨받음'), unknown: t('원인 모름') };
+  // 막힘 줄에 에이전트가 블록에 적은 종류(결정 0022). 코드가 정한 종류가 아니라서 "에이전트가 적음"을 같이 보인다. 안 적었거나 모르는 값이면 칩 없음
+  const TOLD = { unclear: t('지시가 모호함'), input: t('넘겨받은 것이 틀림'), capability: t('권한·도구가 없음'), dependency: t('다른 일이 먼저') };
+  const text = (x) => html`<span>${x.text}${x.fail && FAIL[x.fail] ? html` <span class="chip warn">${FAIL[x.fail]}</span>` : ''}${x.agentKind && TOLD[x.agentKind] ? html` <span class="chip" title=${t('에이전트가 막힘 블록에 적은 종류야(사용자 확인 안 함).')}>${TOLD[x.agentKind]} · ${t('에이전트가 적음')}</span>` : ''}</span>`;
   return html`<div>
     <div class="card"><h4>🎯 ${t('목표')} <span class=${`chip${cls}`}>${label}</span></h4>
       <div>${m.goal || html`<span class="muted">${t('(아직 없음)')}</span>`}</div>

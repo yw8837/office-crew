@@ -180,7 +180,7 @@ function handle(type, d) {
       break;
     }
     case 'messageUsage': { const m = findMsg(d.sessionId, d.messageId); if (m) { m.usage = d.usage; m._v++; } break; }
-    case 'messageMeta': { const m = findMsg(d.sessionId, d.messageId); if (m) { m.model = d.model; if (d.provider) Object.assign(m, { provider: d.provider, effort: d.effort, failover: true }); m._v++; } break; }
+    case 'messageMeta': { const m = findMsg(d.sessionId, d.messageId); if (m) { m.model = d.model; if (d.provider) Object.assign(m, { provider: d.provider, effort: d.effort, failover: true }); if (d.route) m.route = d.route; m._v++; } break; }
     case 'cooldown': state.cooldown = d; break;
     case 'agentState':
       (state.live[d.sessionId] ||= {})[d.agentId] = d;

@@ -4,6 +4,10 @@
 - Date: 2026-11-20
 - Related: [0014](0014-goal-mode-confirmed-goal-card.md) (the goal card, the restart rule), [0015](0015-goal-mode-fresh-review.md) (the criteria check, returns, the waits and the call cap), [0010](0010-meetings-take-turns.md) and [0011](0011-meetings-pause-for-research.md) (meetings and their research turns), [0012](0012-claude-usage-counts-the-whole-tree.md) (usage baseline), [0013](0013-agents-keep-role-notes.md) (role-note hash), `server/mission.js` (`stageDiff`, `sameStages`, `teamRoles`, `resumePoint`, `pastOutputs`, `cutMission`), `server/orchestrator.js` (`resumeMission`, `confirmMission`, `#start`, `#missionRun`, `#missionWork`, `#runStage`, `#missionAt`, `#atWorking`, `#runAgent`, `#capCheck`, `#missionAsk`, `#reviewStage`, `#stagePrev`, `#prompt`, `#missionEnd`, `stopAll`, `recover`, `send`), `server/store.js` (`#fixStale`), `server/index.js` (`POST /api/sessions/:id/mission/resume`), `public/js/views/mission.js` (`CutBox`, `resumeFrom`), `public/js/views/session.js`, `test/mission-resume.test.js`
 
+## Revision (2026-11-25, with [0022](0022-goal-mode-records-and-block-allow-list.md))
+
+The "[Continuing]" line now ends with "Don't repeat anything already sent outside." ([0022](0022-goal-mode-records-and-block-allow-list.md); a written instruction only).
+
 ## Context
 
 Office Crew starts the CLIs itself, so when the app closes while a goal runs, the run is gone. Since 0014 such a goal turns `cut` at the next start and can only be discarded: the user sends the request again, and every stage, and the calls they cost, start over even when most of the work was done. Continuing needs to know where the run was, what the earlier stages produced, who was cut in the middle of a turn, and what to do with their CLI conversations.

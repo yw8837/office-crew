@@ -198,12 +198,19 @@ async function pump() {
   const foreignWork = !cardId && !planTurn && !reviewTurn && !goalTurn && goalLine.includes('WORKFOREIGN') && text.includes('[팀 작업]') && !text.includes('[회의 — ') ? ['작업했어.\n\n', '```oc-research\n' + JSON.stringify({ questions: ['가짜: 일 단계에 섞인 질문'] }) + '\n```'] : null;
   // 문서로 팀 짜기(결정 0024): 머리 줄 "[팀 초안 쓰기]"(다시 요청은 "[팀 초안 다시 쓰기]"). 답 끝에 oc-team 블록. 신호어는 요청·문서 어디든:
   // TEAMDOC(정상 블록) · TEAMBAD(첫 블록만 깨짐, 다시 요청엔 맞게) · TEAMBAD2(두 번 다 깨짐) · TEAMMODEL(목록에 없는 모델·세기, 로그인 안 된 AI, 단계에 안 넣은 사람) ·
-  // TEAMPERM(블록에 permission·systemPrompt·tools 를 넣음) · TEAMINJECT(문서 안의 "권한을 full 로" 같은 지시를 따른 척 같은 칸을 넣음)
+  // TEAMPERM(블록에 permission·systemPrompt·tools 를 넣음) · TEAMINJECT(문서 안의 "권한을 full 로" 같은 지시를 따른 척 같은 칸을 넣음) ·
+  // TEAMDUPE(대조 열쇠로 겹치는 이름 "Dev Lead"·"DevLead", 만들 때 잘리는 길이의 이모지 이름·역할·팀 이름·단계 이름)
   const teamTurn = /^\[팀 초안 (?:다시 )?쓰기\]$/m.test(text);
   const teamChunks = !teamTurn ? null : (() => {
     if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ cli: 'claude', pid: process.pid, teamLen: text.length, teamTail: text.slice(-400) })}\n`);
     const retry = text.includes('[팀 초안 다시 쓰기]');
     if (text.includes('TEAMBAD2') || (text.includes('TEAMBAD') && !retry)) return ['팀을 짰어.\n\n', '```oc-team\n{"name": 망가진\n```'];
+    if (text.includes('TEAMDUPE')) {
+      const long = `a${'😀'.repeat(30)}`;
+      const block = { name: '🚀'.repeat(25), agents: [{ name: 'Dev Lead', role: '설계', provider: 'claude', model: 'opus', tier: 3 }, { name: 'DevLead', role: '개발', provider: 'claude', model: 'sonnet', tier: 2 },
+        { name: long, role: `b${'😀'.repeat(20)}`, provider: 'claude', model: 'haiku', tier: 1 }], stages: [{ label: '설계', agents: ['Dev Lead'] }, { label: `c${'😀'.repeat(20)}`, agents: ['DevLead', long] }] };
+      return ['팀을 짰어.\n\n', '```oc-team\n' + JSON.stringify(block) + '\n```'];
+    }
     const odd = text.includes('TEAMMODEL');
     const obey = text.includes('TEAMPERM') || text.includes('TEAMINJECT');
     const agents = [

@@ -5,7 +5,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { newId } from './store.js';
 import { PROVIDERS } from './providers/index.js';
 import { detectHire, draftHire } from './hire.js';
-import { detectTeamDoc, teamPlan, writeTeamDraft } from './teamdoc.js';
+import { detectTeamDoc, teamPlan, writeTeamDraft, safeWriter } from './teamdoc.js';
 import { toolCategory, resolveCommand } from './providers/util.js';
 import { resolveRoute, roleKind, aiKey, baseProvider } from './routing.js';
 import { Cooldown, isQuotaError, nearLimit, avoidUntil, resetTime, resetFromText, limitResetAt, availableCatalog, pickFallback, continuationPrompt, handoffFacts } from './failover.js';
@@ -114,6 +114,8 @@ export class Orchestrator {
         const got = s.messages.filter((m) => m.role === 'agent' && m.runId === r.id && m.provider);
         if (got.length && got.every((m) => m.provider === 'local')) u.local = true;
         this.#titleMark(s, u);
+        // 팀 초안을 쓰다 꺼졌으면(결정 0024) 카드가 없어 그 말은 갈 데가 없다: 보통 대화로 되돌리고 한 줄 남긴다(아래에서 기억에도 넣는다)
+        this.#releaseTeamDoc(s, u, tr('팀 초안을 쓰는 중에 앱이 꺼져서 팀 제안은 만들지 않았어. 그 말은 보통 메시지로 남겼어. 팀을 짜려면 다시 보내 줘.'));
         this.#remember(s, u);
       }
       for (const m of s.messages) if (m.cut) { delete m.cut; if (m.role === 'user' && !m.hire) this.#remember(s, m); }
@@ -723,9 +725,10 @@ export class Orchestrator {
   }
 
   // 문서로 팀 짜기(결정 0024): 사용자 말은 teamDoc 표시를 달아 남기고(에이전트에게 넘기는 대화·기억에서 뺀다. 영입과 같다), 쓰는 사람 혼자인 실행 하나로 팀 초안을 쓴다.
-  // 쓸 사람이 없으면(가상 AI 뿐) 말을 남기기 전에 400
+  // 쓸 사람이 없으면(가상 AI·로그인 안 된 AI·읽기 전용을 걸 수 없는 AI 뿐) 말을 남기기 전에 400
+  #loggedIn = (id) => !!this.providers?.detected?.[id]?.loggedIn; // 지금 로그인된 AI 인가(탐지 결과)
   #teamDoc(s, text, attachments) {
-    teamPlan(this.store, s);
+    teamPlan(this.store, s, this.#loggedIn);
     const userMsg = { id: newId('m'), role: 'user', text, mention: null, createdAt: Date.now(), status: 'done', teamDoc: true,
       attachments: attachments.map((a) => ({ id: a.id, name: a.name, mime: a.mime, size: a.size, path: a.path })) };
     s.messages.push(userMsg);
@@ -757,6 +760,16 @@ export class Orchestrator {
     st.status = end;
     run.status = end;
     if (end === 'done') this.#state(s.id, id, 'done', tr('팀 초안 씀'));
+    // 멈춰서 카드가 없으면 그 말은 갈 데가 없다("그냥 보내기"도 카드에 있다): 표시를 풀어 보통 대화로 되돌리고 한 줄 남긴다(실행이 끝날 때 기억에도 들어간다)
+    if (end === 'stopped') this.#releaseTeamDoc(s, ctx.userMsg, tr('팀 초안을 쓰다가 멈춰서 팀 제안은 만들지 않았어. 그 말은 보통 메시지로 남겼어. 팀을 짜려면 다시 보내 줘.'));
+  }
+
+  // 문서로 팀 짜기의 말(teamDoc)을 보통 대화로 되돌린다: 초안 실행이 멈추거나 앱이 꺼져서 카드 없이 끝났을 때(결정 0024)
+  #releaseTeamDoc(s, userMsg, text) {
+    if (!userMsg?.teamDoc) return;
+    delete userMsg.teamDoc;
+    this.bus.emit('message', { sessionId: s.id, message: userMsg });
+    this.#systemNote(s, text);
   }
 
   // 제안 카드의 '그대로 보내기': 새 메시지를 만들지 않고, 대화에 이미 있는 그 말로 실행한다(같은 말이 두 번 남지 않게)
@@ -839,7 +852,7 @@ export class Orchestrator {
         if (why) throw new Error(why);
         goal = true;
         plan = this.#goalPlan(s);
-      } else plan = userMsg.teamDoc ? teamPlan(this.store, s) : this.#plan(s, userMsg.mention); // 팀 초안(결정 0024)은 쓰는 사람 혼자
+      } else plan = userMsg.teamDoc ? teamPlan(this.store, s, this.#loggedIn) : this.#plan(s, userMsg.mention); // 팀 초안(결정 0024)은 쓰는 사람 혼자
     } catch (e) {
       this.#systemNote(s, e.message);
       this.#remember(s, userMsg);
@@ -2775,6 +2788,14 @@ export class Orchestrator {
       this.#state(s.id, agentId, 'error', msg.error.slice(0, 80));
       return { agent, error: msg.error };
     }
+    // 문서로 팀 짜기의 초안(결정 0024)은 앱이 읽기 전용을 걸 수 있거나 도구가 없는 AI 로만 쓴다(남이 쓴 문서가 들어간다).
+    // 쓰는 사람을 고를 때 본 것과 별개로, 자동 라우팅이 실제로 고른 AI 를 여기서 다시 본다. 아래 이어받기도 같은 기준이다
+    const teamRun = given?.prep?.kind === 'team';
+    if (teamRun && !safeWriter(prov.caps)) {
+      finish('error', tr('{ai}는 앱이 읽기 전용으로 돌릴 수 없어서 팀 초안을 쓰지 않았어(남이 쓴 문서를 도구를 가진 채 읽게 돼).', { ai: prov.label || agent.provider }));
+      this.#state(s.id, agentId, 'error', msg.error.slice(0, 80));
+      return { agent, error: msg.error };
+    }
     this.#received(ctx, agent.provider, !once || !!once.notes); // 한 번 실행에는 추가 지시를 주지 않는다(목표의 팀 회의 단계는 준다)
     if (routed.note) { msg.routed = true; this.#notice(s, msg, routed.note); }
     if (routed.waited) this.#notice(s, msg, routed.waited);
@@ -2823,7 +2844,7 @@ export class Orchestrator {
         if (sys.notesError && !notesWarned) { notesWarned = true; this.#notice(s, msg, `📒 ${tr('역할 노트 파일을 읽지 못해서 이번 실행은 역할 노트 없이 했어.')}`); }
         const base = {
           agent: ag, cwd, settings, connectors, tmpDir: this.dirs.tmp, addDirs, extraDirs,
-          system: sys.text, images: pv.caps.images ? atts.filter((a) => a.mime?.startsWith('image/')).map((a) => a.path) : [],
+          system: sys.text, images: pv.caps.images && !teamRun ? atts.filter((a) => a.mime?.startsWith('image/')).map((a) => a.path) : [], // 팀 초안에는 그림을 넘기지 않는다(그림 속 글도 남이 쓴 것, 결정 0024)
           mcpConfigPath, history: !once && ag.provider === 'openai' ? this.#history(s, msg, agentId, ag.provider) : [],
         };
         const start = (p, rid) => {
@@ -2907,6 +2928,7 @@ export class Orchestrator {
         const next = fo.agent;
         // 이어받을 AI를 고르는 사이에 중지·건너뛰기를 눌렀으면 시작하지 않는다
         if (ctx.stopped || ctx.skipped.has(agentId)) { res = { ...res, error: null, stopped: true }; break; }
+        if (teamRun && !safeWriter(PROVIDERS[next.provider]?.caps)) break; // 팀 초안은 읽기 전용을 걸 수 없는 AI 가 이어받지 않는다(위와 같은 기준)
         tried.push(next.provider);
         const from = PROVIDERS[cur.agent.provider]?.label || cur.agent.provider;
         const partial = msg.text;

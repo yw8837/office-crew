@@ -15,6 +15,12 @@ const WARN = () => ({
   effort: t('그 모델이 받는 세기로 바꿨어'),
   suspect: t('지시처럼 보이는 글이 있어. 이름·역할을 확인해 줘'),
 });
+// 가장 넓은 두 권한(전부 허용·자동 판단)을 고르면 에이전트 편집 화면과 같은 경고 상자를 띄운다
+const WIDE = () => ({
+  full: t('전부 허용은 에이전트가 승인 없이 명령을 실행하고 파일을 바꿔. 믿을 수 있는 작업 폴더에서만 써.'),
+  auto: t('자동 판단은 CLI가 스스로 허용 여부를 정해서 승인 없이 명령을 실행하거나 파일을 바꿀 수 있어. 믿을 수 있는 작업 폴더에서만 써.'),
+});
+const wideBox = (p) => WIDE()[p] && html`<div class="warnbox" style="margin-top:6px">⚠ ${WIDE()[p]}</div>`;
 const providerName = (id) => state.providers.find((p) => p.id === id)?.label || id;
 // AI · 모델 · 세기(자동 라우팅이면 프로필)
 const aiText = (a) => (a.routing === 'auto' ? `✨ ${t('자동 라우팅')} · ${PROFILE()[a.routingProfile] || a.routingProfile}`
@@ -54,6 +60,9 @@ export function TeamCard({ m }) {
     <div class="hire-head"><b>👥 ${t('팀 제안')}: ${d.name}</b><span class="chip">${t('에이전트 {n}명', { n: d.agents.length })}</span>
       <span class="small muted">${t('AI가 문서를 읽고 쓴 초안이야. 만들기를 눌러야 생겨.')}</span></div>
     ${m.cut && html`<div class="warnbox" role="note">${t('문서가 길어서 앞부분만 읽었어.')}</div>`}
+    ${(m.renamed || []).map((r) => html`<div class="warnbox" role="note">⚠ ${r.kind === 'team'
+      ? t('팀 이름에 지시처럼 보이는 글이 있어서 "{name}"(으)로 바꿨어. 원래 표현: {text}', { name: d.name, text: r.text })
+      : t('{n}번째 단계 이름에 지시처럼 보이는 글이 있어서 "{name}"(으)로 바꿨어. 원래 표현: {text}', { n: r.n, name: d.stages[r.n - 1]?.label || '', text: r.text })}</div>`)}
     <div class="team-table-wrap"><table class="team-table">
       <thead><tr>${cols.map((c) => html`<th scope="col">${c}</th>`)}</tr></thead>
       <tbody>${d.agents.map((a, i) => html`<tr key=${`a${i}`}>
@@ -62,7 +71,8 @@ export function TeamCard({ m }) {
         <td data-label=${cols[2]}>${aiText(a)}</td>
         <td data-label=${cols[3]} class="small">${a.said || '—'}</td>
         <td data-label=${cols[4]}><${PermSelect} value=${permOf(i)} label=${t('{name}의 권한', { name: a.name })} onChange=${(v) => setEach({ ...each, [i]: v })} />
-          ${a.suggest === 'edit' && permOf(i) !== 'edit' && html`<div class="small muted">${t('파일을 고치는 역할이면 "파일 편집 허용"이 필요할 수 있어')}</div>`}</td>
+          ${a.suggest === 'edit' && permOf(i) !== 'edit' && html`<div class="small muted">${t('파일을 고치는 역할이면 "파일 편집 허용"이 필요할 수 있어')}</div>`}
+          ${each[i] && wideBox(each[i])}</td>
       </tr>${a.warn?.length ? html`<tr key=${`w${i}`} class="team-warn"><td colspan="5">⚠ ${a.warn.map((w) => WARN()[w] || w).join(' · ')}</td></tr>` : ''}`)}</tbody>
     </table></div>
     <div class="small"><b>${t('단계')}</b> ${d.stages.map((st, k) => `${k + 1}. ${st.label} (${st.agents.join(' · ')})`).join(' → ')}</div>
@@ -72,6 +82,7 @@ export function TeamCard({ m }) {
       <label class="hire-check team-all"><span>${t('전원 권한')}</span><${PermSelect} value=${all} label=${t('전원 권한')} onChange=${(v) => { setAll(v); setEach({}); }} /></label>
       <label class="hire-check"><input type="checkbox" checked=${sw} onChange=${(e) => setSw(e.target.checked)} /> <span>${t('이 세션을 이 팀으로 바꾸기')}</span></label>
     </div>
+    ${wideBox(all)}
     <div class="hire-acts">
       <button class="btn primary sm" disabled=${busy} onClick=${() => act('accept', { rev: m.rev || 0, permission: all, permissions: each, switchTeam: sw })}><${Icon} name="plus" /> ${t('만들기')}</button>
       <button class="btn sm" disabled=${busy} onClick=${() => act('dismiss')}>${t('그만')}</button>

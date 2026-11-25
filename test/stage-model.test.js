@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { stageModel, openQuestions, requestOf, personInfo, stationInfo, meetLabel, goalWait, holdKind, MAX_STATIONS, MAX_PEOPLE } from '../public/js/stage-model.js';
+import { stageModel, openQuestions, requestOf, personInfo, stationInfo, meetLabel, goalWait, holdKind, fmtClock, critFold, ANSWER_BOX, MAX_STATIONS, MAX_PEOPLE, MAX_CRIT } from '../public/js/stage-model.js';
 import en from '../public/js/i18n/en.js';
 import zh from '../public/js/i18n/zh.js';
 import ja from '../public/js/i18n/ja.js';
@@ -111,7 +111,7 @@ test('6. 내 차례 5종(승인·질문·목표 판정·호출 상한·목표 �
   const verdict = model({ run: runOf(['done', 'done', 'done', 'done'], { missionId: 'G', stageIndex: 3, status: 'waiting', hold: { reason: 'mission', kind: 'verdict', stageIndex: 3, left: [{ id: 'c2' }], at: 1 } }, rv), mission: M({ status: 'waiting' }) });
   assert.deepEqual([verdict.ask.kind, gates(verdict), st(verdict, 3).state, verdict.ask.short], ['verdict', [[3, 'verdict']], 'wait', '남은 기준 1개']);
   assert.deepEqual(st(verdict, 3).review.map((c) => [c.id, c.verdict]), [['c1', 'pass'], ['c2', 'fail']]);
-  assert.deepEqual([verdict.meta.criteria, verdict.meta.calls], [{ pass: 1, total: 2 }, { used: 12, cap: 40 }]);
+  assert.deepEqual([verdict.meta.criteria, verdict.meta.calls], [{ pass: 1, total: 2, judged: true }, { used: 12, cap: 40 }]);
   // 호출 상한은 단계를 시작하기 전에 멈춘다: 문은 그 단계 앞
   const cap = model({ run: runOf(['done', 'done', 'pending', 'pending'], { missionId: 'G', stageIndex: 2, status: 'waiting', hold: { reason: 'cap', stageIndex: 2, used: 40, cap: 40, step: 20, at: 1 } }), mission: M() });
   assert.deepEqual([cap.ask.kind, gates(cap), st(cap, 2).state, cap.ask.short], ['cap', [[1, 'cap']], 'todo', '40/40 다 씀']);
@@ -157,7 +157,7 @@ test('8. 오류 대기, 끊긴 목표, 서버 연결 끊김', () => {
 test('9. 끝남(통과·받아들임·중지·오류)과 건너뛴 단계. 끝난 실행에는 내 차례·지난 상태가 남지 않는다', () => {
   const allDone = runOf(['done', 'done', 'done', 'done'], { missionId: 'G', status: 'done', endedAt: 9, stageIndex: 3 });
   const pass = model({ run: allDone, mission: M({ status: 'done', criteria: [{ id: 'c1', status: 'pass' }, { id: 'c2', status: 'pass' }] }) });
-  assert.deepEqual([pass.end.kind, pass.end.text, pass.goal.kind, pass.done, pass.ask, pass.now.text], ['pass', '통과로 끝', 'done', { pass: 2, total: 2 }, null, '통과로 끝 · 기준 2/2']);
+  assert.deepEqual([pass.end.kind, pass.end.text, pass.goal.kind, pass.done, pass.ask, pass.now.text], ['pass', '통과로 끝', 'done', { pass: 2, total: 2, judged: true }, null, '통과로 끝 · 기준 2/2']);
   const acc = model({ run: allDone, mission: M({ status: 'accepted' }) });
   assert.deepEqual([acc.end.text, acc.goal.kind, acc.now.text], ['받아들여 끝', 'accepted', '받아들여서 끝냈어']);
   const stopped = model({ run: runOf(['done', 'stopped', 'pending', 'pending'], { status: 'stopped', endedAt: 9, stageIndex: 1 }), live: { p: { state: 'waiting' }, m: { state: 'thinking' } } });
@@ -206,6 +206,112 @@ test('11. 무대의 새 문구 키가 en·zh·ja 사전에 모두 있다', () =>
     assert.deepEqual(missing, [], `${lang} 누락`);
   }
   assert.equal(requestOf([{ id: 'u1', text: '요청 글' }], { userMessageId: 'u1' }), '요청 글');
+});
+
+// ── 검토와 화면 확인에서 나온 장면 ──
+test('16. 기준은 판정이 하나도 없으면 "기준 n개"(judged 없음), 시각은 24시간 HH:MM', () => {
+  const m = model({ run: runOf(['running', 'pending', 'pending', 'pending'], { missionId: 'G' }), mission: M({ criteria: [{ id: 'c1', status: 'open' }, { id: 'c2', status: 'open' }] }) });
+  assert.deepEqual(m.meta.criteria, { pass: 0, total: 2, judged: false });
+  const day = new Date();
+  day.setHours(16, 27, 0, 0);
+  const now = new Date(day);
+  now.setHours(9, 0, 0, 0);
+  const clock = fmtClock(day.getTime(), now.getTime());
+  assert.match(clock, /16:27/);
+  assert.doesNotMatch(clock, /오후|PM/i, '오전·오후 표기 없이');
+  const tomorrow = fmtClock(day.getTime() + 86400000, now.getTime());
+  assert.match(tomorrow, /16:27/);
+  assert.notEqual(tomorrow, clock, '오늘이 아니면 날짜가 붙는다');
+});
+
+test('17. 목표 카드 확인 대기면 끝 깃발은 열림, 카드를 닫았거나 목표를 멈췄으면 목표 상태를 실행 상태보다 먼저 본다', () => {
+  const goalTurn = { id: 'g', missionId: 'G', status: 'done', endedAt: 3, stageIndex: 0, stages: [{ label: '목표 잡기', agentIds: ['p'], status: 'done' }] };
+  const draft = model({ run: goalTurn, mission: M({ status: 'draft', cardMsgId: 'card1' }) });
+  assert.deepEqual([draft.end.kind, draft.progress, draft.ask.kind], ['open', '시작 전', 'confirm']);
+  const cancelled = model({ run: goalTurn, mission: M({ status: 'cancelled' }) });
+  assert.deepEqual([cancelled.end, cancelled.now.text, cancelled.progress, cancelled.goal.kind, cancelled.ask], [{ kind: 'stopped', text: '닫힘' }, '목표 카드를 닫았어.', '닫힘', 'stopped', null]);
+  const stopped = model({ run: runOf(['done', 'stopped', 'pending', 'pending'], { missionId: 'G', status: 'stopped', endedAt: 9, stageIndex: 1 }), mission: M({ status: 'stopped' }) });
+  assert.deepEqual([stopped.end.kind, stopped.end.text, stopped.now.text], ['stopped', '중지됨', '중지됨']);
+});
+
+test('18. 회의 참석자가 5명이어도 말하는 사람·반대편·진행자·조사하러 간 사람은 +n 뒤로 숨지 않는다', () => {
+  const big = { 1: { agentIds: ['p', 'r', 'm', 'w', 'q'] } };
+  const turn = model({ run: runOf(['done', 'running', 'pending', 'pending'], { stageIndex: 1 }, { 1: { ...big[1], meetingNow: { phase: 'turn', round: 2, rounds: 3, speakerId: 'q', opposerId: 'w' } } }), live: { q: { state: 'typing', detail: '근거는 이거야', at: 3 } } });
+  const s = st(turn, 1);
+  assert.equal(s.more, 1);
+  assert.deepEqual(s.people.slice(0, 3).map((p) => p.id), ['q', 'w', 'p'], '말하는 사람 → 반대편 → 진행자');
+  assert.deepEqual(s.meeting.speaker, { name: '검수', detail: '근거는 이거야', opp: false, chair: false }, '말 줄은 보이는 사람과 상관없이 모델이 준다');
+  const research = model({ run: runOf(['done', 'running', 'pending', 'pending'], { stageIndex: 1 }, { 1: { ...big[1], meetingNow: { phase: 'research', round: 2, rounds: 3, speakerId: 'q', opposerId: 'w' } } }) });
+  assert.ok(st(research, 1).people.some((p) => p.id === 'q' && p.away), '조사하러 간 사람의 빈자리도 보인다');
+  assert.deepEqual([st(research, 1).meeting.away, st(research, 1).meeting.awayName], ['q', '검수']);
+});
+
+test('19. 이번 실행에 없는 에이전트의 지난 실시간 상태는 "지금" 줄·한도 표시에 섞이지 않는다', () => {
+  const live = { r: { state: 'thinking', detail: '생각 중…', at: 1 }, w: { state: 'typing', detail: '옛 실행의 글', at: 99 }, q: { state: 'paused', detail: '한도가 곧 풀려서 기다리는 중' } };
+  const m = model({ run: runOf(['running', 'pending', 'pending', 'pending']), live });
+  assert.equal(m.now.text, '조사 · 생각 중…');
+  assert.equal(m.limit, null);
+});
+
+test('20. 카드 되풀이 상한은 단계 앞 문(역은 기다림으로 칠하지 않는다), 막힘은 막힌 단계 뒤, 추가 지시·판정은 판정 역 뒤, 일시정지는 알약만', () => {
+  const holdAt = (hold, statuses = ['done', 'done', 'done', 'pending']) => model({ run: runOf(statuses, { missionId: 'G', stageIndex: hold.stageIndex, status: 'waiting', hold: { at: 1, ...hold } }, { 3: { mission: 'review' } }), mission: M() });
+  const limit = holdAt({ reason: 'mission', kind: 'limit', stageIndex: 2, cards: [{ id: 'k1' }] });
+  assert.deepEqual([limit.ask.kind, gates(limit), st(limit, 2).state, st(limit, 2).ask, limit.ask.short], ['limit', [[1, 'limit']], 'done', false, 'k1']);
+  const blocked = holdAt({ reason: 'mission', kind: 'blocked', stageIndex: 2, blocked: [{ name: '만들기' }] }, ['done', 'done', 'done', 'pending']);
+  assert.deepEqual([blocked.ask.kind, gates(blocked), st(blocked, 2).state], ['blocked', [[2, 'blocked']], 'wait']);
+  const notes = holdAt({ reason: 'mission', kind: 'notes', stageIndex: 3, notes: 2 }, ['done', 'done', 'done', 'done']);
+  assert.deepEqual([notes.ask.kind, gates(notes), notes.ask.short], ['notes', [[3, 'notes']], '반영 안 한 추가 지시 2개']);
+  const paused = model({ run: runOf(['done', 'pending', 'pending', 'pending'], { stageIndex: 1, status: 'paused' }) });
+  assert.deepEqual([paused.ask.kind, paused.ask.target, gates(paused)], ['paused', 'gate', []]);
+});
+
+test('21. 단계 9개에 지금 0번이면 앞으로 올 역은 접지 않는다(역 줄을 가로로 민다), 밀어 보일 곳은 지금 역', () => {
+  const stages = Array.from({ length: 9 }, (_, i) => ({ label: `단계${i + 1}`, agentIds: ['r'], status: i === 0 ? 'running' : 'pending' }));
+  const m = stageModel({ agents: AG, run: { id: 'r9', status: 'running', stageIndex: 0, endedAt: null, stages } });
+  assert.deepEqual([m.folded, m.stations.length, m.scrollTo], [0, 9, 0]);
+  const waitGate = model({ run: { id: 'g', missionId: 'G', status: 'done', endedAt: 3, stageIndex: 0, stages: [{ label: '목표 잡기', agentIds: ['p'], status: 'done' }] }, mission: M({ status: 'draft' }) });
+  assert.equal(waitGate.scrollTo, 0, '지금 역이 없으면 내 차례 문 자리');
+});
+
+test('22. 역의 툴팁·이름과 +n 은 자르기 전 전체 이름을 쓴다, 기준 조각은 한 줄에 넘치면 +n', () => {
+  const six = { 2: { agentIds: ['m', 'w', 'r', 'p', 'q', 'x1'] } };
+  const m = stageModel({ agents: [...AG, { id: 'x1', name: '여섯째' }], run: runOf(['done', 'done', 'running', 'pending'], { stageIndex: 2 }, six) });
+  assert.deepEqual([st(m, 2).names.length, st(m, 2).hiddenNames, st(m, 2).more], [6, ['검수', '여섯째'], 2]);
+  const five = Array.from({ length: 5 }, (_, i) => ({ id: `c${i + 1}`, verdict: 'pass' }));
+  assert.deepEqual([critFold(five).shown.length, critFold(five).hidden.length], [MAX_CRIT - 1, 5 - MAX_CRIT + 1]);
+  assert.deepEqual(critFold(five.slice(0, MAX_CRIT)).hidden, [], '다 들어가면 접지 않는다');
+});
+
+test('23. 답 창 자리(ANSWER_BOX)의 클래스 이름이 session.js·mission.js 원문에 실제로 있다', () => {
+  const src = ['public/js/views/session.js', 'public/js/views/mission.js'].map((f) => fs.readFileSync(path.join(root, f), 'utf8')).join('\n');
+  const sels = [ANSWER_BOX.gate, ANSWER_BOX.ask, ANSWER_BOX.askMini, ANSWER_BOX.cut, ANSWER_BOX.card('m1')].join(' ');
+  const classes = [...new Set([...sels.matchAll(/\.([a-z][\w-]*)/g)].map((x) => x[1]))];
+  assert.deepEqual(classes.sort(), ['ask-mini', 'ask-panel', 'chat', 'chat-inner', 'composer-wrap', 'gate', 'goal-card', 'mission-gate', 'session', 'warnbox'].sort());
+  // 클래스 글 안에 그 이름이 낱말로 있다(class="… gate …" 나 class=${'warnbox row'} 같은 꼴)
+  for (const c of classes) assert.match(src, new RegExp(`class=(?:"|\\$\\{[^}]*['\`"])[^"'\`]*(?<![\\w-])${c}(?![\\w-])`), `${c} 클래스가 화면 파일에 없다`);
+  assert.match(src, /data-mid=\$\{m\.id\}/, '메시지 자리의 data-mid');
+  // 끊긴 목표 알림·질문 창이 입력창 묶음 안에 그려진다(그래서 .composer-wrap 아래에서 찾는다)
+  const composer = src.slice(src.indexOf('<div class="composer-wrap">'), src.indexOf('<div class="composer-wrap">') + 400);
+  assert.match(composer, /<\$\{AskPanel\}/);
+  assert.match(composer, /<\$\{CutBox\}/);
+});
+
+test('24. 회의 단계를 되돌리면 카드는 서버가 고치게 하는 사람(진행자 leadId 가 그 단계에 있으면 그 사람, 없으면 첫 에이전트)에게', () => {
+  const back = (leadId) => model({ run: runOf(['done', 'running', 'done', 'done'], { missionId: 'G', stageIndex: 1 }), mission: M({ leadId, at: { stageIndex: 1, back: true }, returns: 1 }) });
+  const inStage = st(back('m'), 1);
+  assert.deepEqual(inStage.people.filter((p) => p.held).map((p) => p.id), ['m'], '진행자(회의의 chair 가 아니라 목표의 leadId)');
+  assert.deepEqual(st(back('q'), 1).people.filter((p) => p.held).map((p) => p.id), ['p'], '그 단계에 없으면 첫 에이전트');
+});
+
+test('25. 한도 대기 뒤 "지금 다시" 앞의 호출 상한: 이미 돈 단계 안에서 기다린다("오류" 꼬리 없음)', () => {
+  const m = model({ run: runOf(['done', 'done', 'error', 'pending'], { missionId: 'G', stageIndex: 2, status: 'waiting', hold: { reason: 'cap', stageIndex: 2, used: 40, cap: 40, at: 1 } }), mission: M() });
+  assert.deepEqual([m.ask.kind, m.ask.station, gates(m), st(m, 2).state, st(m, 2).ask], ['cap', 2, [], 'wait', true]);
+  assert.equal(m.progress, '3/4 만들기 ×2 · 기다림');
+});
+
+test('26. 지워진 에이전트는 id 대신 "삭제된 에이전트"로, 누를 수 없게(gone)', () => {
+  const m = stageModel({ agents: AG, run: { id: 'x', status: 'running', stageIndex: 0, endedAt: null, stages: [{ label: '정리', agentIds: ['ghost'], status: 'running' }] } });
+  assert.deepEqual([m.stations[0].people[0].name, m.stations[0].people[0].gone, who(st(model({}), 0), 'r').gone], ['삭제된 에이전트', true, false]);
 });
 
 // ── 서버가 실제로 만드는 실행 모양(가짜 CLI) ──

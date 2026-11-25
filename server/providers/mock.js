@@ -1,4 +1,5 @@
-// 데모 어댑터: 실제 AI 호출 없이(사용량 0) 생각→도구→타이핑 흐름을 흉내 낸다. 화면·애니메이션·개입 기능 체험과 테스트용
+// 가상 AI 어댑터: 실제 AI 호출 없이(사용량 0) 생각→도구→타이핑 흐름을 흉내 낸다. 테스트용이다.
+// 화면의 AI 목록에는 나오지 않는다(결정 0021. 예전의 데모 팀·데모 에이전트는 없앴다). API로 provider: 'mock' 에이전트를 만들면 돈다
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHandle } from './util.js';
@@ -38,7 +39,7 @@ function answer(role, name, prompt) {
 
 // ── 회의 차례 ──
 // 회의 단계의 프롬프트에는 차례마다 정해진 형식 문구가 들어 있다. 그 문구로 차례를 알아보고 같은 형식의 짧은 답을 낸다
-// (그러지 않으면 데모 팀으로 회의를 돌렸을 때 "조사 결과" 같은 엉뚱한 글이 나온다)
+// (그러지 않으면 가상 AI 에이전트로 회의를 돌렸을 때 "조사 결과" 같은 엉뚱한 글이 나온다)
 function meetingPhase(prompt) {
   if (prompt.includes(tr('[회의 — 조사 ({r}/{n}바퀴)]').split('{')[0])) return 'research';
   if (prompt.includes(tr('[회의 — 결론 내기]'))) return 'conclude';
@@ -98,7 +99,7 @@ function meetingAnswer(phase, role, opposer, ask, prompt = '') {
 
 // ── 목표 잡기 차례(결정 0014) ──
 // 목표 차례 프롬프트는 코드가 만든 끝 모양(블록 예시 goalBlock())으로 끝난다. 그 끝 모양일 때만 목표 차례로 보고 그럴듯한 목표 카드 블록을 낸다
-// (요청 글에 "[목표 잡기]"가 들어 있다고 착각하지 않게. 데모 팀으로 사용량 0으로 눌러 볼 수 있게)
+// (요청 글에 "[목표 잡기]"가 들어 있다고 착각하지 않게. 테스트가 가상 AI 에이전트로 사용량 0으로 목표 흐름을 돌릴 수 있게)
 const isGoalTurn = (prompt) => String(prompt).trimEnd().endsWith(goalBlock());
 function goalAnswer(prompt) {
   const t = topic(prompt);
@@ -135,7 +136,7 @@ function reviewAnswer({ nonce, goal, round, ids }) {
 
 // ── 일하기 전 조사(결정 0017) ──
 // 훑어보기·조사 프롬프트는 코드가 만든 머리 줄("[조사 전 훑어보기]", "[조사 — 질문 n/m]")로 시작하고, 조사 질문 프롬프트는 블록 예시(researchBlock())로 끝난다.
-// 그 모양일 때만 그 차례로 보고 같은 형식의 짧은 답을 낸다(데모 팀으로 사용량 0으로 조사·회의를 눌러 볼 수 있게)
+// 그 모양일 때만 그 차례로 보고 같은 형식의 짧은 답을 낸다(테스트가 가상 AI 에이전트로 사용량 0으로 조사·회의를 돌릴 수 있게)
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 function prepTurn(prompt) {
   const p = String(prompt);

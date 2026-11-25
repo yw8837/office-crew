@@ -943,7 +943,7 @@ export function RightPanel({ s }) {
   const agents = sessionAgents(s);
   const live = state.live[s.id] || {};
   const lim = state.usage?.limits || {};
-  const today = state.usage?.today || {};
+  const today = Object.fromEntries(Object.entries(state.usage?.today || {}).filter(([p]) => p !== 'mock')); // 가상 AI(mock)는 화면에 보이지 않는다(결정 0021)
   const u = sessionUsage(s);
   const L = (logs[s.id] || []).slice(-60).reverse();
   const run = latestRun(s);

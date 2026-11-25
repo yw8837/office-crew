@@ -401,7 +401,10 @@ function About() {
 // ── 사용량 화면 ──
 export function UsagePage() {
   const u = state.usage || {};
-  const byP = Object.entries(u.byProvider || {});
+  // 가상 AI(mock)는 테스트용이라 AI 목록에 보이지 않는다(결정 0021). 예전 데모 팀이 남긴 누적·오늘 기록도 빼고 그린다
+  const real = ([p]) => p !== 'mock';
+  const byP = Object.entries(u.byProvider || {}).filter(real);
+  const today = Object.entries(u.today || {}).filter(real);
   const byA = Object.entries(u.byAgent || {}).sort((a, b) => usageTotal(b[1]) - usageTotal(a[1]));
   const max = Math.max(1, ...byA.map(([, v]) => usageTotal(v)));
   return html`<div class="page"><div class="page-inner">
@@ -409,8 +412,8 @@ export function UsagePage() {
     <div class="grid2" style="gap:14px">
       <div class="card"><h4>🔋 ${t('계정 한도')}</h4><${Limits} lim=${u.limits} /></div>
       <div class="card"><h4>📅 ${t('오늘')}</h4>
-        ${Object.entries(u.today || {}).map(([p, v]) => html`<div class="stat"><span><${ProviderChip} id=${p} /></span><span>${t('{n} 토큰', { n: fmtTok(usageTotal(v)) })} ${fmtCost(v.cost)} · ${t('{n}회', { n: v.calls })}</span></div>`)}
-        ${!Object.keys(u.today || {}).length && html`<div class="muted small">${t('오늘 기록 없음')}</div>`}
+        ${today.map(([p, v]) => html`<div class="stat"><span><${ProviderChip} id=${p} /></span><span>${t('{n} 토큰', { n: fmtTok(usageTotal(v)) })} ${fmtCost(v.cost)} · ${t('{n}회', { n: v.calls })}</span></div>`)}
+        ${!today.length && html`<div class="muted small">${t('오늘 기록 없음')}</div>`}
       </div>
     </div>
     <div class="section">${t('AI별 누적')}</div>
@@ -419,7 +422,7 @@ export function UsagePage() {
     <div class="section">${t('에이전트별 누적')}</div>
     <div class="list">${byA.map(([id, v]) => {
       const a = agentById(id);
-      return html`<div class="li-row"><div style="width:140px" class="ellipsis"><b>${a?.name || id}</b></div><div class="grow"><div class="bar"><i style=${`width:${(usageTotal(v) / max) * 100}%;background:${providerColor(a?.provider)}`}></i></div></div><b>${fmtTok(usageTotal(v))}</b><span class="muted small">${fmtCost(v.cost)}</span></div>`;
+      return html`<div class="li-row"><div style="width:140px" class="ellipsis"><b>${a?.name || t('삭제된 에이전트')}</b></div><div class="grow"><div class="bar"><i style=${`width:${(usageTotal(v) / max) * 100}%;background:${providerColor(a?.provider)}`}></i></div></div><b>${fmtTok(usageTotal(v))}</b><span class="muted small">${fmtCost(v.cost)}</span></div>`;
     })}${!byA.length && html`<div class="li-row muted">${t('아직 기록이 없어.')}</div>`}</div>
   </div></div>`;
 }

@@ -9,6 +9,7 @@ import { stageModel, openQuestions, requestOf, personInfo, stationInfo, meetLabe
 import en from '../public/js/i18n/en.js';
 import zh from '../public/js/i18n/zh.js';
 import ja from '../public/js/i18n/ja.js';
+import { setLang } from '../public/js/i18n/index.js';
 import { startTestApp } from './helpers.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -193,17 +194,57 @@ test('10. 단계 7개면 지난 역을 접는다, 에이전트 하나뿐인 세�
   assert.deepEqual(st(cards, 2).review.map((c) => c.verdict), ['pass', 'fail'], '아직 안 돈 판정 역은 지난 판정 그대로');
 });
 
-test('11. 무대의 새 문구 키가 en·zh·ja 사전에 모두 있다', () => {
-  const keys = new Set();
-  for (const f of ['public/js/stage-model.js', 'public/js/views/stage.js']) {
-    const src = fs.readFileSync(path.join(root, f), 'utf8');
-    for (const m of src.matchAll(/\bt\(\s*'((?:[^'\\\n]|\\.)*)'/g)) keys.add(m[1].replace(/\\(.)/g, '$1'));
-  }
-  for (const k of ['통과', '불합격', '확인 못 함', '확인 중', '아직']) keys.add(k); // 기준 조각은 표에서 t() 로 부른다
-  assert.ok(keys.size > 50, `키 ${keys.size}개`);
+test('11. 무대 모델을 en·zh·ja 로 돌리면 내는 글(알약·지금 줄·끝 깃발·진행 줄·역·사람·회의 표식)에 한글이 남지 않는다', () => {
+  // test/i18n.test.js 는 소스의 t('…') 글자 키가 사전에 있는지만 본다. 여기서는 모델을 각 언어로 실제로 돌려서
+  // 표·변수로 고른 문구까지 번역되어 나오는지 본다(사전에 없으면 t() 가 한국어 원문을 그대로 낸다).
+  // 이름·단계 이름·목표 글·질문처럼 바깥 글은 영어로 넣는다. 화면(views/stage.js)이 따로 만드는 글은 DOM 없이 돌릴 수 없어 보지 않는다(아래 기준 낱말만 사전에서 본다)
+  const ag = [{ id: 'a', name: 'Ann' }, { id: 'b', name: 'Ben' }, { id: 'c', name: 'Cy' }];
+  const team = { stages: [{ label: 'Plan', agentIds: ['a'] }, { label: 'Talk', agentIds: ['a', 'b', 'c'], meeting: { chairId: 'a', rounds: 3 } }, { label: 'Build', agentIds: ['b', 'c'] }, { label: 'Check', agentIds: ['c'], mission: 'review' }] };
+  const r = (statuses, extra = {}, patch = {}) => ({ id: 'r', missionId: 'G', status: 'running', stageIndex: 0, endedAt: null, userMessageId: 'u', stages: team.stages.map((s, i) => ({ ...s, status: statuses[i], ...(patch[i] || {}) })), ...extra });
+  const g = (over = {}) => ({ id: 'G', status: 'active', goal: 'Ship it', criteria: [{ id: 'c1', text: 'x', status: 'pass' }, { id: 'c2', text: 'y', status: 'open' }], calls: { used: 3, cap: 40 }, at: { stageIndex: 2 }, returns: 0, returnCap: 1, cardMsgId: 'k', ...over });
+  const wait = (hold, statuses = ['done', 'done', 'done', 'pending'], over = {}) => ({ run: r(statuses, { stageIndex: hold.stageIndex, status: 'waiting', hold: { at: 1, ...hold } }), mission: g(over) });
+  const until = Date.now() + 600000;
+  const scenes = {
+    idle: {}, solo: { team: null, solo: { id: 'a', name: 'Ann' } },
+    tool: { run: r(['running', 'pending', 'pending', 'pending']), live: { a: { state: 'running', tool: 'Bash', at: 2 } }, request: 'Do it', mission: null },
+    meet: { run: r(['done', 'running', 'pending', 'pending'], { stageIndex: 1 }, { 1: { meetingNow: { phase: 'turn', round: 2, rounds: 3, speakerId: 'b', opposerId: 'b' } } }), mission: g() },
+    research: { run: r(['done', 'running', 'pending', 'pending'], { stageIndex: 1 }, { 1: { meetingNow: { phase: 'research', round: 2, rounds: 3, speakerId: 'c', opposerId: 'b' } } }), mission: g() },
+    opinion: { run: r(['done', 'running', 'pending', 'pending'], { stageIndex: 1 }, { 1: { meetingNow: { phase: 'opinion', round: 1, rounds: 3 } } }), mission: g() },
+    approve: wait({ reason: 'approve', stageIndex: 2 }, ['done', 'done', 'review', 'pending']), error: wait({ reason: 'error', stageIndex: 2, message: 'x' }, ['done', 'done', 'error', 'pending']),
+    verdict: wait({ reason: 'mission', kind: 'verdict', stageIndex: 3, left: [{ id: 'c2' }] }, ['done', 'done', 'done', 'done']), notes: wait({ reason: 'mission', kind: 'notes', stageIndex: 3, notes: 1 }, ['done', 'done', 'done', 'done']),
+    blocked: wait({ reason: 'mission', kind: 'blocked', stageIndex: 2, blocked: [{ name: 'Ben' }] }), limit: wait({ reason: 'mission', kind: 'limit', stageIndex: 2, cards: [{ id: 'k1' }] }),
+    cap: wait({ reason: 'cap', stageIndex: 2, used: 40, cap: 40 }, ['done', 'done', 'pending', 'pending']), rate: wait({ reason: 'cap', kind: 'rate', stageIndex: 2, used: 20, cap: 20 }, ['done', 'done', 'pending', 'pending']),
+    quota: wait({ reason: 'quota', stageIndex: 2, until, who: [{ agentId: 'b', name: 'Ben' }] }, ['done', 'done', 'error', 'pending']),
+    quotaAuto: wait({ reason: 'quota', stageIndex: 2, until, autoAt: until, who: [{ agentId: 'b', name: 'Ben' }] }, ['done', 'done', 'error', 'pending']),
+    paused: { run: r(['done', 'pending', 'pending', 'pending'], { stageIndex: 1, status: 'paused' }), mission: g() },
+    question: { run: r(['done', 'done', 'running', 'pending'], { stageIndex: 2 }), mission: g(), questions: [{ id: 'q', agentId: 'b', runId: 'r', stageIndex: 2, text: 'Color?' }] },
+    back: { run: r(['done', 'done', 'running', 'done'], { stageIndex: 2 }), mission: g({ at: { stageIndex: 2, back: true }, returns: 1 }) },
+    draft: { run: r(['done'], { status: 'done', endedAt: 2 }), mission: g({ status: 'draft' }) },
+    cut: { run: r(['done', 'done', 'stopped', 'pending'], { status: 'stopped', endedAt: 2, stageIndex: 2 }), mission: g({ status: 'cut' }) },
+    lost: { run: r(['running', 'pending', 'pending', 'pending']), conn: 'lost', mission: g() },
+    ...Object.fromEntries(['done', 'accepted', 'stopped', 'cancelled'].map((s) => [s, { run: r(['done', 'done', 'done', 'done'], { status: 'done', endedAt: 2, stageIndex: 3 }), mission: g({ status: s }) }])),
+    noCard: { run: r(['error'], { status: 'error', endedAt: 2 }), mission: g({ status: 'cancelled', cardMsgId: null }) },
+    runEnds: { run: r(['done', 'skipped', 'error', 'stopped'], { status: 'error', endedAt: 2, stageIndex: 2 }), mission: null },
+    gone: { run: { id: 'x', status: 'running', stageIndex: 0, endedAt: null, stages: [{ label: 'Tidy', agentIds: ['ghost'], status: 'running' }] }, mission: null },
+  };
+  const texts = (m) => [m.goal.text, m.now.text, m.end.text, m.progress, m.ask?.title, m.ask?.short, ...m.stations.flatMap((s) => [s.label, stationInfo(s.state).text, s.meeting?.label, s.meeting?.awayName, ...s.names, ...s.people.map((p) => (p.st ? personInfo(p).text : ''))])];
+  const states = ['todo', 'run', 'done', 'wait', 'limit', 'error', 'skipped', 'stopped', 'cut'];
+  const people = [...['think', 'write', 'meet', 'wait', 'limit', 'error', 'done', 'off', 'idle'].map((st) => ({ st })), ...['search', 'read', 'run', 'edit', 'other'].map((tool) => ({ st: 'tool', tool })), { st: 'meet', speaker: true }];
+  try {
+    for (const lang of ['en', 'zh', 'ja']) {
+      setLang(lang);
+      for (const [name, input] of Object.entries(scenes)) {
+        const bad = texts(stageModel({ agents: ag, team, ...input })).filter((x) => /[가-힣]/.test(x || ''));
+        assert.deepEqual(bad, [], `${lang} · ${name}`);
+      }
+      const tables = [...states.map((s) => stationInfo(s).text), ...people.map((p) => personInfo(p).text), ...['opinion', 'turn', 'research', 'judge', 'conclude', 'review'].map((phase) => meetLabel({ phase, round: 1, rounds: 2 }))];
+      assert.deepEqual(tables.filter((x) => /[가-힣]/.test(x)), [], `${lang} · 역·사람·회의 표`);
+    }
+  } finally { setLang('ko'); }
+  assert.equal(meetLabel({ phase: 'conclude' }), '결론', '한국어로 돌아왔다(뒤 테스트는 한국어 문구로 본다)');
+  // 기준 조각 낱말은 views/stage.js 의 표(CR)에서 t() 로 부른다: i18n.test.js 의 글자 키 모으기에 안 잡혀서 사전에 있는지 여기서 본다
   for (const [lang, dict] of Object.entries({ en, zh, ja })) {
-    const missing = [...keys].filter((k) => typeof dict[k] !== 'string' || !dict[k].trim());
-    assert.deepEqual(missing, [], `${lang} 누락`);
+    assert.deepEqual(['통과', '불합격', '확인 못 함', '확인 중', '아직'].filter((k) => typeof dict[k] !== 'string' || !dict[k].trim()), [], `${lang} 기준 낱말`);
   }
   assert.equal(requestOf([{ id: 'u1', text: '요청 글' }], { userMessageId: 'u1' }), '요청 글');
 });
@@ -228,7 +269,7 @@ test('17. 목표 카드 확인 대기면 끝 깃발은 열림, 카드를 닫았�
   const goalTurn = { id: 'g', missionId: 'G', status: 'done', endedAt: 3, stageIndex: 0, stages: [{ label: '목표 잡기', agentIds: ['p'], status: 'done' }] };
   const draft = model({ run: goalTurn, mission: M({ status: 'draft', cardMsgId: 'card1' }) });
   assert.deepEqual([draft.end.kind, draft.progress, draft.ask.kind], ['open', '시작 전', 'confirm']);
-  const cancelled = model({ run: goalTurn, mission: M({ status: 'cancelled' }) });
+  const cancelled = model({ run: goalTurn, mission: M({ status: 'cancelled', cardMsgId: 'card1' }) }); // 사용자가 닫는 카드는 늘 있다(서버가 카드와 같이 cardMsgId 를 적는다)
   assert.deepEqual([cancelled.end, cancelled.now.text, cancelled.progress, cancelled.goal.kind, cancelled.ask], [{ kind: 'stopped', text: '닫힘' }, '목표 카드를 닫았어.', '닫힘', 'stopped', null]);
   const stopped = model({ run: runOf(['done', 'stopped', 'pending', 'pending'], { missionId: 'G', status: 'stopped', endedAt: 9, stageIndex: 1 }), mission: M({ status: 'stopped' }) });
   assert.deepEqual([stopped.end.kind, stopped.end.text, stopped.now.text], ['stopped', '중지됨', '중지됨']);
@@ -282,7 +323,9 @@ test('22. 역의 툴팁·이름과 +n 은 자르기 전 전체 이름을 쓴다,
   assert.deepEqual(critFold(five.slice(0, MAX_CRIT)).hidden, [], '다 들어가면 접지 않는다');
 });
 
-test('23. 답 창 자리(ANSWER_BOX)의 클래스 이름이 session.js·mission.js 원문에 실제로 있다', () => {
+// 글자 검사다: 이름이 그 파일의 class 글에 있는지만 본다. 그 창이 실제로 선택자의 부모(.chat-inner 등) 안에 그려지는지,
+// 찾은 창에 초점이 가는지는 DOM 없이 볼 수 없어서 보장하지 않는다(결정 0020 대로 브라우저에서 손으로 확인)
+test('23. (글자 검사) 답 창 자리(ANSWER_BOX)의 클래스 이름이 session.js·mission.js 의 class 글에 있고, 무대(stage.js)는 그 이름을 쓰지 않는다', () => {
   const src = ['public/js/views/session.js', 'public/js/views/mission.js'].map((f) => fs.readFileSync(path.join(root, f), 'utf8')).join('\n');
   const sels = [ANSWER_BOX.gate, ANSWER_BOX.ask, ANSWER_BOX.askMini, ANSWER_BOX.cut, ANSWER_BOX.card('m1')].join(' ');
   const classes = [...new Set([...sels.matchAll(/\.([a-z][\w-]*)/g)].map((x) => x[1]))];
@@ -294,6 +337,58 @@ test('23. 답 창 자리(ANSWER_BOX)의 클래스 이름이 session.js·mission.
   const composer = src.slice(src.indexOf('<div class="composer-wrap">'), src.indexOf('<div class="composer-wrap">') + 400);
   assert.match(composer, /<\$\{AskPanel\}/);
   assert.match(composer, /<\$\{CutBox\}/);
+  // 무대 안의 요소가 답 창으로 잘못 찾히지 않게: stage.js 의 class 글에 답 창 클래스 이름이 없다(예전 문 연결선의 "gate")
+  const { words } = stageClasses();
+  const answer = classes.filter((c) => !['chat', 'chat-inner', 'composer-wrap', 'session'].includes(c));
+  assert.deepEqual(answer.filter((c) => words.has(c)), [], '무대가 쓰는 답 창 클래스');
+});
+
+// 무대 화면(stage.js)의 class 글(class="…", class=${`…`}, const cls = `…`, className = `…`)에서 클래스 낱말을 모은다.
+// 글자 그대로인 낱말과 ${…} 안의 따옴표 글(' done')을 모으고, 낱말에 바로 붙은 ${값}(stg-${…}·s-${…})은 접두가 붙은 무대 것이라 뺀다.
+// 접두 없이 통째로 들어가는 ${값}은 bare 에 식 그대로 모은다
+function stageClasses() {
+  const src = fs.readFileSync(path.join(root, 'public/js/views/stage.js'), 'utf8');
+  assert.deepEqual([...src.matchAll(/class=\$\{(?!`|cls\})/g)].map((m) => src.slice(m.index, m.index + 30)), [], '모으지 못하는 class 글 꼴');
+  const words = new Set();
+  const bare = new Set();
+  for (const m of src.matchAll(/class=(?:"([^"]*)"|\$\{`([^`]*)`\})|(?:const cls|className) = `([^`]*)`/g)) {
+    const parts = (m[1] ?? m[2] ?? m[3]).split(/(\$\{[^}]*\})/);
+    parts.forEach((p, k) => {
+      if (p.startsWith('${')) {
+        const lits = [...p.matchAll(/'([^']*)'/g)].map((q) => q[1]);
+        lits.forEach((l) => l.split(/\s+/).filter(Boolean).forEach((w) => words.add(w)));
+        if (!lits.length && !/\S$/.test(parts[k - 1] || '')) bare.add(p.slice(2, -1));
+        return;
+      }
+      const ws = p.split(/\s+/).filter(Boolean);
+      const next = parts[k + 1];
+      if (next && !next.includes("'") && /\S$/.test(p)) ws.pop(); // 바로 뒤 ${값}의 접두(stg-·s-)
+      ws.forEach((w) => words.add(w));
+    });
+  }
+  return { words, bare };
+}
+
+test('33. 무대(stage.js)의 클래스가 app.css·office.css 의 범위 없는 전역 규칙(.limit·.small·.mono·.gate 같은)과 겹치지 않는다', () => {
+  // 범위 없는 전역 규칙: 선택자가 클래스 한 덩어리뿐인 것(.limit, .gate.err). 조상이 붙은 규칙(.sess .more)은 무대 밖 조상이 있어야 먹어서 뺀다
+  const css = ['public/css/app.css', 'public/css/office.css'].map((f) => fs.readFileSync(path.join(root, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')).join('\n');
+  const globals = [];
+  for (const m of css.matchAll(/([^{}]+)\{/g)) {
+    for (const sel of m[1].split(',')) {
+      const s = sel.trim().replace(/::?[\w-]+(?:\([^)]*\))?/g, ''); // :hover·::after 같은 것은 떼고 본다
+      if (/^(?:\.[\w-]+)+$/.test(s)) globals.push(s.slice(1).split('.'));
+    }
+  }
+  assert.ok(globals.some((g) => g.join('.') === 'limit') && globals.some((g) => g.join('.') === 'small'), '전역 규칙을 읽었다');
+  // 무대의 클래스 낱말(stageClasses). 접두 없이 통째로 들어가는 ${값}은 아래 값 목록으로 본다(새로 생기면 접두를 붙이거나 목록에 넣는다)
+  const { words, bare } = stageClasses();
+  const VALUES = { 'k.cls': ['me', 'err', 'cut'], 'c.verdict': ['pass', 'fail', 'unknown', 'check', 'open'], 'end.kind': ['pass', 'stopped', 'error', 'cut', 'open'], 'fly.kind': ['hand', 'ret'] };
+  assert.deepEqual([...bare].sort(), Object.keys(VALUES).sort(), '접두 없는 동적 클래스');
+  for (const v of Object.values(VALUES)) v.forEach((w) => words.add(w));
+  words.delete('resizer'); // 앱 공용 높이 손잡이(app.css .resizer)는 일부러 같이 쓴다
+  assert.ok(words.has('stg-st') && words.has('stg-link-gate') && words.has('stg-small') && words.has('stg-calls'), '무대 class 글을 읽었다');
+  const hit = globals.filter((g) => g.every((c) => words.has(c))).map((g) => `.${g.join('.')}`);
+  assert.deepEqual(hit, [], '무대 요소에 먹는 전역 규칙');
 });
 
 test('24. 회의 단계를 되돌리면 카드는 서버가 고치게 하는 사람(진행자 leadId 가 그 단계에 있으면 그 사람, 없으면 첫 에이전트)에게', () => {
@@ -312,6 +407,118 @@ test('25. 한도 대기 뒤 "지금 다시" 앞의 호출 상한: 이미 돈 단
 test('26. 지워진 에이전트는 id 대신 "삭제된 에이전트"로, 누를 수 없게(gone)', () => {
   const m = stageModel({ agents: AG, run: { id: 'x', status: 'running', stageIndex: 0, endedAt: null, stages: [{ label: '정리', agentIds: ['ghost'], status: 'running' }] } });
   assert.deepEqual([m.stations[0].people[0].name, m.stations[0].people[0].gone, who(st(model({}), 0), 'r').gone], ['삭제된 에이전트', true, false]);
+});
+
+test('27. 끊긴 목표 뒤의 다른 실행이 나를 기다리면(승인·오류·질문·일시정지) 그 차례가 보이고, 끊김 알약은 기다리는 게 없을 때만', () => {
+  const cutM = M({ status: 'cut' });
+  const other = (statuses, extra = {}) => runOf(statuses, { id: 'mention', stageIndex: 2, ...extra });
+  const approve = model({ run: other(['done', 'done', 'review', 'pending'], { status: 'waiting', hold: { reason: 'approve', stageIndex: 2, at: 1 } }), mission: cutM });
+  assert.deepEqual([approve.ask.kind, gates(approve), approve.now.text], ['approve', [[2, 'approve']], '"만들기" 결과 확인']);
+  const err = model({ run: other(['done', 'done', 'error', 'pending'], { status: 'waiting', hold: { reason: 'error', stageIndex: 2, message: 'x', at: 1 } }), mission: cutM });
+  assert.deepEqual([err.ask.kind, st(err, 2).ask], ['error', true]);
+  const q = model({ run: other(['done', 'done', 'running', 'pending']), mission: cutM, questions: [{ id: 'k', agentId: 'm', runId: 'mention', stageIndex: 2, text: '버튼 색은?' }] });
+  assert.equal(q.ask.kind, 'question');
+  const paused = model({ run: other(['done', 'done', 'pending', 'pending'], { status: 'paused' }), mission: cutM });
+  assert.equal(paused.ask.kind, 'paused');
+  const busy = model({ run: other(['done', 'done', 'running', 'pending']), mission: cutM });
+  assert.deepEqual([busy.ask.kind, busy.ask.target], ['cut', 'cut'], '기다리는 게 없으면 끊김 알약');
+});
+
+// 일 카드 단계 하나짜리 목표 실행(계획 → 일 → 기준 판정). 호출 상한으로 일 단계에서 기다린다
+const cardRun = (status, hold) => ({ id: 'rc', missionId: 'G', status: 'waiting', stageIndex: 1, endedAt: null, hold: { at: 1, stageIndex: 1, ...hold }, stages: [
+  { label: '계획', agentIds: ['p'], status: 'done', mission: 'plan' }, { label: '일 1/1', agentIds: ['m', 'w'], status, mission: 'cards', cardIds: ['k1', 'k2'] }, { label: '기준 판정', agentIds: ['q'], status: 'pending', mission: 'review' }] });
+const cardsM = (k1, at = { stageIndex: 1 }) => M({ at, cards: [{ id: 'k1', ownerId: 'm', status: k1 }, { id: 'k2', ownerId: 'w', status: 'done' }] });
+
+test('28. 일 카드 끝 두 칸 다시 요청 앞의 호출 상한은 이미 돈 단계라 역 안, 되돌림으로 다시 하기 전이면 단계 앞', () => {
+  const cap = { reason: 'cap', used: 40, cap: 40 };
+  // 첫 바퀴: 서버는 단계를 done 으로 끝낸 뒤(#cardsAfter) 끝 두 칸이 없는 카드(아직 running)를 다시 부르기 전에 묻고, 이미 돈 단계라고 알린다(ran)
+  const tail = stageModel({ agents: AG, run: cardRun('done', { ...cap, ran: true }), mission: cardsM('running') });
+  assert.deepEqual([tail.ask.kind, tail.ask.station, gates(tail), st(tail, 1).state, st(tail, 1).ask], ['cap', 1, [], 'wait', true]);
+  assert.equal(tail.progress, '2/3 일 1/1 ×2 · 기다림');
+  // 되돌림 바퀴의 끝 두 칸 다시 요청도 역 안
+  const backTail = stageModel({ agents: AG, run: cardRun('done', { ...cap, ran: true }), mission: cardsM('running', { stageIndex: 1, back: true }) });
+  assert.deepEqual([backTail.ask.station, gates(backTail)], [1, []]);
+  // 되돌림으로 다시 하기 전: 지난 바퀴의 done 이 남아 있어도 아직 시작 전이라 단계 앞 문
+  const redo = stageModel({ agents: AG, run: cardRun('done', cap), mission: cardsM('done', { stageIndex: 1, back: true }) });
+  assert.deepEqual([redo.ask.kind, gates(redo), st(redo, 1).state, st(redo, 1).ask], ['cap', [[0, 'cap']], 'done', false]);
+  // 처음 시작 전(pending)은 그대로 단계 앞
+  const first = stageModel({ agents: AG, run: cardRun('pending', cap), mission: cardsM('open') });
+  assert.deepEqual([gates(first), st(first, 1).state], [[[0, 'cap']], 'todo']);
+});
+
+test('29. 오류 다시 하기 앞의 카드 되풀이 상한은 오류 난 역 안에서 기다린다(진행 줄 꼬리도 기다림)', () => {
+  const lim = model({ run: runOf(['done', 'done', 'error', 'pending'], { missionId: 'G', stageIndex: 2, status: 'waiting', hold: { reason: 'mission', kind: 'limit', stageIndex: 2, cards: [{ id: 'k1' }], at: 1 } }), mission: M() });
+  assert.deepEqual([lim.ask.kind, lim.ask.station, gates(lim), st(lim, 2).state, st(lim, 2).ask], ['limit', 2, [], 'wait', true]);
+  assert.equal(lim.progress, '3/4 만들기 ×2 · 기다림');
+  // 오류 다시 하기 앞의 시간당 카드 시작 수 상한도 역 안
+  const rate = model({ run: runOf(['done', 'done', 'error', 'pending'], { missionId: 'G', stageIndex: 2, status: 'waiting', hold: { reason: 'cap', kind: 'rate', stageIndex: 2, used: 20, cap: 20, at: 1 } }), mission: M() });
+  assert.deepEqual([rate.ask.station, gates(rate), st(rate, 2).state], [2, [], 'wait']);
+});
+
+test('30. 끝 깃발: 안 끝난 실행·쉬는 세션·카드 확인 대기는 "도착", 끝난 실행만 "끝"(번역도 서로 다르다)', () => {
+  assert.deepEqual(model({}).end, { kind: 'open', text: '도착' });
+  assert.deepEqual(model({ run: runOf(['running', 'pending', 'pending', 'pending']) }).end, { kind: 'open', text: '도착' });
+  const draft = model({ run: { id: 'g', missionId: 'G', status: 'done', endedAt: 3, stageIndex: 0, stages: [{ label: '목표 잡기', agentIds: ['p'], status: 'done' }] }, mission: M({ status: 'draft', cardMsgId: 'card1' }) });
+  assert.deepEqual(draft.end, { kind: 'open', text: '도착' });
+  assert.deepEqual(model({ run: runOf(['done', 'done', 'done', 'done'], { status: 'done', endedAt: 9, stageIndex: 3 }) }).end, { kind: 'pass', text: '끝' });
+  for (const [lang, dict] of Object.entries({ en, zh, ja })) assert.notEqual(dict['도착'], dict['끝'], `${lang}: 안 끝났는데 완료로 읽히지 않게`);
+});
+
+test('31. 목표 잡기가 오류·중지로 끝나 카드 없이 닫힌 목표는 "카드를 닫았어"가 아니라 그 끝 상태로', () => {
+  const goalTurn = (status) => ({ id: 'g', missionId: 'G', mission: 'goal', status, endedAt: 3, stageIndex: 0, stages: [{ label: '목표 잡기', agentIds: ['p'], status }] });
+  const noCard = (status) => model({ run: goalTurn(status), mission: M({ status: 'cancelled', goal: '', criteria: [], cardMsgId: null }) });
+  const err = noCard('error');
+  assert.deepEqual([err.end, err.now.text, err.now.cls, err.progress], [{ kind: 'error', text: '오류로 끝' }, '목표 카드가 나오기 전에 끝나서 이 목표는 닫았어.', 'error', '오류로 끝']);
+  // 서버는 진행자를 건너뛰어도(orchestrator #goalTurn: 건너뛴 답은 stopped), 초안을 쓰는 중에 앱이 꺼져도(#fixStale) 목표 잡기 실행을 stopped 로 끝낸다
+  const stopped = noCard('stopped');
+  assert.deepEqual([stopped.end, stopped.now.text, stopped.now.cls], [{ kind: 'stopped', text: '중지됨' }, '목표 카드가 나오기 전에 끝나서 이 목표는 닫았어.', 'off']);
+  // 초안 블록을 못 읽으면 서버는 요청 글로 카드를 만든다. 카드가 나온 뒤(목표 잡기 실행 done) 사용자가 닫은 목표는 "닫힘"과 "목표 카드를 닫았어."
+  const dropped = model({ run: goalTurn('done'), mission: M({ status: 'cancelled', cardMsgId: 'card1' }) });
+  assert.deepEqual([dropped.end, dropped.now.text], [{ kind: 'stopped', text: '닫힘' }, '목표 카드를 닫았어.']);
+});
+
+test('32. 되돌림을 끝내고 판정 앞에서 일시정지하면(서버가 바뀐 자리를 아직 안 알림) 되돌린 역에 "되돌림 n/상한"이 남지 않는다', () => {
+  const rv = { 3: { mission: 'review' } };
+  const stale = model({ run: runOf(['done', 'done', 'done', 'pending'], { missionId: 'G', stageIndex: 3, status: 'paused', hold: { reason: 'pause', stageIndex: 3, at: 1 } }, rv), mission: M({ at: { stageIndex: 2, back: true }, returns: 1, returnCap: 1 }) });
+  assert.deepEqual([st(stale, 2).ret, st(stale, 2).note, stale.ask.kind], [null, 'merged', 'paused']);
+  // 되돌림 단계를 시작하기 전 일시정지(지금 단계가 되돌릴 단계)는 되돌림 표시 그대로
+  const before = model({ run: runOf(['done', 'done', 'done', 'pending'], { missionId: 'G', stageIndex: 2, status: 'paused', hold: { reason: 'pause', stageIndex: 2, at: 1 } }, rv), mission: M({ at: { stageIndex: 2, back: true }, returns: 1, returnCap: 1 }) });
+  assert.deepEqual(st(before, 2).ret, { n: 1, of: 1 });
+});
+
+test('34. 이미 돈 단계에서 묻는 상한(서버가 hold.ran 으로 알린다)은 카드 되풀이 상한·호출 상한 모두 그 역 안, 시작하기 전이면 단계 앞', () => {
+  const rv = { 3: { mission: 'review' } };
+  const at = (statuses, hold, mission = M()) => model({ run: runOf(statuses, { missionId: 'G', stageIndex: hold.stageIndex, status: 'waiting', hold: { at: 1, ...hold } }, rv), mission });
+  const inside = (m, kind) => assert.deepEqual([m.ask.kind, m.ask.station, gates(m), st(m, 2).state, st(m, 2).ask], [kind, 2, [], 'wait', true]);
+  const before = (m, kind, state) => assert.deepEqual([m.ask.kind, m.ask.station, gates(m), st(m, 2).state, st(m, 2).ask], [kind, undefined, [[1, kind]], state, false]);
+  const limit = { reason: 'mission', kind: 'limit', stageIndex: 2, cards: [{ id: 'k1' }] };
+  const cap = { reason: 'cap', stageIndex: 2, used: 40, cap: 40 };
+  // 막힘 "한 번 더" 뒤 두 번째 바퀴: 단계는 이번 바퀴에서 done 으로 끝났다
+  inside(at(['done', 'done', 'done', 'pending'], { ...limit, ran: true }), 'limit');
+  inside(at(['done', 'done', 'done', 'pending'], { ...cap, ran: true }), 'cap');
+  // 되돌림 바퀴: 시작하기 전(지난 바퀴의 done 이 남아 있다)은 단계 앞, 그 바퀴에서 막힘 "한 번 더" 앞은 역 안
+  const backM = M({ at: { stageIndex: 2, back: true }, returns: 1, returnCap: 1 });
+  before(at(['done', 'done', 'done', 'pending'], cap, backM), 'cap', 'done');
+  before(at(['done', 'done', 'done', 'pending'], limit, backM), 'limit', 'done');
+  inside(at(['done', 'done', 'done', 'pending'], { ...cap, ran: true }, backM), 'cap');
+  inside(at(['done', 'done', 'done', 'pending'], { ...limit, ran: true }, backM), 'limit');
+  // 끊겼다 이어서 한 뒤 한도 다시 하기 앞의 상한: 이어서 한 실행은 그 단계를 pending 으로 다시 만들지만 이미 돈 단계다
+  inside(at(['done', 'done', 'pending', 'pending'], { ...cap, ran: true }), 'cap');
+  // 처음 시작하기 전(pending, 표시 없음)은 그대로 단계 앞, 오류 다시 하기 앞(error)은 표시가 없어도 역 안
+  before(at(['done', 'done', 'pending', 'pending'], cap), 'cap', 'todo');
+  before(at(['done', 'done', 'pending', 'pending'], limit), 'limit', 'todo');
+  inside(at(['done', 'done', 'error', 'pending'], limit), 'limit');
+  inside(at(['done', 'done', 'error', 'pending'], cap), 'cap');
+});
+
+test('35. 끊긴 목표가 되돌림 중이었어도 그 뒤의 다른 실행 역에는 "되돌림 n/상한"·되돌림 줄이 붙지 않는다', () => {
+  const cutM = M({ status: 'cut', at: { stageIndex: 2, back: true }, returns: 1, returnCap: 1 });
+  const other = model({ run: runOf(['done', 'done', 'running', 'pending'], { id: 'mention', stageIndex: 2 }), mission: cutM, live: { m: { state: 'thinking', at: 2 } } });
+  assert.deepEqual([st(other, 2).ret, st(other, 2).note], [null, null]);
+  assert.notEqual(other.now.icon, 'ret');
+  // 그 목표의 실행이면 되돌림 표시
+  const own = model({ run: runOf(['done', 'done', 'running', 'pending'], { missionId: 'G', stageIndex: 2 }), mission: M({ at: { stageIndex: 2, back: true }, returns: 1, returnCap: 1 }) });
+  assert.deepEqual(st(own, 2).ret, { n: 1, of: 1 });
 });
 
 // ── 서버가 실제로 만드는 실행 모양(가짜 CLI) ──
@@ -380,7 +587,7 @@ async function goalTeam() {
   return gt;
 }
 // 요청 → 목표 카드(확인 전 모델을 같이 돌려준다) → 목표 문장에 신호어를 넣어 확인
-async function goal(signal) {
+async function goal(signal, work = 'stages') {
   const { tm } = await goalTeam();
   const sid = (await t.api('POST', '/api/sessions', { teamId: tm.id })).json.id;
   assert.equal((await t.api('PATCH', `/api/sessions/${sid}`, { goalMode: true })).status, 200);
@@ -391,7 +598,7 @@ async function goal(signal) {
   const c = S.messages.findLast((m) => m.role === 'proposal' && m.kind === 'goal');
   const shown = { goal: c.goal, criteria: c.criteria, outOfScope: c.outOfScope, userDecides: c.userDecides };
   const review = { reviewerId: c.review.reviewerId, droppable: c.review.droppable, drop: c.review.droppable.map((d) => d.index) };
-  const r = await t.api('POST', `/api/sessions/${sid}/mission/confirm`, { missionId: S.mission.id, expected: shown, review, work: 'stages', edited: { ...shown, goal: `${signal} 목표` } });
+  const r = await t.api('POST', `/api/sessions/${sid}/mission/confirm`, { missionId: S.mission.id, expected: shown, review, work, edited: { ...shown, goal: `${signal} 목표` } });
   assert.equal(r.status, 200, JSON.stringify(r.json));
   return { sid, draft, cardId: c.id };
 }
@@ -435,4 +642,23 @@ test('15. (서버 모양) 한도 대기: 자동 이어서를 고르기 전에는
   }
   const stopped = (await modelOf(sid)).m;
   assert.deepEqual([stopped.ask, stopped.limit, stopped.goal.kind], [null, null, 'stopped']);
+});
+
+test('36. (서버 모양) 막힘 "한 번 더"를 거듭해 이미 돈 카드 단계에서 되풀이 상한을 물으면 문은 그 역 안(서버가 hold.ran 으로 알린다)', async () => {
+  const { sid } = await goal('CARDBLOCK', 'cards'); // k1 이 늘 막힘으로 끝난다
+  try {
+    for (let n = 0; n < 3; n++) {
+      await runAt(sid, (r) => r.hold?.reason === 'mission' && r.hold.kind === 'blocked');
+      assert.equal((await ctl(sid, 'more')).json.ok, true);
+      await runAt(sid, (r) => r.hold?.kind !== 'blocked' || r.status !== 'waiting');
+    }
+    const run = await runAt(sid, (r) => r.hold?.reason === 'mission' && r.hold.kind === 'limit');
+    const i = run.hold.stageIndex;
+    assert.deepEqual([run.hold.ran, run.stages[i].status], [true, 'done'], '이번 바퀴에서 이미 돌아 done 인 단계');
+    const m = (await modelOf(sid)).m;
+    assert.deepEqual([m.ask.kind, m.ask.station, gates(m), st(m, i).state, st(m, i).ask], ['limit', i, [], 'wait', true]);
+  } finally {
+    await ctl(sid, 'stop');
+    await t.waitFor(() => idle(sid), 30000, '그만');
+  }
 });

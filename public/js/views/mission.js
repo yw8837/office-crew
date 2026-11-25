@@ -336,12 +336,17 @@ export function GoalCard({ m }) {
   // 일하는 방식(결정 0018): 옛 카드(이 칸 없음)는 보내지 않는다(팀 단계표대로)
   const wk = workShown || m.work || null;
   const work = wk ? (workSel || wk.on) : undefined;
-  const start = () => send('confirm', { missionId: m.missionId, expected: v, review, prep, ...(wk ? { work } : {}) });
+  // 호출 어림(결정 0019): 보여 주는 범위의 두 숫자도 보낸다(지금 팀으로 다시 센 값과 다르면 서버가 409 와 지금 조각을 준다). 옛 카드(이 칸 없음)는 보내지 않는다
+  const est = estShown || m.estimate || null;
+  const estPick = { work: work === 'cards' ? 'cards' : 'stages', research: !!prep?.research, meeting: !!prep?.meeting, kept };
+  const seen = est ? sumEstimate(est, estPick) : null;
+  const estimate = seen ? { estimate: { min: seen.min, max: seen.max } } : {};
+  const start = () => send('confirm', { missionId: m.missionId, expected: v, review, prep, ...(wk ? { work } : {}), ...estimate });
   // 고친 값: 기준 줄과 같은 줄의 확인 방법을 짝지어 빈 기준은 그 확인 방법과 같이 뺀다
   const pairs = edit ? String(edit.criteria).split(/\r?\n/).map((c, i) => [c.trim(), (String(edit.checks || '').split(/\r?\n/)[i] || '').trim()]).filter(([c]) => c) : [];
   const edited = edit && { goal: edit.goal.trim(), criteria: pairs.map((x) => x[0]), checks: pairs.map((x) => x[1]), outOfScope: lines(edit.outOfScope), userDecides: lines(edit.userDecides), keep: lines(edit.keep) };
   const canEdited = !!edited && !!edited.goal && edited.criteria.length > 0;
-  const startEdited = () => { if (canEdited) send('confirm', { missionId: m.missionId, expected: v, edited, review, prep, ...(wk ? { work } : {}) }); };
+  const startEdited = () => { if (canEdited) send('confirm', { missionId: m.missionId, expected: v, edited, review, prep, ...(wk ? { work } : {}), ...estimate }); };
   const names = (who) => who.map((w) => agentById(w.id)?.name || w.name || w.id).join(', ');
   const prepLine = pp && html`<div class="goal-sec goal-prep">
     <div class="small muted"><b>${t('조사·회의 먼저')}</b></div>
@@ -379,7 +384,7 @@ export function GoalCard({ m }) {
       <span><b>${t('팀 단계표대로')}</b> — ${t('팀에 짜 둔 단계를 순서대로 돌아.')}</span></label>
   </div>`;
   // 호출 어림(결정 0019): 조사·회의 체크, 일하는 방식, 남기기를 바꾸면 바로 다시 더한다(옛 카드는 이 칸이 없어 안 보인다). 구독 한도는 받은 기록이 있을 때만
-  const estLine = (estShown || m.estimate) && html`<${EstimateLine} est=${estShown || m.estimate} pick=${{ work: work === 'cards' ? 'cards' : 'stages', research: !!prep?.research, meeting: !!prep?.meeting, kept }} />`;
+  const estLine = est && html`<${EstimateLine} est=${est} pick=${estPick} />`;
   const limLine = html`<${LimitLine} providers=${m.providers} />`;
   const openEdit = () => setEdit({ goal: v.goal, criteria: v.criteria.join('\n'), checks: checksOf(v).join('\n'), outOfScope: v.outOfScope.join('\n'), userDecides: v.userDecides.join('\n'), keep: (v.keep || []).join('\n') });
   const closeEdit = () => { setEdit(null); setTimeout(() => editBtn.current?.focus(), 0); };

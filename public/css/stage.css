@@ -57,7 +57,7 @@
 .stg-goal b::first-letter { text-transform: uppercase; }
 .stg-goal .g { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); min-width: 0; }
 .stg-meta { display: flex; gap: 8px; align-items: center; flex: none; font-size: 12px; color: var(--muted); white-space: nowrap; }
-.stg-meta .mono { font-variant-numeric: tabular-nums; }
+.stg-meta .stg-calls { font-variant-numeric: tabular-nums; }
 .stg-meta .over { color: var(--s-err-ink); font-weight: 800; }
 .stg-now { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 46%; color: var(--text-2); justify-content: flex-end; }
 .stg-now .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -72,13 +72,14 @@
 .stg-st { flex: 1 1 0; min-width: 136px; display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border-radius: 12px; background: var(--panel); border: 1.5px solid var(--border-2); position: relative; overflow: hidden; transition: border-color .3s ease, box-shadow .3s ease, background-color .3s ease; }
 .stg-st.meet { flex-grow: 2.3; min-width: 230px; }
 .stg-st.rev { flex-grow: 1.3; min-width: 170px; }
-.stg-st.todo { background: transparent; border-style: dashed; }
-.stg-st.run { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent); }
-.stg-st.wait, .stg-st.ask { border: 2px dashed var(--s-me); background: color-mix(in srgb, var(--s-me-soft) 60%, var(--panel)); }
-.stg-st.limit { border: 2px solid var(--s-lim); background: var(--panel-3); }
-.stg-st.error { border: 2px solid var(--s-err); background: color-mix(in srgb, var(--err-soft) 60%, var(--panel)); }
-.stg-st.cut, .stg-st.stopped { border-style: dashed; border-color: var(--s-idle); background: transparent; }
-.stg-st.skipped { border-style: dashed; opacity: .75; }
+/* 역·띠 조각의 상태 클래스는 stg- 를 붙인다(app.css 의 전역 .limit·.small·.mono·.gate 같은 규칙이 무대에 먹지 않게) */
+.stg-st.stg-todo { background: transparent; border-style: dashed; }
+.stg-st.stg-run { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent); }
+.stg-st.stg-wait, .stg-st.ask { border: 2px dashed var(--s-me); background: color-mix(in srgb, var(--s-me-soft) 60%, var(--panel)); }
+.stg-st.stg-limit { border: 2px solid var(--s-lim); background: var(--panel-3); }
+.stg-st.stg-error { border: 2px solid var(--s-err); background: color-mix(in srgb, var(--err-soft) 60%, var(--panel)); }
+.stg-st.stg-cut, .stg-st.stg-stopped { border-style: dashed; border-color: var(--s-idle); background: transparent; }
+.stg-st.stg-skipped { border-style: dashed; opacity: .75; }
 .stg-hd { display: flex; align-items: center; gap: 6px; font-size: 12.5px; line-height: 18px; font-weight: 800; white-space: nowrap; min-width: 0; }
 .stg-hd .lab { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .stg-hd .num { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; box-shadow: inset 0 0 0 1.5px var(--s-idle); color: var(--muted); flex: none; }
@@ -134,7 +135,7 @@
 .stg-link.done::before { background: var(--s-ok); }
 .stg-link.done::after { border-left-color: var(--s-ok); }
 .stg-link.cut::before { background: repeating-linear-gradient(90deg, var(--s-idle) 0 4px, transparent 4px 8px); }
-.stg-link.gate { width: auto; min-width: 58px; padding: 0 6px; }
+.stg-link.stg-link-gate { width: auto; min-width: 58px; padding: 0 6px; }
 .stg-gate { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 2px; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; border-radius: 8px; }
 .stg-gate .stg-bd { width: 26px; height: 26px; }
 .stg-gate .stg-bd > .stg-ico { width: 14px; height: 14px; }
@@ -157,26 +158,29 @@
 .stg-wrap.cut::after, .stg-strip.cut::after { content: ''; position: absolute; inset: 3px; border: 1.5px dashed var(--s-idle); border-radius: 10px; pointer-events: none; }
 
 /* 작은 모양(140px 아래): 이름·말 줄을 숨기고 동그라미를 줄인다 */
-.stg-wrap.small { gap: 6px; padding: 7px 12px 8px; }
-.stg-wrap.small .stg-top { height: 26px; }
-.stg-wrap.small .stg-p { min-width: 28px; }
-.stg-wrap.small .stg-st { padding: 5px 8px; gap: 5px; }
-.stg-wrap.small .stg-seat { width: 24px; height: 24px; }
-.stg-wrap.small .stg-link { width: 26px; }
-.stg-wrap.small .stg-link.gate { width: 36px; min-width: 36px; padding: 0; }
-.stg-wrap.small .stg-gate .gl { display: none; }
-.stg-wrap.small .stg-end { width: 56px; }
+.stg-wrap.stg-small { gap: 6px; padding: 7px 12px 8px; }
+.stg-wrap.stg-small .stg-top { height: 26px; }
+.stg-wrap.stg-small .stg-p { min-width: 28px; }
+.stg-wrap.stg-small .stg-st { padding: 5px 8px; gap: 5px; }
+.stg-wrap.stg-small .stg-seat { width: 24px; height: 24px; }
+.stg-wrap.stg-small .stg-link { width: 26px; }
+.stg-wrap.stg-small .stg-link.stg-link-gate { width: 36px; min-width: 36px; padding: 0; }
+.stg-wrap.stg-small .stg-gate .gl { display: none; }
+.stg-wrap.stg-small .stg-end { width: 56px; }
+/* 높이 손잡이(app.css 의 .resizer)에 키보드 초점이 오면 손잡이 막대도 강조 */
+.stg-wrap > .resizer:focus-visible::after { background: var(--accent); width: 64px; }
 
 /* ── 접은 한 줄 띠 ── */
 .stg-strip { position: relative; flex: none; display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--panel-2); font-size: 12px; overflow: hidden; white-space: nowrap; min-width: 0; }
-.stg-strip .segs { display: inline-flex; gap: 3px; flex: none; }
+.stg-strip .segs { display: inline-flex; align-items: center; gap: 3px; flex: none; }
 .stg-strip .sg { width: 22px; height: 6px; border-radius: 3px; background: var(--panel-3); box-shadow: inset 0 0 0 1px var(--border-2); }
-.stg-strip .sg.done { background: var(--s-ok); box-shadow: none; }
-.stg-strip .sg.run { background: repeating-linear-gradient(-45deg, var(--s-work) 0 3px, color-mix(in srgb, var(--s-work) 45%, transparent) 3px 6px); box-shadow: none; }
-.stg-strip .sg.wait { background: var(--s-me-soft); box-shadow: none; border: 1.5px dashed var(--s-me); }
-.stg-strip .sg.limit { background: repeating-linear-gradient(45deg, var(--s-lim) 0 2px, transparent 2px 4px); box-shadow: inset 0 0 0 1px var(--s-lim); }
-.stg-strip .sg.error { background: linear-gradient(90deg, var(--s-err) 0 40%, transparent 40% 60%, var(--s-err) 60%); box-shadow: none; }
-.stg-strip .sg.cut, .stg-strip .sg.stopped, .stg-strip .sg.skipped { background: none; box-shadow: none; border: 1.5px dashed var(--s-idle); }
+.stg-strip .sg.stg-done { background: var(--s-ok); box-shadow: none; }
+.stg-strip .sg.stg-run { background: repeating-linear-gradient(-45deg, var(--s-work) 0 3px, color-mix(in srgb, var(--s-work) 45%, transparent) 3px 6px); box-shadow: none; }
+/* 기다림: 점선이 아니라 키가 큰 양 끝 뾰족한 칠(역의 마름모 표식과 같은 모양 말). 중지·건너뜀·끊김의 점선 테두리와 모양으로도 갈린다 */
+.stg-strip .sg.stg-wait { height: 10px; border-radius: 0; background: var(--s-me); box-shadow: none; clip-path: polygon(0 50%, 5px 0, calc(100% - 5px) 0, 100% 50%, calc(100% - 5px) 100%, 5px 100%); }
+.stg-strip .sg.stg-limit { background: repeating-linear-gradient(45deg, var(--s-lim) 0 2px, transparent 2px 4px); box-shadow: inset 0 0 0 1px var(--s-lim); }
+.stg-strip .sg.stg-error { background: linear-gradient(90deg, var(--s-err) 0 40%, transparent 40% 60%, var(--s-err) 60%); box-shadow: none; }
+.stg-strip .sg.stg-cut, .stg-strip .sg.stg-stopped, .stg-strip .sg.stg-skipped { background: none; box-shadow: none; border: 1.5px dashed var(--s-idle); }
 .stg-strip .prog { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
 .stg-strip .grow { flex: 1; }
 .stg-strip .stg-pill { height: 28px; font-size: 12px; }

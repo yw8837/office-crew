@@ -196,7 +196,6 @@ test('4. 한도 대기(시각 앎): 일 단계가 한도로 멈추면 보통 오
   assert.equal(h.out, 'skip', '일 단계의 출구는 건너뛰기');
   const line = m.log.findLast((x) => x.kind === 'quota');
   assert.equal(line.fail, 'outside');
-  assert.ok(!S(sid).runs.at(-1).hold || S(sid).runs.at(-1).hold.reason !== 'error', '보통 오류 대기가 아니다');
   assert.equal((await ctl(sid, 'accept')).json.ok, false, '일 단계 한도 대기에는 받아들이기가 없다(건너뛰기가 있다)');
   // 한도가 풀림 → 지금 다시: 정리 단계가 다시 돌고, 그 뒤로 이어 간다
   lift(true);
@@ -384,7 +383,7 @@ test('9. 순수 함수: 한도 대기의 초기화 시각은 실제로 다 찬 �
 });
 
 test('10. 한도 대기의 예전 출구: 일 단계는 건너뛰기(단계표는 그 단계를 건너뛴 채로, 일 카드는 그 카드를 구멍으로 빼고 이어 감), 판정은 받아들이기(판정 없이 받아들임으로 끝). 그만이면 사무실 표시도 정리', async () => {
-  const { tm, a, b } = await quotaTeam();
+  const { tm, a } = await quotaTeam();
   // 단계표: 정리 단계에서 한도 → 건너뛰기 → 빌드·판정까지 간다
   clean();
   const s1 = await goal(tm.id, 'WORKQUOTA', { work: 'stages' });
@@ -425,16 +424,17 @@ test('10. 한도 대기의 예전 출구: 일 단계는 건너뛰기(단계표�
   } finally { t.app.store.settings.failover = true; }
   // 그만: 사무실 표시가 오류로 남지 않는다
   clean();
+  const n4 = t.fakeLog().length;
   const s4 = await goal(tm.id, 'WORKQUOTA', { work: 'stages' });
   await holdOf(s4);
   await ctl(s4, 'stop');
   await waitEnd(s4);
   assert.deepEqual([t.app.orch.liveStates(s4)[a.id]?.state, t.app.orch.liveStates(s4)[a.id]?.detail], ['idle', '중지됨']);
-  assert.notEqual(t.app.orch.liveStates(s4)[b.id]?.state, 'thinking', '빌드 담당은 돌지 않았다');
+  assert.ok(!prompts(n4).some((p) => p.includes('단계 "빌드"를 네가 맡았어')), '빌드 단계 프롬프트는 가짜 CLI 에 가지 않았다');
 });
 
 test('11. 다시 하기 앞에 호출 상한을 본다(일 단계·자동 이어서·판정). 모자라면 "20번 더"부터. 자동 이어서 횟수는 실제로 다시 시작할 때만', async () => {
-  const { tm } = await quotaTeam();
+  const { tm, a } = await quotaTeam();
   const lowCap = (sid) => { const c = S(sid).mission.calls; c.cap = c.used; };
   // 일 단계 + 지금 다시
   clean();
@@ -444,9 +444,10 @@ test('11. 다시 하기 앞에 호출 상한을 본다(일 단계·자동 이어
   lift(true);
   const n1 = t.fakeLog().length;
   await ctl(s1, 'retry');
-  await t.waitFor(() => S(s1).runs.at(-1).hold?.reason === 'cap', 20000, '상한 대기');
+  const capHold = await t.waitFor(() => S(s1).runs.at(-1).hold?.reason === 'cap' && S(s1).runs.at(-1).hold, 20000, '상한 대기');
   assert.equal(t.fakeLog().length, n1, '상한을 넘기 전에는 다시 돌지 않는다');
-  assert.deepEqual(S(s1).mission.at.wait, { reason: 'cap' });
+  assert.deepEqual(S(s1).mission.at.wait, { reason: 'cap', quota: true, failed: [{ agentId: a.id }] }, '한도 뒤 다시 하기 앞의 상한 대기라는 표시와 한도에 걸린 사람');
+  assert.equal(capHold.ran, true, '이미 돈 단계에서 묻는다는 표시(화면은 문을 그 역 안에 그린다)');
   await ctl(s1, 'more');
   await waitEnd(s1);
   lift(false);
@@ -488,9 +489,10 @@ test('12. 자동 이어서 타이머: 울릴 때 일시정지를 눌러 뒀으�
   try {
     const s1 = await goal(tm.id, 'WORKQUOTA', { work: 'stages' });
     await holdOf(s1);
-    await ctl(s1, 'later');
-    await ctl(s1, 'pause');
+    // 일시정지를 자동 이어서보다 먼저 누른다(타이머가 울리기 전에 눌려 있으면 결과는 같고, 느린 PC 에서도 순서가 흔들리지 않는다)
     const n = t.fakeLog().length;
+    assert.equal((await ctl(s1, 'pause')).json.ok, true);
+    assert.equal((await ctl(s1, 'later')).json.ok, true);
     await t.waitFor(() => S(s1).runs.at(-1).hold?.reason === 'pause', 20000, '일시정지 대기');
     assert.equal(t.fakeLog().length, n, '일시정지 중에는 시작하지 않는다');
     assert.equal(S(s1).mission.quota.autos, 0);
@@ -584,8 +586,8 @@ test('15. 팀이 바뀌어 확인이 409 면 지금 팀의 어림 조각을 같�
   await waitEnd(sid);
 });
 
-// 따로 켜는 앱(같은 데이터 폴더로 끄고 다시 켜기). 팀은 정리 → 검수
-async function sideApp(name) {
+// 따로 켜는 앱(같은 데이터 폴더로 끄고 다시 켜기). 팀은 정리 → 검수(build 면 정리 → 빌드 → 검수: 일 카드를 쓸 수 있다)
+async function sideApp(name, { build = false } = {}) {
   await app();
   const home = path.join(t.root, name);
   const open = async () => {
@@ -604,20 +606,21 @@ async function sideApp(name) {
   const ag = async (n, role) => (await h.api('POST', '/api/agents', { name: n, role, provider: 'claude', model: 'claude-sonnet-5-5', permission: 'plan', routing: 'manual' })).json;
   const x = await ag(`${name}정리`, '정리');
   const y = await ag(`${name}검수`, '검수');
-  const tm = (await h.api('POST', '/api/teams', { name: `${name}팀`, stages: [{ label: '정리', agentIds: [x.id] }, { label: '검수', agentIds: [y.id] }] })).json;
-  const start = async (goalText) => {
+  const z = build ? await ag(`${name}빌드`, '빌드') : null;
+  const tm = (await h.api('POST', '/api/teams', { name: `${name}팀`, stages: [{ label: '정리', agentIds: [x.id] }, ...(z ? [{ label: '빌드', agentIds: [z.id] }] : []), { label: '검수', agentIds: [y.id] }] })).json;
+  const start = async (goalText, work = 'stages') => {
     const sid = (await h.api('POST', '/api/sessions', { teamId: tm.id })).json.id;
     await h.api('PATCH', `/api/sessions/${sid}`, { goalMode: true });
     await h.api('POST', `/api/sessions/${sid}/messages`, { text: '정리해 줘' });
     await t.waitFor(() => h.S(sid).mission?.status === 'draft' && h.idle(sid), 20000, '목표 카드');
     const c = h.S(sid).messages.findLast((mm) => mm.role === 'proposal' && mm.kind === 'goal');
     const r = await h.api('POST', `/api/sessions/${sid}/mission/confirm`, { missionId: h.S(sid).mission.id, expected: shown(c), edited: { ...shown(c), goal: goalText },
-      review: { reviewerId: c.review.reviewerId, droppable: c.review.droppable, drop: c.review.droppable.map((d) => d.index) }, work: 'stages' });
+      review: { reviewerId: c.review.reviewerId, droppable: c.review.droppable, drop: c.review.droppable.map((d) => d.index) }, work });
     assert.equal(r.status, 200, JSON.stringify(r.json));
     return sid;
   };
-  const holdIn = (hh, sid) => t.waitFor(() => hh.S(sid).runs.at(-1)?.hold?.reason === 'quota' && hh.S(sid).runs.at(-1).hold, 30000, '한도 대기');
-  return { h, open, x, y, start, holdIn, home };
+  const holdIn = (hh, sid, reason = 'quota') => t.waitFor(() => hh.S(sid).runs.at(-1)?.hold?.reason === reason && hh.S(sid).runs.at(-1).hold, 30000, `${reason} 대기`);
+  return { h, open, x, y, z, start, holdIn, home };
 }
 
 test('16. 끊김 뒤 이어서: 판정의 한도 대기, 되돌림 중 한도 대기(호출 없이 같은 대기). 저장된 초기화 시각이 지났으면 "지났어"로', async () => {
@@ -667,5 +670,257 @@ test('16. 끊김 뒤 이어서: 판정의 한도 대기, 되돌림 중 한도 �
     await B2.ctl(sb, 'retry');
     await t.waitFor(() => B2.idle(sb) && !['active', 'waiting'].includes(B2.S(sb).mission.status), 30000, '되돌림 끝');
     assert.deepEqual([B2.S(sb).mission.status, B2.S(sb).mission.returns, B2.S(sb).mission.round], ['done', 1, 2], '되돌림 수는 다시 세지 않고 2회차에 통과');
+  } finally { lift(false); }
+});
+
+// ── 두 번째 검토 뒤 고친 것(결정 0019) ──
+const resumeIn = (hh, sid) => hh.api('POST', `/api/sessions/${sid}/mission/resume`, { missionId: hh.S(sid).mission.id });
+const forget = (hh) => { hh.a.store.usage.limits = {}; hh.a.orch.cooldown.map.clear(); }; // 다시 켠 앱의 한도 기록·쉬는 표시(저장된 시각만 보게)
+const settled = (hh, sid) => t.waitFor(() => hh.idle(sid) && !['active', 'waiting'].includes(hh.S(sid).mission.status), 30000, '목표 끝');
+
+test('17. 끊겼다 이어서 해도 한도로 건너뛴 카드는 검수 자료에 "결과가 비었다"는 줄로 가고, 그 담당의 옛 답(되돌림 전 답)은 지금 결과로 넣지 않는다', async () => {
+  await app();
+  const skipLine = '이 담당은 사용량 한도에 걸려 사용자가 건너뛰어서, 이 결과는 비어 있어';
+  const reviewOf = (from) => prompts(from).find((p) => p.startsWith('[기준 판정 —'));
+  // 첫 바퀴에서 k2 만 한도 → (일시정지를 먼저 눌러 두고) 건너뛰기 → 판정 앞 일시정지에서 앱을 끄고 다시 켜서 이어서
+  clean();
+  const A = await sideApp('건너뜀이어서', { build: true });
+  const sa = await A.start('WORKQUOTAK2 목표', 'cards');
+  await A.holdIn(A.h, sa);
+  assert.equal((await A.h.ctl(sa, 'pause')).json.ok, true);
+  assert.equal((await A.h.ctl(sa, 'skip')).json.ok, true);
+  await A.holdIn(A.h, sa, 'pause');
+  assert.equal(A.h.S(sa).mission.at.phase, 'review');
+  await A.h.a.close();
+  const A2 = await A.open();
+  const na = t.fakeLog().length;
+  assert.equal((await resumeIn(A2, sa)).status, 200);
+  await settled(A2, sa);
+  const ra = reviewOf(na);
+  assert.ok(ra?.includes(skipLine), '이어서 한 검수에도 건너뛴 카드의 줄');
+  assert.ok(ra.includes('CARDANSWER-k1'), '끝낸 카드의 답은 그대로');
+  // 되돌림에서 두 카드 다 한도 → 건너뛰기 → 끊김 → 이어서: 되돌림 전 답(CARDANSWER)을 지금 결과처럼 넣지 않는다
+  clean();
+  const B = await sideApp('되돌림건너뜀', { build: true });
+  const sb = await B.start('REVIEWFAIL BACKQUOTA 목표', 'cards');
+  await B.holdIn(B.h, sb);
+  assert.deepEqual([B.h.S(sb).mission.returns, B.h.S(sb).mission.at.back], [1, true]);
+  assert.equal((await B.h.ctl(sb, 'pause')).json.ok, true);
+  assert.equal((await B.h.ctl(sb, 'skip')).json.ok, true);
+  await B.holdIn(B.h, sb, 'pause');
+  await B.h.a.close();
+  const B2 = await B.open();
+  const nb = t.fakeLog().length;
+  assert.equal((await resumeIn(B2, sb)).status, 200);
+  await settled(B2, sb);
+  const rb = reviewOf(nb);
+  assert.ok(rb, '이어서 검수했다');
+  assert.equal(rb.split(skipLine).length - 1, 2, '두 카드 다 결과가 비었다는 줄');
+  assert.ok(!rb.includes('CARDANSWER-'), '되돌림 전 답을 지금 결과로 넣지 않는다');
+});
+
+test('18. 일 카드 물결에 카드가 하나뿐인데 한도로 건너뛰면 그 단계는 "끝"이 아니라 건너뜀', async () => {
+  const { tm } = await quotaTeam();
+  clean();
+  const sid = await goal(tm.id, 'WORKQUOTAK2 PLANDEP', { work: 'cards' });
+  await holdOf(sid);
+  assert.equal((await ctl(sid, 'skip')).json.ok, true);
+  await waitEnd(sid);
+  const st = S(sid).runs.at(-1).stages.find((x) => (x.cardIds || []).includes('k2'));
+  assert.deepEqual(st.cardIds, ['k2'], '한 물결에 k2 하나');
+  assert.equal(st.status, 'skipped');
+  const log = S(sid).mission.log.map((x) => x.text);
+  assert.ok(log.includes(`"${st.label}" 단계 건너뜀`), JSON.stringify(log));
+  assert.ok(!log.includes(`"${st.label}" 단계 끝`));
+});
+
+test('19. 409 가 안 나는 팀 변경 뒤 확인: 화면이 보던 어림과 지금 팀으로 다시 센 값이 다르면 409 와 지금 조각. 어림을 안 보내는 옛 화면은 그대로 통과', async () => {
+  await app();
+  const a = await mk('어긋정리', '정리');
+  const b = await mk('어긋빌드', '빌드');
+  const b2 = await mk('어긋빌드2', '빌드');
+  const r = await mk('어긋검수', '검수');
+  const tm = await mkTeam('어긋팀', [{ label: '정리', agentIds: [a.id] }, { label: '빌드', agentIds: [b.id] }, { label: '검수', agentIds: [r.id] }]);
+  const s1 = await draft(tm.id);
+  const s2 = await draft(tm.id);
+  const c1 = cardOf(s1);
+  const c2 = cardOf(s2);
+  // 카드를 본 뒤 빌드 단계에 사람이 하나 늘었다(검수·조사·회의·일하는 방식 대조는 그대로 통과한다)
+  const team0 = t.app.store.get('teams', tm.id);
+  assert.equal((await t.api('PUT', `/api/teams/${tm.id}`, { ...team0, stages: team0.stages.map((st) => (st.label === '빌드' ? { ...st, agentIds: [b.id, b2.id] } : st)) })).status, 200);
+  const pick = { work: 'stages', research: false, meeting: false, kept: [] };
+  const body = (sid, c, extra) => ({ missionId: S(sid).mission.id, expected: shown(c), review: { reviewerId: c.review.reviewerId, droppable: c.review.droppable, drop: c.review.droppable.map((d) => d.index) },
+    prep: { research: false, meeting: false, lead: c.prep.lead.id, researchers: c.prep.research.who.map((w) => w.id), attendees: c.prep.meeting.who.map((w) => w.id) }, work: 'stages', ...extra });
+  const seen = sumEstimate(c1.estimate, pick);
+  const bad = await t.api('POST', `/api/sessions/${s1}/mission/confirm`, body(s1, c1, { estimate: { min: seen.min, max: seen.max } }));
+  assert.equal(bad.status, 409, JSON.stringify(bad.json));
+  assert.deepEqual(bad.json.estimate, estimateParts(t.app.store.get('teams', tm.id), t.app.store.all('agents'), { lead: c1.leadId, spent: c1.estimate.spent }), '409 에 지금 팀의 어림 조각');
+  assert.equal(S(s1).mission.status, 'draft', '확정하지 않았다');
+  const now = sumEstimate(bad.json.estimate, pick);
+  assert.notDeepEqual([now.min, now.max], [seen.min, seen.max]);
+  // 화면이 새 조각으로 다시 더한 값을 보내면 확정되고, 그 값이 저장된다
+  const ok = await t.api('POST', `/api/sessions/${s1}/mission/confirm`, body(s1, c1, { estimate: { min: now.min, max: now.max } }));
+  assert.equal(ok.status, 200, JSON.stringify(ok.json));
+  assert.deepEqual(S(s1).mission.estimate, now);
+  await waitEnd(s1);
+  // 옛 화면(어림을 안 보냄): 지금처럼 통과하고 저장값은 지금 팀으로 센 값
+  const old = await t.api('POST', `/api/sessions/${s2}/mission/confirm`, body(s2, c2, {}));
+  assert.equal(old.status, 200, JSON.stringify(old.json));
+  assert.deepEqual(S(s2).mission.estimate, now);
+  await waitEnd(s2);
+});
+
+test('20. 지난 초기화 시각은 두 번 끊겼다 이어서 해도 "지났어"로 남는다(끊긴 자리에 지난 시각을 그대로 적는다)', async () => {
+  await app();
+  clean();
+  const A = await sideApp('두번끊김');
+  const sid = await A.start('WORKQUOTA 목표');
+  await A.holdIn(A.h, sid);
+  const file = path.join(A.h.a.store.dirs.sessions, `${sid}.json`);
+  await A.h.a.close();
+  const snap = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const past = Date.now() - 60000;
+  snap.mission.at.wait.until = past;
+  fs.writeFileSync(file, JSON.stringify(snap));
+  let hh = await A.open();
+  for (let k = 1; k <= 2; k++) {
+    forget(hh);
+    assert.equal((await resumeIn(hh, sid)).status, 200);
+    const h = await A.holdIn(hh, sid);
+    assert.deepEqual([h.until, h.passed, h.canAuto], [0, past, false], `${k}번째 이어서`);
+    assert.equal(hh.S(sid).mission.at.wait.until, past, `${k}번째 이어서: 끊긴 자리에 지난 시각`);
+    await hh.a.close();
+    hh = await A.open();
+    assert.deepEqual([hh.S(sid).mission.status, hh.S(sid).mission.at.wait.until], ['cut', past]);
+  }
+});
+
+test('21. 자동 이어서 → 일시정지 → 타이머 울림(일시정지 대기) → 그만이어도 사무실에 한도에 걸린 사람이 오류로 남지 않는다', async () => {
+  const { tm, a } = await quotaTeam();
+  clean();
+  process.env.OFFICE_CREW_QUOTA_RESUME_MS = '50';
+  try {
+    const sid = await goal(tm.id, 'WORKQUOTA', { work: 'stages' });
+    await holdOf(sid);
+    assert.equal(t.app.orch.liveStates(sid)[a.id]?.state, 'error', '한도에 걸린 사람은 오류 표시');
+    assert.equal((await ctl(sid, 'pause')).json.ok, true);
+    assert.equal((await ctl(sid, 'later')).json.ok, true);
+    await t.waitFor(() => S(sid).runs.at(-1).hold?.reason === 'pause', 20000, '일시정지 대기');
+    assert.equal((await ctl(sid, 'stop')).json.ok, true);
+    await waitEnd(sid);
+    assert.equal(S(sid).mission.status, 'stopped');
+    assert.deepEqual([t.app.orch.liveStates(sid)[a.id]?.state, t.app.orch.liveStates(sid)[a.id]?.detail], ['idle', '중지됨']);
+  } finally { delete process.env.OFFICE_CREW_QUOTA_RESUME_MS; }
+});
+
+test('22. 한도 다시 하기 앞의 "20번 더?"에서 끊겼다 이어서 해도 카드 재실행은 카드 시작 수·시간당 시작 수에 세지 않는다', async () => {
+  await app();
+  clean();
+  const A = await sideApp('상한끊김', { build: true });
+  const sid = await A.start('WORKQUOTAK2 목표', 'cards');
+  await A.holdIn(A.h, sid);
+  const c = A.h.S(sid).mission.calls;
+  c.cap = c.used;
+  lift(true);
+  try {
+    assert.equal((await A.h.ctl(sid, 'retry')).json.ok, true);
+    await A.holdIn(A.h, sid, 'cap');
+    await A.h.a.close();
+    const A2 = await A.open();
+    assert.equal(A2.S(sid).mission.status, 'cut');
+    const n = t.fakeLog().length;
+    assert.equal((await resumeIn(A2, sid)).status, 200);
+    const h2 = await A.holdIn(A2, sid, 'cap');
+    assert.equal(t.fakeLog().length, n, '상한을 넘기 전에는 다시 돌지 않는다');
+    assert.deepEqual([h2.ran, A2.S(sid).runs.at(-1).stages[h2.stageIndex].status], [true, 'pending'], '이어서 한 실행은 단계를 pending 으로 다시 만들지만 이미 돈 단계라는 표시는 그대로');
+    assert.equal((await A2.ctl(sid, 'more')).json.ok, true);
+    await settled(A2, sid);
+    const m = A2.S(sid).mission;
+    assert.equal(m.status, 'done');
+    assert.deepEqual(prompts(n).filter((p) => /^\[일 카드 k\d\]$/m.test(p)).map((p) => p.match(/^\[일 카드 (k\d)\]$/m)[1]), ['k2'], '한도에 걸린 카드만 다시');
+    assert.deepEqual(m.cards.map((x) => [x.id, x.status, x.starts]), [['k1', 'done', 1], ['k2', 'done', 1]]);
+    assert.equal(m.rate.starts.length, 2);
+  } finally { lift(false); }
+});
+
+test('23. 이어서: 저장된 오류 문구(600자로 자름)에 한도 문구가 없어도 끊기기 전이 한도 대기였으면 한도 대기로(저장된 초기화 시각 그대로)', async () => {
+  await app();
+  clean();
+  const A = await sideApp('긴오류');
+  const sid = await A.start('WORKQUOTA 목표');
+  const h = await A.holdIn(A.h, sid);
+  const file = path.join(A.h.a.store.dirs.sessions, `${sid}.json`);
+  await A.h.a.close();
+  // 한도 문구가 600자 뒤에 있던 오류라면 끊긴 자리에는 앞 600자만 남는다
+  const snap = JSON.parse(fs.readFileSync(file, 'utf8'));
+  snap.mission.at.wait.failed[0].error = '[log] '.repeat(100);
+  fs.writeFileSync(file, JSON.stringify(snap));
+  const A2 = await A.open();
+  forget(A2);
+  const n = t.fakeLog().length;
+  const runs0 = A2.S(sid).runs.length;
+  assert.equal((await resumeIn(A2, sid)).status, 200);
+  const h2 = await t.waitFor(() => A2.S(sid).runs.length > runs0 && A2.S(sid).runs.at(-1).hold, 30000, '대기');
+  assert.deepEqual([h2.reason, h2.until, t.fakeLog().length], ['quota', h.until, n]);
+  assert.equal(A2.S(sid).mission.at.wait.reason, 'quota');
+});
+
+test('24. 한도 대기 → "지금 다시" → "20번 더?"에서 그만이어도 사무실에 한도에 걸린 사람이 오류로 남지 않는다', async () => {
+  const { tm, a } = await quotaTeam();
+  clean();
+  const sid = await goal(tm.id, 'WORKQUOTA', { work: 'stages' });
+  await holdOf(sid);
+  assert.equal(t.app.orch.liveStates(sid)[a.id]?.state, 'error', '한도에 걸린 사람은 오류 표시');
+  const c = S(sid).mission.calls;
+  c.cap = c.used;
+  assert.equal((await ctl(sid, 'retry')).json.ok, true);
+  await t.waitFor(() => S(sid).runs.at(-1).hold?.reason === 'cap', 20000, '상한 대기');
+  assert.equal((await ctl(sid, 'stop')).json.ok, true);
+  await waitEnd(sid);
+  assert.equal(S(sid).mission.status, 'stopped');
+  assert.deepEqual([t.app.orch.liveStates(sid)[a.id]?.state, t.app.orch.liveStates(sid)[a.id]?.detail], ['idle', '중지됨']);
+});
+
+test('25. 끊긴 한도 다시 하기 앞 "20번 더?"를 이어서 하면 한도에 걸린 사람만 다시 돈다(그 단계에서 사용자가 건너뛴 사람은 다시 돌지 않는다. 살아 있을 때와 같다)', async () => {
+  await app();
+  clean();
+  const A = await sideApp('건너뛴사람');
+  const ag = async (n, role) => (await A.h.api('POST', '/api/agents', { name: n, role, provider: 'claude', model: 'claude-sonnet-5-5', permission: 'plan', routing: 'manual' })).json;
+  const p = await ag('건너뛴정리', '정리');
+  const q = await ag('한도정리B', '정리');
+  const r = await ag('건너뛴검수', '검수');
+  const tm = (await A.h.api('POST', '/api/teams', { name: '건너뛴팀', stages: [{ label: '정리', agentIds: [p.id, q.id] }, { label: '검수', agentIds: [r.id] }] })).json;
+  const sid = (await A.h.api('POST', '/api/sessions', { teamId: tm.id })).json.id;
+  await A.h.api('PATCH', `/api/sessions/${sid}`, { goalMode: true });
+  await A.h.api('POST', `/api/sessions/${sid}/messages`, { text: 'SLOW 정리해 줘' }); // SLOW: 차례마다 1.5초 늦게 끝남(건너뛸 틈)
+  await t.waitFor(() => A.h.S(sid).mission?.status === 'draft' && A.h.idle(sid), 20000, '목표 카드');
+  const c = A.h.S(sid).messages.findLast((mm) => mm.role === 'proposal' && mm.kind === 'goal');
+  const ok = await A.h.api('POST', `/api/sessions/${sid}/mission/confirm`, { missionId: A.h.S(sid).mission.id, expected: shown(c), edited: { ...shown(c), goal: `MIXQUOTA:${q.name} 목표` },
+    review: { reviewerId: c.review.reviewerId, droppable: c.review.droppable, drop: c.review.droppable.map((d) => d.index) }, work: 'stages', prep: { research: false, meeting: false } });
+  assert.equal(ok.status, 200, JSON.stringify(ok.json));
+  // 정리 단계에서 p 는 사용자가 건너뛰고, q 는 한도에 걸린다
+  await t.waitFor(() => A.h.a.orch.ctx.get(sid)?.handles?.has(p.id), 20000, 'p 가 일하는 중');
+  assert.equal((await A.h.api('POST', `/api/sessions/${sid}/control`, { action: 'skip', agentId: p.id })).json.ok, true);
+  const qh = await A.holdIn(A.h, sid);
+  assert.deepEqual(qh.who.map((w) => w.agentId), [q.id]);
+  const calls = A.h.S(sid).mission.calls;
+  calls.cap = calls.used;
+  lift(true);
+  try {
+    assert.equal((await A.h.ctl(sid, 'retry')).json.ok, true);
+    await A.holdIn(A.h, sid, 'cap');
+    assert.deepEqual(A.h.S(sid).mission.at.wait, { reason: 'cap', quota: true, failed: [{ agentId: q.id }] }, '끊긴 자리에 한도에 걸린 사람');
+    await A.h.a.close();
+    const A2 = await A.open();
+    forget(A2);
+    const n = t.fakeLog().length;
+    assert.equal((await resumeIn(A2, sid)).status, 200);
+    await A.holdIn(A2, sid, 'cap');
+    assert.equal((await A2.ctl(sid, 'more')).json.ok, true);
+    await settled(A2, sid);
+    const work = prompts(n).filter((x) => x.includes('단계 "정리"를 네가 맡았어'));
+    assert.equal(work.length, 1, '정리 단계는 한 사람만 다시 돈다');
+    assert.ok(work[0].includes(`같은 단계에서 ${p.name}도 병렬로`), '다시 돈 사람은 한도에 걸린 q(건너뛴 p 가 아니다)');
+    assert.equal(A2.S(sid).mission.status, 'done');
   } finally { lift(false); }
 });

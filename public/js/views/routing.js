@@ -76,7 +76,7 @@ export function RoutingPage() {
   const agents = state.agents.filter((a) => a.provider !== 'mock' || a.routing === 'auto');
   const autos = agents.filter((a) => a.routing === 'auto');
   const preview = useRoutePreview(autos.map((a) => ({ key: a.id, role: a.role, profile: a.routingProfile || 'balanced' })));
-  const ready = (state.catalog?.providers || state.providers).filter((p) => p.id !== 'mock');
+  const ready = state.catalog?.providers || state.providers; // 가상 AI 는 서버가 주는 목록에 없다(결정 0021)
 
   const refresh = async () => {
     setLoading(true);
@@ -133,7 +133,7 @@ function RoutingRow({ a, legacy, preview }) {
   const models = modelOptions(a.provider, { showLegacy: legacy });
   const known = models.some((m) => m.id === a.model);
   const efforts = effortOptions(a.provider, a.model);
-  const ready = (state.catalog?.providers || state.providers).filter((p) => p.loggedIn && p.id !== 'mock');
+  const ready = (state.catalog?.providers || state.providers).filter((p) => p.loggedIn);
   const setProvider = (pid) => {
     const first = modelOptions(pid)[0];
     const ef = effortOptions(pid, first?.id);
@@ -173,7 +173,7 @@ export function RoutingFields({ a, set, setMany }) {
   useEffect(() => { loadCatalog().catch(() => {}); }, []);
   const auto = a.routing === 'auto';
   const preview = useRoutePreview(auto ? [{ key: 'x', role: a.role, profile: a.routingProfile || 'balanced' }] : [])?.x;
-  const ready = (state.catalog?.providers || state.providers).filter((p) => p.id !== 'mock');
+  const ready = state.catalog?.providers || state.providers;
   const models = modelOptions(a.provider, { showLegacy: legacy });
   const efforts = effortOptions(a.provider, a.model);
   const pickProvider = (pid) => {

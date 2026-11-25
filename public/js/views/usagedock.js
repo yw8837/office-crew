@@ -14,7 +14,7 @@ export function UsageDock() {
   const [open, setOpen] = useState(() => { try { return localStorage.getItem('ui.dock') === '1'; } catch { return false; } });
   const toggle = (v) => { setOpen(v); try { localStorage.setItem('ui.dock', v ? '1' : '0'); } catch { /* 저장소가 막혀도 이번 화면에선 동작 */ } };
   const lim = state.usage?.limits || {};
-  const today = state.usage?.today || {};
+  const today = Object.fromEntries(Object.entries(state.usage?.today || {}).filter(([p]) => p !== 'mock')); // 가상 AI(mock)는 화면에 보이지 않는다(결정 0021)
   const total = Object.values(today).reduce((n, v) => n + usageTotal(v), 0);
   // AI마다 가장 많이 찬 한도 창 하나만 알약에 보인다
   const peaks = Object.entries(lim)

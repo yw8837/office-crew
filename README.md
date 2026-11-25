@@ -127,7 +127,7 @@ Office Crew is a local workspace for running several AI agents together. It runs
 
 ## 🚀 Quick start
 
-**Requirements:** [Node.js](https://nodejs.org) 20 or newer, plus the AI CLIs you want to use. You don't need any of them to try the demo.
+**Requirements:** [Node.js](https://nodejs.org) 20 or newer, plus at least one AI to work with: an AI CLI you are signed in to, an API key or a local model (see Supported AIs below).
 
 ```bash
 git clone https://github.com/yw8837/office-crew.git
@@ -137,7 +137,7 @@ npm start
 
 - The server starts at `http://127.0.0.1:4317` and opens an Edge/Chrome app window. If neither browser is found, it opens your default browser.
 - **Windows:** you can also double-click `오피스크루 실행.cmd` ("Run Office Crew"), or `오피스크루 실행 (창 없이).vbs` to start it without a console window. To quit, use Settings → About → Quit Office Crew.
-- **First run:** the built-in **Demo** team is selected by default. Its agents are simulated and use no AI quota, so you can try the office, approvals and steering before connecting any AI.
+- **First run:** new sessions use the **Default team** (research → organize → analysis → build). Check Settings → AI accounts first, so its agents have an AI to run on.
 - Your data is stored in `~/.office-crew`.
 
 | Option | Description |
@@ -162,7 +162,6 @@ Pass options after `--`, for example `npm start -- --browser --port 5000`. The e
 | **ACP agents** | Agent Client Protocol over stdio | Gemini CLI, Hermes, OpenCode, Goose, Qwen Code and others | Settings → API keys & local models → ACP agents (one-click presets) |
 | **OpenAI-compatible APIs** | HTTPS API | none | Settings → API keys & local models: OpenAI, OpenRouter, Nous Portal, xAI, Gemini API |
 | **Local models** | Local HTTP server | Ollama, LM Studio, llama.cpp, vLLM or Jan | None. Detected automatically while the server runs; custom URLs can be added in Settings |
-| **Demo** | Built in | none | None, 0 usage |
 
 Settings → **AI accounts** shows each CLI's install status, version, signed-in account and supported effort levels.
 
@@ -230,7 +229,7 @@ Found a vulnerability? See [SECURITY.md](SECURITY.md).
 Office Crew doesn't sign in for you, proxy your account or share credentials. It starts the official CLI you installed and signed in to, on your own machine, the same way you would from a terminal. You're still responsible for following each service's terms, including any rules on automation or third-party tools. For organizational or commercial use, API keys are the safer route. See [Using your accounts](#-using-your-accounts) for the rules Office Crew follows. Office Crew isn't affiliated with Anthropic, OpenAI, Google or Nous Research.
 
 **What does it cost?**
-Office Crew itself is free under the AGPL. Each provider counts usage against your subscription or API key exactly as if you used its CLI directly. The usage panel shows tokens and account limits as you go, the **economy** routing profile picks cheaper models, and the demo provider costs nothing.
+Office Crew itself is free under the AGPL. Each provider counts usage against your subscription or API key exactly as if you used its CLI directly. The usage panel shows tokens and account limits as you go, and the **economy** routing profile picks cheaper models.
 
 **Can I use it offline or with local models only?**
 Yes. Ollama, LM Studio, llama.cpp, vLLM and Jan are detected automatically while they run, and the UI ships with its own copies of Preact and htm, so nothing loads from a CDN.

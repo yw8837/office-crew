@@ -115,20 +115,21 @@ function Sidebar() {
       ${NAV().map(([v, icon, label]) => html`<button class=${`nav${state.route.view === v ? ' on' : ''}`} onClick=${() => { go(v); if (innerWidth < 860) { state.ui.side = false; changed(); } }}><${Icon} name=${icon} />${label}</button>`)}
     </div>
     <div class="side-foot">
-      ${state.providers.filter((p) => p.kind !== 'mock').map((p) => html`<span class=${`pdot${p.loggedIn ? ' ok' : p.installed ? ' warn' : ''}`} title=${`${p.label}: ${p.checking ? t('확인 중') : p.loggedIn ? t('사용 가능') : p.installed ? t('로그인 필요') : t('미설치')}${p.account ? ` · ${p.account}` : ''}`} onClick=${() => { state.ui.settingsTab = 'accounts'; go('settings'); }}><i></i>${{ claude: 'Claude', codex: 'GPT', gemini: 'Gemini', hermes: 'Hermes', openai: 'API', acp: 'ACP' }[p.id] || (p.base === 'codex' ? `GPT·${p.accountName}` : p.id)}</span>`)}
+      ${state.providers.map((p) => html`<span class=${`pdot${p.loggedIn ? ' ok' : p.installed ? ' warn' : ''}`} title=${`${p.label}: ${p.checking ? t('확인 중') : p.loggedIn ? t('사용 가능') : p.installed ? t('로그인 필요') : t('미설치')}${p.account ? ` · ${p.account}` : ''}`} onClick=${() => { state.ui.settingsTab = 'accounts'; go('settings'); }}><i></i>${{ claude: 'Claude', codex: 'GPT', gemini: 'Gemini', hermes: 'Hermes', openai: 'API', acp: 'ACP' }[p.id] || (p.base === 'codex' ? `GPT·${p.accountName}` : p.id)}</span>`)}
       <span class="small" style="width:100%">${t('{n}개 CLI 사용 가능', { n: okCount })}</span>
     </div>
   </aside>`;
 }
 
 function Home() {
+  // 시작 단추는 팀을 정하지 않는다: 서버가 설정의 새 세션 기본 팀으로 만든다. 그 팀이 없으면(팀 없이로 두었거나 지운 팀) 기본 에이전트 한 명이라 "새 세션"
+  const tm = state.teams.find((x) => x.id === state.settings.defaultTeamId);
   return html`<div class="page"><div class="page-inner"><div class="empty">
     <div style="font-size:52px">🏢</div>
     <h2>${t('오피스 크루에 온 걸 환영해')}</h2>
     <p>${t('Claude·ChatGPT(Codex)·Gemini·Hermes·로컬 모델을 한 사무실에 모아 팀으로 일 시켜봐.')}</p>
     <div class="row" style="justify-content:center;margin-top:16px;flex-wrap:wrap">
-      <button class="btn primary" onClick=${() => newSession({ teamId: 'team-demo' })}>🎬 ${t('데모 팀으로 시작 (사용량 0)')}</button>
-      <button class="btn" onClick=${() => newSession({ teamId: 'team-default' })}>👥 ${t('기본 팀으로 시작')}</button>
+      <button class="btn primary" title=${tm ? tm.name : undefined} onClick=${() => newSession()}>${tm ? html`👥 ${t('기본 팀으로 시작')}` : html`<${Icon} name="plus" /> ${t('새 세션')}`}</button>
       <button class="btn" onClick=${openImport}>⬇️ ${t('하던 세션 불러오기')}</button>
       <button class="btn" onClick=${() => go('settings')}>🔑 ${t('AI 계정 확인')}</button>
     </div>

@@ -6,13 +6,13 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { VERSION, PUBLIC_DIR, HOST, PORT, homeDir, dataDirs, ensureDirs, unsafeWorkdir } from './config.js';
 import { cleanAvatar, cleanSkin } from './media.js';
-import { Store, newId } from './store.js';
+import { Store, newId, DEMO_AGENT_IDS } from './store.js';
 import { Bus } from './bus.js';
 import { Usage } from './usage.js';
 import { Catalog } from './catalog.js';
 import { Orchestrator, normMeeting } from './orchestrator.js';
 import { uniqueName, STAGE_MAX } from './hire.js';
-import { ProviderRegistry, PROVIDERS, syncCodexAccounts, accountProviderId, codexAccountHome } from './providers/index.js';
+import { ProviderRegistry, PROVIDERS, HIDDEN_PROVIDERS, syncCodexAccounts, accountProviderId, codexAccountHome } from './providers/index.js';
 import { defaultCodexHome } from './providers/codex.js';
 import { resolveRoute, roleKind } from './routing.js';
 import { storageReport, cleanup } from './storage.js';
@@ -255,6 +255,9 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
 
   // 에이전트를 지우면 역할 노트는 지우지 않고 이름만 바꾼다(<id>.removed.json). 못 바꿔도 에이전트 삭제는 끝낸다
   const dropNotes = (id) => { try { notes.removeAgent(id); } catch (e) { console.error('[역할 노트 이름 바꾸기 실패]', e.message); } };
+  // 이전 처리로 지운 데모 에이전트의 역할 노트도 에이전트 삭제와 같게(결정 0021). 이전 처리가 이번에 켤 때 돌았을 때만(한 번만. 그 뒤에 백업에서 되살린 노트는 건드리지 않는다).
+  // 남겨 둔 데모 에이전트는 건드리지 않고, 노트가 없으면 아무 일도 없다
+  if (store.droppedDemo) for (const id of DEMO_AGENT_IDS) if (!store.get('agents', id)) dropNotes(id);
   // 에이전트 목록에 역할 노트 초안 수(noteDrafts)와 확정 수(noteCount)를 싣는다
   const withNoteCounts = (list) => list.map((a) => { const c = notes.counts(a.id); return { ...a, noteDrafts: c.drafts, noteCount: c.confirmed }; });
 
@@ -267,8 +270,9 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
 
   // 프로바이더
   route('GET', '/api/providers', async (req, url) => (url.searchParams.get('refresh') ? providers.refresh() : providers.list()));
+  // 화면에서 숨긴 프로바이더(가상 AI)는 목록처럼 여기서도 없는 것으로 답한다(결정 0021)
   route('POST', '/api/providers/([\\w-]+)/refresh', async (req, url, [id]) => {
-    if (!PROVIDERS[id]) throw new HttpError(404, tr('프로바이더 없음'));
+    if (!PROVIDERS[id] || HIDDEN_PROVIDERS.has(id)) throw new HttpError(404, tr('프로바이더 없음'));
     await providers.refresh(id);
     const list = providers.list();
     bus.emit('providers', list);
@@ -276,7 +280,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   });
   route('GET', '/api/providers/([\\w-]+)/models', async (req, url, [id]) => {
     const p = PROVIDERS[id];
-    if (!p) throw new HttpError(404, tr('프로바이더 없음'));
+    if (!p || HIDDEN_PROVIDERS.has(id)) throw new HttpError(404, tr('프로바이더 없음'));
     return providers.models(id, { force: !!url.searchParams.get('refresh'), query: { profile: url.searchParams.get('profile') } });
   });
   route('POST', '/api/providers/([\\w-]+)/login', async (req, url, [id]) => {
@@ -455,8 +459,11 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   // 세션
   route('POST', '/api/sessions', async (req) => {
     const b = await readJson(req);
-    // teamId 를 명시(null 포함)하면 그대로, 에이전트만 주면 팀 없이, 아무것도 없으면 기본 팀
-    const teamId = 'teamId' in b ? (b.teamId || null) : (b.agentId ? null : (store.settings.defaultTeamId || null));
+    // teamId 를 명시(null 포함)하면 그대로(없는 팀이면 거절. 세션 수정·예약·보드와 같다), 에이전트만 주면 팀 없이,
+    // 아무것도 없으면 설정의 기본 팀(그 팀이 지워졌으면 팀 없이 = 기본 에이전트 한 명)
+    if ('teamId' in b && b.teamId && !store.get('teams', b.teamId)) throw new HttpError(400, tr('없는 팀이야.'));
+    const def = store.settings.defaultTeamId && store.get('teams', store.settings.defaultTeamId) ? store.settings.defaultTeamId : null;
+    const teamId = 'teamId' in b ? (b.teamId || null) : (b.agentId ? null : def);
     if (b.cwd && !fs.existsSync(b.cwd)) throw new HttpError(400, tr('그 폴더가 없어.'));
     if (b.cwd && unsafeWorkdir(b.cwd, dirs.home)) throw new HttpError(400, UNSAFE_CWD());
     const s = store.createSession({ title: b.title, teamId, agentId: b.agentId || null, cwd: b.cwd || '' });
@@ -716,7 +723,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   });
   route('PUT', '/api/settings', async (req) => {
     const b = await readJson(req);
-    delete b.codexAccounts; delete b.claudeSeen;
+    delete b.codexAccounts; delete b.claudeSeen; delete b.demoDropped; // 서버가 적는 내부 표시(demoDropped: 데모 이전 처리를 한 번 했다. 결정 0021)
     const cur = store.settings;
     const keep = (nv, ov) => (typeof nv === 'string' && nv.startsWith(MASK) ? ov : nv);
     // 일부 키만 보내도 나머지 키는 그대로 둔다

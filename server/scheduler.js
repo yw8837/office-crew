@@ -160,7 +160,7 @@ export class Scheduler {
     if (!over?.size) return false;
     const team = s.teamId ? this.store.get('teams', s.teamId) : null;
     const ids = team ? team.stages.flatMap((st) => st.agentIds) : [s.agentId];
-    const others = (this.orch.providers?.list() || []).filter((p) => p.loggedIn && p.id !== 'mock');
+    const others = (this.orch.providers?.list() || []).filter((p) => p.loggedIn); // 가상 AI 는 목록에 없다(결정 0021)
     const anyFree = others.some((p) => !over.has(p.id));
     return ids.map((id) => this.store.get('agents', id)).filter(Boolean).some((a) => {
       if (a.routing === 'auto') return others.length > 0 && !anyFree;

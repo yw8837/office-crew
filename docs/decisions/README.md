@@ -25,3 +25,4 @@ Keep a record under about 100 lines. When a decision changes, add a dated "Revis
 | [0017](0017-goal-mode-research-and-meeting-first.md) | Goal mode researches and holds a meeting before the work, every turn in a new conversation | Accepted |
 | [0018](0018-goal-mode-task-cards.md) | Goal mode can split the work into task cards the lead plans and the code orders | Accepted |
 | [0019](0019-goal-mode-call-estimate-and-limit-wait.md) | Goal mode shows a rough call estimate before confirming, and waits for a usage-limit reset when no other AI can take over | Accepted |
+| [0020](0020-flow-stage-default-picture.md) | The split view shows a flow stage above the chat; the village stays in the Large office view | Accepted |

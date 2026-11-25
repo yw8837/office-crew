@@ -11,6 +11,8 @@ import { DraftChip } from './rolenotes.js';
 import { continueList, findInMessages, hideAsks, hideCheck, hideGoal, hideReview, hideResearch, hidePlan, hideBlocked } from '../chat-tools.js';
 import { GoalCard, MissionLog, MissionGate, ReviewTable, CutBox, ResearchCard, PlanCard } from './mission.js';
 import { researcherOf, meetingView, boardCards } from '../office/meeting.js';
+import { meetLabel, goalWait } from '../stage-model.js';
+import { FlowStage, StageStrip } from './stage.js';
 
 export const sessionAgents = (s) => {
   if (!s) return [];
@@ -78,22 +80,23 @@ function liveMeeting(s) {
   const st = r && !r.endedAt && r.stages[r.stageIndex];
   return { now: (st && st.meetingNow) || null, chairId: (st && ((st.meeting && st.meeting.chairId) || st.agentIds[0])) || null };
 }
-// 회의 차례 이름: 의견 1/3, 차례 2/3, 조사 2/3, 판정 2/3, 결론. 그 밖(옛 세션의 'review')은 검토 2/2
-const meetLabel = (m) => (m.phase === 'conclude' ? t('결론') : m.phase === 'opinion' ? t('의견 {r}/{n}', { r: m.round, n: m.rounds }) : m.phase === 'turn' ? t('차례 {r}/{n}', { r: m.round, n: m.rounds }) : m.phase === 'research' ? t('조사 {r}/{n}', { r: m.round, n: m.rounds }) : m.phase === 'judge' ? t('판정 {r}/{n}', { r: m.round, n: m.rounds }) : t('검토 {r}/{n}', { r: m.round, n: m.rounds }));
 // 회의 차례 글에 붙은 질문(msg.check)의 상태 칩: [글, 칩 모양]
 // low: 목표 실행에서 남은 호출이 상한의 4분의 1 아래라 회의 중 조사를 껐다(결정 0017)
 const checkChip = (status) => ({ asked: [t('조사 중'), ''], answered: [t('조사해 옴'), ' ok'], 'no-researcher': [t('조사할 사람 없음'), ' warn'], over: [t('조사 상한'), ' warn'], low: [t('호출이 적어 조사 끔'), ' warn'], failed: [t('확인 못 함'), ' warn'] }[status] || [status, '']);
 
 // ── 사무실 패널 ──
-// 사무실 기본 높이: 화면의 30%쯤, 200~300px 사이(대화가 주인공이라 절반을 넘지 않게)
-const officeDefaultH = () => Math.max(200, Math.min(300, Math.round(innerHeight * 0.3)));
+// 나눠 보기는 흐름 무대(views/stage.js), "사무실 크게"는 마을·스킨 그림. 컴포넌트가 달라서 보기를 바꾸면 마을은 새로 만들어지고 나올 때 치워진다
 function OfficePanel({ s, full, onCollapse, onJump }) {
+  return full ? html`<${VillagePanel} s=${s} onJump=${onJump} />` : html`<${FlowStage} s=${s} onCollapse=${onCollapse} />`;
+}
+
+// 마을·스킨 그림("사무실 크게" 보기에서 화면 가득)
+function VillagePanel({ s, onJump }) {
   const host = useRef(null);
   const officeRef = useRef(null);
   const jumpRef = useRef(null); // 게시판 카드를 눌렀을 때 채팅에서 그 메시지로(그림은 한 번만 만들어서 최신 함수를 여기로 넘긴다)
   jumpRef.current = onJump;
   const boardSid = useRef(null); // 게시판을 마지막으로 채운 세션(세션이 바뀌면 "새 카드" 표시 없이 채운다)
-  const [height, setHeight] = useState(() => Number(localStorage.getItem('ui.officeH')) || officeDefaultH());
   const agents = sessionAgents(s);
   const key = agents.map((a) => `${a.id}:${a.name}:${a.model}:${avatarKey(a.avatar)}`).join('|');
   const mod = officeMod.m;
@@ -168,17 +171,7 @@ function OfficePanel({ s, full, onCollapse, onJump }) {
   }), [s.id, key, mod]);
   useEffect(() => () => helpers.current.clear(), [s.id, mod]);
 
-  const startDrag = (e) => {
-    e.preventDefault();
-    const y0 = e.clientY, h0 = height;
-    const mv = (ev) => setHeight(Math.max(180, Math.min(innerHeight - 260, h0 + ev.clientY - y0)));
-    const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); localStorage.setItem('ui.officeH', String(Math.round(host.current?.parentElement?.offsetHeight || h0))); };
-    addEventListener('pointermove', mv);
-    addEventListener('pointerup', up);
-  };
-  const resetHeight = () => { localStorage.removeItem('ui.officeH'); setHeight(officeDefaultH()); };
-
-  return html`<div class=${`office-wrap${full ? ' full' : ''}`} style=${full ? '' : `height:${height}px`}>
+  return html`<div class="office-wrap full">
     ${!mod && html`<div class="empty">${t('사무실 그래픽을 불러오는 중…')}</div>`}
     <div class="office-host" ref=${host}></div>
     <div class="office-tools">
@@ -186,12 +179,10 @@ function OfficePanel({ s, full, onCollapse, onJump }) {
         ${(mod?.SKINS || []).map((k) => html`<option value=${k.id}>${mod.skinName ? mod.skinName(k, uiLang()) : k.name}</option>`)}
         ${state.skins.map((k) => html`<option value=${k.id}>${k.type === 'village' ? '🏡' : '🖼'} ${k.name}</option>`)}
       </select>
-      ${!full && onCollapse && html`<button class="btn sm" onClick=${onCollapse} title=${t('사무실 접기 (채팅만 보기)')} aria-label=${t('사무실 접기 (채팅만 보기)')}><${Icon} name="up" size=${14} /> ${t('접기')}</button>`}
     </div>
     ${agents.length > 0 && html`<div class="office-chips" role="group" aria-label=${t('에이전트 상태')}>
       ${chipOrder(agents, state.live[s.id] || {}).map(([a, st]) => { const label = STATE_LABEL[st] || st; return html`<button type="button" class=${`ochip st-${st}${state.ui.inspector === a.id ? ' on' : ''}`} aria-pressed=${state.ui.inspector === a.id ? 'true' : 'false'} aria-label=${`${a.name}, ${label}`} title=${`${a.name}${a.role ? ` · ${a.role}` : ''} · ${label}`} onClick=${() => { state.ui.inspector = a.id; changed(); }}><${Avatar} agent=${a} size=${18} /><b>${a.name}</b><span>${label}</span></button>`; })}
     </div>`}
-    ${!full && html`<div class="resizer" onPointerDown=${startDrag} onDblClick=${resetHeight} title=${t('드래그해서 높이 조절 · 두 번 누르면 기본 크기')}></div>`}
   </div>`;
 }
 
@@ -644,24 +635,23 @@ const cardTitles = (s, run, st) => {
   return '\n' + st.cardIds.map((id) => { const c = (s.mission.cards || []).find((x) => x.id === id); return c ? `${id} · ${c.title}` : id; }).join('\n');
 };
 
-// 목표의 판정 뒤 묻기·호출 상한으로 기다리는 단계면 단계 띠에 보일 표시(아니면 ''). 끝난 판정 단계가 ✓ 로 보여 다 끝난 것처럼 읽히지 않게(결정 0015)
-const goalWait = (run, i) => (run.status === 'waiting' && run.hold?.stageIndex === i ? { mission: '🎯', cap: '🔢', quota: '⏳' }[run.hold.reason] || '' : '');
-
 // ── 진행 바 + 승인/오류 카드 ──
-function RunBar({ s, run }) {
+// stages: 단계 띠까지 그린다("사무실 크게" 보기). 나눠 보기·채팅만 보기에서는 단계를 위쪽 무대·접은 띠가 보여 주고, 이 줄은 단추·기억·사용량만
+function RunBar({ s, run, stages = true }) {
   const active = run && ['running', 'paused', 'waiting'].includes(run.status) && !run.endedAt;
   const u = sessionUsage(s);
   const usageText = `${u.estimated ? '~' : ''}${t('{n} 토큰', { n: fmtTok(usageTotal(u)) })} ${fmtCost(u.cost)}`;
-  if (!run) return html`<div class="runbar"><span class="muted small">${t('아직 실행 없음')}</span><span class="grow"></span><${MemoryBadge} s=${s} /><span class="small muted">${t('세션 사용량 {usage}', { usage: usageText })}</span></div>`;
+  const cls = stages ? 'runbar' : 'runbar thin';
+  if (!run) return html`<div class=${cls}>${stages && html`<span class="muted small">${t('아직 실행 없음')}</span>`}<span class="grow"></span><${MemoryBadge} s=${s} /><span class="small muted">${t('세션 사용량 {usage}', { usage: usageText })}</span></div>`;
   const ctl = (action) => post(`/api/sessions/${s.id}/control`, { action }).catch((e) => toast(e.message, 'error'));
-  return html`<div class="runbar">
-    <div class="stages">
+  return html`<div class=${cls}>
+    ${stages ? html`<div class="stages">
       ${run.stages.map((st, i) => { const wait = goalWait(run, i); return html`${i > 0 && html`<span class="stage-arrow">→</span>`}<span class=${`stage ${wait ? 'review' : st.status}`} title=${`${st.agentIds.map((id) => agentById(id)?.name).join(', ')}${st.note ? ` · ${st.note}` : ''}${cardTitles(s, run, st)}`}>
         ${wait ? wait : st.status === 'running' ? html`<span class="spin" style="width:10px;height:10px"></span>` : st.status === 'done' ? '✓' : st.status === 'error' ? '⚠' : st.status === 'review' ? '✋' : st.status === 'skipped' ? '⤼' : `${i + 1}`}
         ${st.label}${st.count ? ` ×${st.count}` : st.agentIds.length > 1 ? ` ×${st.agentIds.length}` : ''}${st.meetingNow ? ` · ${meetLabel(st.meetingNow)}` : st.meeting && st.mission !== 'meeting' ? ` · ${t('회의')}` : ''}${st.status === 'skipped' ? ` (${t('건너뜀')})` : st.note ? ` (${st.note})` : ''}
       </span>`; })}
       ${!active && html`<span class=${`chip ${run.status === 'done' ? 'ok' : run.status === 'error' ? 'err' : 'warn'}`} style="margin-left:6px">${{ done: t('완료'), error: t('오류'), stopped: t('중지됨') }[run.status] || run.status}</span>`}
-    </div>
+    </div>` : html`<span class="grow"></span>`}
     <${MemoryBadge} s=${s} />
     <span class="small muted hide-sm" title=${u.estimated ? t('작성 중인 출력은 글자 수로 추정(~)') : ''}>${t('세션 {usage}', { usage: usageText })}</span>
     ${active && run.stages[run.stageIndex]?.meetingNow && run.stages[run.stageIndex].meetingNow.phase !== 'conclude' && html`<button class="btn sm" onClick=${() => ctl('conclude')} title=${t('지금까지 나온 의견으로 진행자가 바로 결론을 내')}>${t('회의 끝내기')}</button>`}
@@ -1075,7 +1065,7 @@ function TopBar({ s }) {
     <span class="grow"></span>
     <div class="seg hide-sm" role="tablist" aria-label=${t('화면 배치')}>
       <button class=${vm === 'chat' ? 'on' : ''} onClick=${() => setView('chat')} title=${t('채팅만')}><${Icon} name="msg" size=${14} /></button>
-      <button class=${vm === 'split' ? 'on' : ''} onClick=${() => setView('split')} title=${t('사무실 + 채팅')}><${Icon} name="split" size=${14} /></button>
+      <button class=${vm === 'split' ? 'on' : ''} onClick=${() => setView('split')} title=${t('흐름 무대 + 채팅')}><${Icon} name="split" size=${14} /></button>
       <button class=${vm === 'office' ? 'on' : ''} onClick=${() => setView('office')} title=${t('사무실 크게')}><${Icon} name="building" size=${14} /></button>
     </div>
     <button class="icon-btn" title=${t('대화를 마크다운(.md)으로 내보내기')} onClick=${() => exportMarkdown(s)}><${Icon} name="download" /></button>
@@ -1106,10 +1096,10 @@ export function SessionView({ s }) {
   return html`<div class="session">
     <${TopBar} s=${s} />
     ${vm !== 'chat' && html`<${OfficePanel} s=${s} full=${vm === 'office'} onCollapse=${() => setView('chat')} onJump=${jumpTo} />`}
-    ${vm === 'chat' && html`<button class="office-reopen" onClick=${() => setView('split')}><${Icon} name="down" size=${14} /> ${t('사무실 펼치기')}</button>`}
+    ${vm === 'chat' && html`<${StageStrip} s=${s} onExpand=${() => setView('split')} />`}
     ${vm !== 'office' && html`<${Chat} s=${s} run=${run} />`}
     ${vm === 'office' && html`<${Gate} s=${s} run=${run} />`}
-    <${RunBar} s=${s} run=${run} />
+    <${RunBar} s=${s} run=${run} stages=${vm === 'office'} />
     <${Composer} s=${s} run=${run} />
     ${state.ui.inspector && html`<${Inspector} s=${s} agentId=${state.ui.inspector} />`}
   </div>`;

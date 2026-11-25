@@ -87,18 +87,16 @@ const checkChip = (status) => ({ asked: [t('조사 중'), ''], answered: [t('조
 // ── 사무실 패널 ──
 // 나눠 보기는 흐름 무대(views/stage.js), "사무실 크게"는 마을·스킨 그림. 컴포넌트가 달라서 보기를 바꾸면 마을은 새로 만들어지고 나올 때 치워진다
 function OfficePanel({ s, full, onCollapse, onJump }) {
-  return full ? html`<${VillagePanel} s=${s} full=${true} onJump=${onJump} />` : html`<${FlowStage} s=${s} onCollapse=${onCollapse} />`;
+  return full ? html`<${VillagePanel} s=${s} onJump=${onJump} />` : html`<${FlowStage} s=${s} onCollapse=${onCollapse} />`;
 }
 
-// 사무실 기본 높이: 화면의 30%쯤, 200~300px 사이(대화가 주인공이라 절반을 넘지 않게)
-const officeDefaultH = () => Math.max(200, Math.min(300, Math.round(innerHeight * 0.3)));
-function VillagePanel({ s, full, onCollapse, onJump }) {
+// 마을·스킨 그림("사무실 크게" 보기에서 화면 가득)
+function VillagePanel({ s, onJump }) {
   const host = useRef(null);
   const officeRef = useRef(null);
   const jumpRef = useRef(null); // 게시판 카드를 눌렀을 때 채팅에서 그 메시지로(그림은 한 번만 만들어서 최신 함수를 여기로 넘긴다)
   jumpRef.current = onJump;
   const boardSid = useRef(null); // 게시판을 마지막으로 채운 세션(세션이 바뀌면 "새 카드" 표시 없이 채운다)
-  const [height, setHeight] = useState(() => Number(localStorage.getItem('ui.officeH')) || officeDefaultH());
   const agents = sessionAgents(s);
   const key = agents.map((a) => `${a.id}:${a.name}:${a.model}:${avatarKey(a.avatar)}`).join('|');
   const mod = officeMod.m;
@@ -173,17 +171,7 @@ function VillagePanel({ s, full, onCollapse, onJump }) {
   }), [s.id, key, mod]);
   useEffect(() => () => helpers.current.clear(), [s.id, mod]);
 
-  const startDrag = (e) => {
-    e.preventDefault();
-    const y0 = e.clientY, h0 = height;
-    const mv = (ev) => setHeight(Math.max(180, Math.min(innerHeight - 260, h0 + ev.clientY - y0)));
-    const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); localStorage.setItem('ui.officeH', String(Math.round(host.current?.parentElement?.offsetHeight || h0))); };
-    addEventListener('pointermove', mv);
-    addEventListener('pointerup', up);
-  };
-  const resetHeight = () => { localStorage.removeItem('ui.officeH'); setHeight(officeDefaultH()); };
-
-  return html`<div class=${`office-wrap${full ? ' full' : ''}`} style=${full ? '' : `height:${height}px`}>
+  return html`<div class="office-wrap full">
     ${!mod && html`<div class="empty">${t('사무실 그래픽을 불러오는 중…')}</div>`}
     <div class="office-host" ref=${host}></div>
     <div class="office-tools">
@@ -191,12 +179,10 @@ function VillagePanel({ s, full, onCollapse, onJump }) {
         ${(mod?.SKINS || []).map((k) => html`<option value=${k.id}>${mod.skinName ? mod.skinName(k, uiLang()) : k.name}</option>`)}
         ${state.skins.map((k) => html`<option value=${k.id}>${k.type === 'village' ? '🏡' : '🖼'} ${k.name}</option>`)}
       </select>
-      ${!full && onCollapse && html`<button class="btn sm" onClick=${onCollapse} title=${t('사무실 접기 (채팅만 보기)')} aria-label=${t('사무실 접기 (채팅만 보기)')}><${Icon} name="up" size=${14} /> ${t('접기')}</button>`}
     </div>
     ${agents.length > 0 && html`<div class="office-chips" role="group" aria-label=${t('에이전트 상태')}>
       ${chipOrder(agents, state.live[s.id] || {}).map(([a, st]) => { const label = STATE_LABEL[st] || st; return html`<button type="button" class=${`ochip st-${st}${state.ui.inspector === a.id ? ' on' : ''}`} aria-pressed=${state.ui.inspector === a.id ? 'true' : 'false'} aria-label=${`${a.name}, ${label}`} title=${`${a.name}${a.role ? ` · ${a.role}` : ''} · ${label}`} onClick=${() => { state.ui.inspector = a.id; changed(); }}><${Avatar} agent=${a} size=${18} /><b>${a.name}</b><span>${label}</span></button>`; })}
     </div>`}
-    ${!full && html`<div class="resizer" onPointerDown=${startDrag} onDblClick=${resetHeight} title=${t('드래그해서 높이 조절 · 두 번 누르면 기본 크기')}></div>`}
   </div>`;
 }
 

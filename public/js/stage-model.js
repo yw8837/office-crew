@@ -84,43 +84,72 @@ export function requestOf(messages, run) {
 }
 
 const firstLine = (s) => [...(String(s || '').split(/\r?\n/).find((l) => l.trim()) || '').trim()].slice(0, 200).join('');
-export const fmtClock = (ms) => new Date(ms).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' });
+// 내 차례 알약·문을 누르면 갈 답 창. 다른 화면 파일(views/session.js·views/mission.js)의 클래스 이름이라
+// test/stage-model.test.js 가 그 파일들에 이 이름이 실제로 있는지 본다(이름이 바뀌면 테스트가 깨진다)
+export const ANSWER_BOX = {
+  gate: '.chat-inner .mission-gate, .chat-inner .gate, .session > .mission-gate, .session > .gate',
+  ask: '.composer-wrap .ask-panel:not(.mission-gate)',
+  askMini: '.composer-wrap .ask-mini',
+  cut: '.composer-wrap .warnbox',
+  card: (id) => `.chat [data-mid="${id}"] .goal-card`,
+};
+
+// 시각: 한도 대기 창과 같은 24시간 HH:MM. 오늘이 아니면 날짜도 붙인다
+export const fmtClock = (ms, nowMs = Date.now()) => {
+  const d = new Date(ms);
+  const same = new Date(nowMs).toDateString() === d.toDateString();
+  return d.toLocaleString(locale(), same ? { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' } : { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+};
+
+// 기준 조각 접기: 한 줄에 max 칸까지. 넘치면 마지막 칸이 "+n"(숨은 기준은 툴팁·이름으로 읽는다)
+export const MAX_CRIT = 3;
+export function critFold(review, max = MAX_CRIT) {
+  const list = Array.isArray(review) ? review : [];
+  return list.length <= max ? { shown: list, hidden: [] } : { shown: list.slice(0, max - 1), hidden: list.slice(max - 1) };
+}
 
 /**
  * 흐름 무대의 모델.
  * run: 세션의 마지막 실행(없으면 null), live: 에이전트 id → 실시간 상태(agentState), mission: 세션의 목표(없으면 null),
- * questions: openQuestions 의 결과, agents: [{ id, name }](이름 찾기), team: 세션의 팀(쉬는 세션의 역), solo: 팀이 없을 때의 에이전트,
+ * questions: openQuestions 의 결과, agents: [{ id, name }](이름 찾기. 없는 id 는 지워진 에이전트), team: 세션의 팀(쉬는 세션의 역), solo: 팀이 없을 때의 에이전트,
  * conn: 'ok'|'lost'(서버 연결), now: 지금 시각(ms), prev: 바로 앞에 그린 모델(단계가 넘어갔는지 보려고), request: 실행을 시작한 내 말
  */
 export function stageModel(input = {}) {
   const { run = null, live = {}, mission = null, questions = [], agents = [], team = null, solo = null, conn = 'ok', now = Date.now(), prev = null, request = '' } = input;
   const names = new Map((agents || []).map((a) => [String(a.id), a.name || String(a.id)]));
-  const nameOf = (id) => names.get(String(id)) || String(id);
+  const known = (id) => names.has(String(id));
+  const nameOf = (id) => names.get(String(id)) || t('삭제된 에이전트');
   const liveOf = (id) => (live && live[id]) || null;
   const active = !!run && !run.endedAt && ACTIVE.has(run.status);
   const hold = active && run.status === 'waiting' ? run.hold || null : null;
   // 이 그림이 보여 줄 목표: 마지막 실행이 그 목표의 실행이거나, 카드 확인 대기·끊긴 목표
   const mis = mission && ((run && run.missionId === mission.id) || ['draft', 'cut'].includes(mission.status)) ? mission : null;
-  const drafted = mis?.status === 'draft';
+  const drafted = mis?.status === 'draft' || mis?.status === 'drafting';
   const cutGoal = mis?.status === 'cut';
   const cutRun = cutGoal && run?.missionId === mis.id; // 끊긴 자리는 그 목표의 실행에서만 찾는다(그 뒤의 다른 실행이면 표시하지 않는다)
   // 역: 실행의 단계. 실행이 없으면(쉬는 세션) 팀 단계표를 흐린 역으로, 팀이 없으면 에이전트 하나의 역 하나.
   // 목표 카드 확인 대기면 아직 아무 단계도 시작하지 않았으니 팀 단계표를 할 일로 둔다
-  const useRun = !!run && !(drafted && !active);
+  const useRun = !!run && !(mis?.status === 'draft' && !active);
   const src = useRun ? run.stages || [] : team?.stages?.length ? team.stages : solo ? [{ label: solo.role || solo.name || '', agentIds: [String(solo.id)] }] : [];
   const cur = useRun && active && Number.isInteger(run.stageIndex) ? run.stageIndex : null;
   const quotaAuto = hold?.reason === 'quota' && !!hold.autoAt;
   const qs = active ? (questions || []).filter((q) => !q.runId || q.runId === run.id) : [];
   const curStage = cur != null ? src[cur] : null;
+  const holdStage = hold && Number.isInteger(hold.stageIndex) ? src[hold.stageIndex] || null : null;
   const errand = curStage?.meetingNow ? researcherOf(curStage.meetingNow) : null; // 회의 중 조사하러 간 사람(결정 0011)
   const back = !!(mis && active && mis.at?.back); // 되돌림 중(결정 0015)
+  // 지금 실행에서 일하는 사람: 지금 단계·대기가 가리키는 단계의 담당과 조사하러 간 사람. 다른 사람의 지난 상태는 "지금" 줄·한도 표시에 섞지 않는다
+  const inRun = new Set([...(curStage?.agentIds || []), ...(holdStage?.agentIds || []), ...(errand ? [errand] : [])].map(String));
+  // 호출 상한: 보통은 단계를 시작하기 전에 묻는다(문은 그 단계 앞). 한도 대기 뒤 "지금 다시" 앞이면 이미 돈 단계라 그 역에서 기다린다
+  const capInside = hold?.reason === 'cap' && holdStage?.status === 'error';
 
   const stations = src.map((st, i) => {
     const ids = (st.agentIds || []).map(String);
     let state = useRun ? ST_STATE[st.status] || 'todo' : 'todo';
     const hk = useRun ? holdKind(run, i) : '';
-    if (hk === 'mission') state = 'wait';
+    if (hk === 'mission' && hold.kind !== 'limit') state = 'wait'; // 카드 되풀이 상한은 단계를 시작하기 전에 묻는다(그 단계는 아직 돌지 않았다)
     if (hk === 'quota') state = quotaAuto ? 'limit' : 'wait';
+    if (hk === 'cap' && capInside) state = 'wait';
     if (cutRun && useRun && state !== 'done' && (st.status === 'stopped' || i === mis.at?.stageIndex)) state = 'cut';
     const isCur = cur === i;
     const showLive = isCur || (!!hold && hold.stageIndex === i);
@@ -129,8 +158,10 @@ export function stageModel(input = {}) {
     const mv = meet ? meetingView(meet, chairId) : null;
     const asking = new Set(qs.filter((q) => (q.stageIndex ?? cur) === i).map((q) => q.agentId));
     const working = ['run', 'wait', 'error', 'limit'].includes(state);
+    // 되돌림에서 회의 단계를 고치는 사람: 서버와 같이 진행자(목표의 leadId)가 그 단계에 있으면 그 사람, 없으면 첫 에이전트
+    const fixer = back && st.meeting && i === mis.at.stageIndex ? (ids.includes(String(mis.leadId)) ? String(mis.leadId) : ids[0]) : null;
     const people = ids.map((id) => {
-      const p = { id, name: nameOf(id), st: null, tool: null, held: false, chair: !!chairId && id === chairId, opp: false, speaker: false, away: false, limitLeft: null, detail: '' };
+      const p = { id, name: nameOf(id), gone: !known(id), st: null, tool: null, held: false, chair: !!chairId && id === chairId, opp: false, speaker: false, away: false, limitLeft: null, detail: '' };
       if (showLive || id === errand) {
         const ps = personSt(liveOf(id));
         Object.assign(p, ps, { detail: String(liveOf(id)?.detail || '') });
@@ -150,27 +181,35 @@ export function stageModel(input = {}) {
       }
       if (asking.has(id)) Object.assign(p, { st: 'wait', tool: null });
       if (state === 'cut') Object.assign(p, { st: 'off', tool: null });
-      // 일감 카드: 지금 단계에서 일을 맡은 사람(회의는 진행자). 병렬 단계는 먼저 끝낸 사람도 두 몫이 합쳐질 때까지 쥐고 있다
-      p.held = isCur && working && (st.meeting ? id === chairId : true);
+      // 일감 카드: 지금 단계에서 일을 맡은 사람(회의는 진행자, 회의 단계의 되돌림은 고치는 사람). 병렬 단계는 먼저 끝낸 사람도 두 몫이 합쳐질 때까지 쥐고 있다
+      p.held = isCur && working && (fixer ? id === fixer : st.meeting ? id === chairId : true);
       return p;
     });
-    const rank = (p) => (['wait', 'error', 'limit'].includes(p.st) ? 0 : p.held || BUSY.has(p.st) ? 1 : 2);
-    const shown = mv ? people : people.map((p, k) => [p, k]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([p]) => p);
+    // 보일 순서: 회의는 말하는 사람·반대편·진행자·조사하러 간 사람을 앞에, 그 밖은 나를 기다리는 사람·일하는 사람을 앞에(넘치면 +n 뒤로 가지 않게)
+    const rank = mv ? (p) => (p.speaker && mv.phase !== 'opinion' ? 0 : p.opp ? 1 : p.chair ? 2 : p.away ? 3 : 4)
+      : (p) => (['wait', 'error', 'limit'].includes(p.st) ? 0 : p.held || BUSY.has(p.st) ? 1 : 2);
+    const shown = people.map((p, k) => [p, k]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([p]) => p);
     const parallel = Number(st.count) || (ids.length > 1 && !st.meeting ? ids.length : 0);
     const ret = back && i === mis.at.stageIndex ? { n: Math.max(1, Number(mis.returns) || 1), of: Math.max(1, Number(mis.returnCap) || 1, Number(mis.returns) || 1) } : null;
     const cards = st.mission === 'cards' && mis && Array.isArray(st.cardIds) ? st.cardIds.map((id) => ({ id, title: String((mis.cards || []).find((c) => c.id === id)?.title || '') })) : null;
+    const speakerP = mv && mv.phase !== 'opinion' ? people.find((p) => p.speaker) || null : null;
     return {
       i, label: String(st.label || ''), state, cur: isCur,
       people: shown.slice(0, MAX_PEOPLE), more: Math.max(0, shown.length - MAX_PEOPLE),
+      names: people.map((p) => p.name), hiddenNames: shown.slice(MAX_PEOPLE).map((p) => p.name), // 툴팁·+n 은 자르기 전 전체 이름으로
       parallel, isMeeting: !!st.meeting && st.mission !== 'meeting',
-      meeting: mv ? { phase: mv.phase, round: mv.round, rounds: mv.rounds, label: meetLabel(meet), speakerId: mv.speakerId, chairId, away: errand && ids.includes(errand) ? errand : null } : null,
+      meeting: mv ? {
+        phase: mv.phase, round: mv.round, rounds: mv.rounds, label: meetLabel(meet), speakerId: mv.speakerId, chairId, away: errand && ids.includes(errand) ? errand : null,
+        speaker: speakerP ? { name: speakerP.name, detail: speakerP.detail, opp: speakerP.opp, chair: speakerP.chair } : null,
+        awayName: errand ? nameOf(errand) : '',
+      } : null,
       review: st.mission === 'review' && mis ? (mis.criteria || []).map((c) => ({ id: String(c.id), text: String(c.text || ''), verdict: state === 'run' ? 'check' : c.status || 'open' })) : null,
       note: ret ? 'ret' : asking.size ? 'question' : state === 'done' && parallel > 1 && !st.note ? 'merged' : null, // 누가 건너뛰었으면(메모) 합침 대신 메모를 보인다
       ret, memo: String(st.note || ''), cards, ask: false,
     };
   });
 
-  // ── 내 차례: 무엇을 기다리는지와 길 위의 자리(문: 그 단계 뒤 / 역 안 / 맨 앞) ──
+  // ── 내 차례: 무엇을 기다리는지와 길 위의 자리(문: 그 단계 뒤 / 그 단계 앞 / 역 안 / 맨 앞) ──
   let ask = null;
   const labelAt = (i) => String(src[i]?.label || '');
   if (cutGoal) ask = { kind: 'cut', icon: 'unplug', cls: 'cut', title: t('목표 끊김'), short: t('앱이 꺼져서 끊겼어 · 저절로 다시 시작 안 함'), target: 'cut' };
@@ -187,11 +226,11 @@ export function stageModel(input = {}) {
         : k === 'blocked' ? (hold.blocked || []).map((b) => b.name).filter(Boolean).join(', ')
           : k === 'limit' ? (hold.cards || []).map((c) => c.id).join(', ')
             : t('남은 기준 {n}개', { n: (hold.left || []).length });
-      ask = { kind: 'verdict', icon: 'target', cls: 'me', title, short, target: 'gate', gateAfter: i };
+      // 판정·추가 지시는 판정 역 뒤, 막힘은 막힌 일 단계 뒤, 카드 되풀이 상한은 그 카드 단계를 시작하기 전(앞)
+      ask = { kind: k === 'limit' ? 'limit' : k === 'blocked' ? 'blocked' : k === 'notes' ? 'notes' : 'verdict', icon: k === 'limit' ? 'gauge' : 'target', cls: 'me', title, short, target: 'gate', gateAfter: k === 'limit' ? i - 1 : i };
     } else if (hold.reason === 'cap') {
-      // 호출 상한은 단계를 시작하기 전에 멈춘다: 문은 그 단계 앞(앞 단계 뒤)
       const short = hold.kind === 'rate' ? t('한 시간에 카드 {used}장 시작함', { used: hold.used }) : t('{used}/{cap} 다 씀', { used: hold.used, cap: hold.cap });
-      ask = { kind: 'cap', icon: 'gauge', cls: 'me', title: hold.kind === 'rate' ? t('카드 시작 수 상한') : t('호출 상한'), short, target: 'gate', gateAfter: i - 1 };
+      ask = { kind: 'cap', icon: 'gauge', cls: 'me', title: hold.kind === 'rate' ? t('카드 시작 수 상한') : t('호출 상한'), short, target: 'gate', ...(capInside ? { station: i } : { gateAfter: i - 1 }) };
     } else if (hold.reason === 'quota' && !quotaAuto) {
       ask = { kind: 'quota', icon: 'hour', cls: 'me', title: t('사용량 한도'), short: (hold.who || []).map((w) => w.name || nameOf(w.agentId)).join(', '), target: 'gate', station: i };
     }
@@ -200,10 +239,10 @@ export function stageModel(input = {}) {
     const i = q.stageIndex ?? cur;
     ask = { kind: 'question', icon: 'ask', cls: 'me', title: t('질문'), short: q.text ? `${nameOf(q.agentId)}: ${q.text}` : nameOf(q.agentId), target: 'ask', station: i };
   }
-  if (!ask && drafted) ask = { kind: 'confirm', icon: 'target', cls: 'me', title: t('목표 카드 확인'), short: t('확인해야 팀이 일을 시작해'), target: 'card', msgId: mis.cardMsgId || null, gateAfter: -1 };
+  if (!ask && mis?.status === 'draft') ask = { kind: 'confirm', icon: 'target', cls: 'me', title: t('목표 카드 확인'), short: t('확인해야 팀이 일을 시작해'), target: 'card', msgId: mis.cardMsgId || null, gateAfter: -1 };
   if (ask && Number.isInteger(ask.station) && stations[ask.station]) stations[ask.station].ask = true;
 
-  // ── 지난 역 접기: 지금 역 하나 앞까지는 남긴다 ──
+  // ── 지난 역 접기: 지금 역 하나 앞까지는 남긴다. 앞으로 올 역은 접지 않는다(역 줄이 가로로 넘치면 화면이 민다) ──
   const anchor = cur ?? (useRun && !active ? stations.length : stations.findIndex((s) => !['done', 'skipped'].includes(s.state)));
   const start = stations.length > MAX_STATIONS ? Math.max(0, Math.min((anchor < 0 ? stations.length : anchor) - 1, stations.length - MAX_STATIONS)) : 0;
   const visible = stations.slice(start);
@@ -212,7 +251,7 @@ export function stageModel(input = {}) {
   if (gate && (gate.after === -1 || gate.after === start - 1)) links.unshift({ after: gate.after, done: false, cut: cutGoal, gate: { kind: gate.kind, icon: gate.icon } });
 
   // ── 한도 대기(내 차례 아님): 자동 이어서가 걸린 한도 대기, 한도가 곧 풀려 기다리는 사람(결정 0019) ──
-  const waiting = Object.entries(live || {}).filter(([, l]) => l?.state === 'paused').map(([id]) => id);
+  const waiting = Object.entries(live || {}).filter(([id, l]) => l?.state === 'paused' && inRun.has(String(id))).map(([id]) => id);
   const limit = quotaAuto ? { until: hold.autoAt, names: (hold.who || []).map((w) => w.name || nameOf(w.agentId)) }
     : active && waiting.length ? { until: null, names: waiting.map(nameOf) } : null;
 
@@ -220,15 +259,19 @@ export function stageModel(input = {}) {
   const kindOf = mis ? ({ drafting: 'run', draft: 'run', active: 'run', waiting: 'run', done: 'done', unreviewed: 'done', accepted: 'accepted', stopped: 'stopped', cancelled: 'stopped', cut: 'cut' }[mis.status] || 'run')
     : run ? (active ? 'run' : { done: 'done', stopped: 'stopped', error: 'error' }[run.status] || 'done') : 'none';
   const goal = { kind: kindOf, mission: !!mis, text: mis ? firstLine(mis.goal || mis.request) : run ? firstLine(request) : '' };
-  const crit = mis?.criteria?.length ? { pass: mis.criteria.filter((c) => c.status === 'pass').length, total: mis.criteria.length } : null;
+  // 기준: 판정이 하나라도 있으면 "통과 n/m", 아직 없으면 "기준 m개"
+  const crit = mis?.criteria?.length ? { pass: mis.criteria.filter((c) => c.status === 'pass').length, total: mis.criteria.length, judged: mis.criteria.some((c) => ['pass', 'fail', 'unknown'].includes(c.status)) } : null;
   const meta = { criteria: crit, calls: mis?.calls ? { used: Number(mis.calls.used) || 0, cap: Number(mis.calls.cap) || 0 } : null };
 
-  // ── 끝 깃발 ──
+  // ── 끝 깃발: 목표가 있으면 목표 상태를 실행 상태보다 먼저 본다 ──
   const end = cutGoal ? { kind: 'cut', text: t('끊김') }
-    : mis?.status === 'done' ? { kind: 'pass', text: t('통과로 끝') }
-      : mis?.status === 'accepted' ? { kind: 'pass', text: t('받아들여 끝') }
-        : run && !active ? ({ done: { kind: 'pass', text: t('끝') }, stopped: { kind: 'stopped', text: t('중지됨') }, error: { kind: 'error', text: t('오류로 끝') } }[run.status] || { kind: 'open', text: t('끝') })
-          : { kind: 'open', text: t('끝') };
+    : drafted ? { kind: 'open', text: t('끝') }
+      : mis?.status === 'done' ? { kind: 'pass', text: t('통과로 끝') }
+        : mis?.status === 'accepted' ? { kind: 'pass', text: t('받아들여 끝') }
+          : mis?.status === 'cancelled' ? { kind: 'stopped', text: t('닫힘') }
+            : mis?.status === 'stopped' && !active ? { kind: 'stopped', text: t('중지됨') }
+              : run && !active ? ({ done: { kind: 'pass', text: t('끝') }, stopped: { kind: 'stopped', text: t('중지됨') }, error: { kind: 'error', text: t('오류로 끝') } }[run.status] || { kind: 'open', text: t('끝') })
+                : { kind: 'open', text: t('끝') };
 
   // ── 지금 한 줄: 마지막 활동으로 정한다 ──
   const curSt = cur != null ? stations[cur] : null;
@@ -236,23 +279,24 @@ export function stageModel(input = {}) {
   if (conn === 'lost') line = { icon: 'wifi', cls: 'off', text: t('서버 연결 끊김 — 다시 연결 중…') };
   else if (ask) line = { icon: ask.icon, cls: ask.cls === 'err' ? 'error' : ask.cls === 'cut' ? 'off' : 'wait', text: ask.short || ask.title };
   else if (mis?.status === 'done') line = { icon: 'check', cls: 'done', text: crit ? t('통과로 끝 · 기준 {pass}/{total}', crit) : t('통과로 끝') };
-  else if (limit) line = { icon: 'hour', cls: 'limit', text: limit.until ? t('한도 대기 · {time}에 자동으로 이어서', { time: fmtClock(limit.until) }) : t('{names} · 한도가 풀리길 기다리는 중', { names: limit.names.join(', ') }) };
+  else if (limit) line = { icon: 'hour', cls: 'limit', text: limit.until ? t('한도 대기 · {time}에 자동으로 이어서', { time: fmtClock(limit.until, now) }) : t('{names} · 한도가 풀리길 기다리는 중', { names: limit.names.join(', ') }) };
   else if (back && curSt) line = { icon: 'ret', cls: 'error', text: t('되돌림 — "{label}" 단계가 걸린 기준을 고치는 중', { label: curSt.label }) };
   else if (curSt?.meeting) {
     const m = curSt.meeting;
     const who = m.phase === 'opinion' ? t('참석자가 동시에 의견 쓰는 중') : m.phase === 'research' && errand ? t('{name}이(가) 자료 확인하러 감', { name: nameOf(errand) }) : m.speakerId ? t('{name} 말하는 중', { name: nameOf(m.speakerId) }) : '';
     line = { icon: 'chat', cls: 'meet', text: who ? `${t('회의 · {label}', { label: m.label })} — ${who}` : t('회의 · {label}', { label: m.label }) };
   } else if (active) {
-    // 지금 일하는 사람 중 가장 최근에 상태가 바뀐 사람
-    const busy = Object.entries(live || {}).map(([id, l]) => [id, l, personSt(l)]).filter(([, l, ps]) => l && BUSY.has(ps.st)).sort((a, b) => (Number(b[1].at) || 0) - (Number(a[1].at) || 0))[0];
+    // 지금 일하는 사람 중 가장 최근에 상태가 바뀐 사람(이번 실행에 없는 사람의 지난 상태는 빼고)
+    const busy = Object.entries(live || {}).filter(([id]) => inRun.has(String(id))).map(([id, l]) => [id, l, personSt(l)]).filter(([, l, ps]) => l && BUSY.has(ps.st)).sort((a, b) => (Number(b[1].at) || 0) - (Number(a[1].at) || 0))[0];
     if (busy) {
       const info = personInfo(busy[2]);
       line = { icon: info.icon, cls: info.cls, text: `${nameOf(busy[0])} · ${String(busy[1].detail || '') || info.text}` };
     } else line = { icon: 'dots', cls: 'think', text: t('진행 중') };
-  } else if (run) {
+  } else if (mis?.status === 'cancelled') line = { icon: 'stop', cls: 'off', text: t('목표 카드를 닫았어.') };
+  else if (run) {
     line = mis?.status === 'accepted' ? { icon: 'check', cls: 'done', text: t('받아들여서 끝냈어') }
-      : ({ done: { icon: 'check', cls: 'done', text: t('끝났어') }, stopped: { icon: 'stop', cls: 'off', text: t('중지됨') }, error: { icon: 'warn', cls: 'error', text: t('오류로 끝났어') } }[run.status] || { icon: 'check', cls: 'done', text: t('끝났어') });
-    if (drafted) line = { icon: 'target', cls: 'wait', text: t('확인해야 팀이 일을 시작해') };
+      : mis?.status === 'stopped' ? { icon: 'stop', cls: 'off', text: t('중지됨') }
+        : ({ done: { icon: 'check', cls: 'done', text: t('끝났어') }, stopped: { icon: 'stop', cls: 'off', text: t('중지됨') }, error: { icon: 'warn', cls: 'error', text: t('오류로 끝났어') } }[run.status] || { icon: 'check', cls: 'done', text: t('끝났어') });
   } else line = { icon: 'moon', cls: 'idle', text: t('모두 쉬는 중 · 할 일을 보내면 팀이 시작해') };
 
   // ── 진행 한 줄(접은 띠·작은 모양): "3/4 만들기 ×2 · 기다림" ──
@@ -260,15 +304,18 @@ export function stageModel(input = {}) {
   const tail = (s) => ({ wait: ` · ${t('기다림')}`, error: ` · ${t('오류')}`, cut: ` · ${t('끊김')}`, limit: ` · ${t('한도 대기')}` }[s.state] || '');
   const focus = curSt || (cutRun && Number.isInteger(mis.at?.stageIndex) ? stations[mis.at.stageIndex] || null : null);
   const progress = focus ? `${focus.i + 1}/${n} ${focus.label}${focus.parallel > 1 ? ` ×${focus.parallel}` : ''}${focus.meeting ? ` · ${focus.meeting.label}` : ''}${tail(focus)}`
-    : useRun && run && !active ? (run.status === 'done' ? `${n}/${n} ${t('끝')}` : end.text)
-      : drafted ? t('시작 전') : t('쉬는 중');
+    : mis?.status === 'draft' && !active ? t('시작 전')
+      : useRun && run && !active ? (end.kind === 'pass' && run.status === 'done' ? `${n}/${n} ${t('끝')}` : end.text)
+        : t('쉬는 중');
 
   // ── 넘기기·되돌림: 바로 앞 모델과 비교해 지금 단계가 바뀌었을 때만 ──
   const runId = run?.id || null;
   const fly = prev && runId && prev.runId === runId && prev.cur != null && cur != null && prev.cur !== cur ? { from: prev.cur, to: cur, kind: cur < prev.cur ? 'ret' : 'hand' } : null;
+  // 좁은 창에서 역 줄을 밀어 보일 곳: 지금 역, 없으면 내 차례 문(또는 그 역)
+  const scrollTo = cur ?? (ask && Number.isInteger(ask.station) ? ask.station : gate ? Math.max(gate.after, 0) : null);
 
   return {
-    runId, cur, active, lost: conn === 'lost', cut: cutGoal,
+    runId, cur, active, lost: conn === 'lost', cut: cutGoal, scrollTo,
     goal, meta, now: line, stations: visible, links, ask, limit, end, fly, progress,
     done: mis?.status === 'done' ? crit || { pass: 0, total: 0 } : null,
     folded: start, total: n, segs: stations.map((s) => ({ i: s.i, state: s.state, label: s.label })),

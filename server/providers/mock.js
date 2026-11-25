@@ -135,16 +135,17 @@ function reviewAnswer({ nonce, goal, round, ids }) {
 }
 
 // ── 일하기 전 조사(결정 0017) ──
-// 훑어보기·조사 프롬프트는 코드가 만든 머리 줄("[조사 전 훑어보기]", "[조사 — 질문 n/m]")로 시작하고, 조사 질문 프롬프트는 블록 예시(researchBlock())로 끝난다.
+// 훑어보기·조사 프롬프트에는 코드가 만든 머리 줄("[조사 전 훑어보기]", "[조사 — 질문 n/m]")이 있고(그 앞에 호출마다 달라지는 지시가 붙을 수 있다, 결정 0023),
+// 조사 질문 프롬프트는 블록 예시(researchBlock())로 끝난다.
 // 그 모양일 때만 그 차례로 보고 같은 형식의 짧은 답을 낸다(테스트가 가상 AI 에이전트로 사용량 0으로 조사·회의를 돌릴 수 있게)
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 function prepTurn(prompt) {
   const p = String(prompt);
-  const first = p.split('\n', 1)[0];
-  if (first === tr('[조사 전 훑어보기]')) return { kind: 'scan' };
+  const lines = p.split('\n');
+  if (lines.includes(tr('[조사 전 훑어보기]'))) return { kind: 'scan' };
   if (p.trimEnd().endsWith(researchBlock()) && p.split('\n').includes(tr('[조사 질문 뽑기]'))) return { kind: 'questions' };
   const head = new RegExp(`^${esc(tr('[조사 — 질문 {n}/{total}]')).replace('\\{n\\}', '(\\d+)').replace('\\{total\\}', '\\d+')}$`);
-  const m = first.match(head);
+  const m = lines.map((l) => l.match(head)).find(Boolean);
   return m ? { kind: 'research', n: Number(m[1]) } : null;
 }
 function prepAnswer({ kind, n }, prompt) {

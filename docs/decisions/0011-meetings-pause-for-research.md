@@ -4,6 +4,10 @@
 - Date: 2026-11-17
 - Related: [0010](0010-meetings-take-turns.md) (the turns and verdicts this adds a step to; 0010 is otherwise unchanged), [0009](0009-agents-ask-with-a-marked-block.md) (the question uses the same kind of marked block), `server/meeting.js` (`CHECK_MAX`, `parseCheck`, `checkBlock`, `pickResearcher`), `server/orchestrator.js` (`#meeting`, `#meetingPrompt`, `#runAgent`, `recover`), `server/providers/mock.js`, `public/js/chat-tools.js` (`hideCheck`), `public/js/views/session.js`, `test/meeting-research.test.js`
 
+## Revision 2026-11-25: research in a long session's meeting runs once
+
+([0023](0023-prompt-assembly-for-cache-and-fresh-meeting-turns.md)) Outside goal mode, when the meeting runs its turns in new conversations because the session is long, the research turn does too: it gets the question, the request, the earlier stage results and the picked earlier messages, and doesn't continue or change the researcher's session conversation. Research keeps the skill bodies in its system instructions. In a shorter session the researcher still continues its conversation.
+
 ## Revision 2026-11-20: fewer research turns when a goal is low on calls
 
 In a goal's work run ([0017](0017-goal-mode-research-and-meeting-first.md)) the research turn runs once in a new conversation like the meeting's other turns, with the research agent's permission set to read-only for that call only (since 2026-11-22; its result also gets the research note's two counts and AI marks, and the following turns see it with a warning when it has an instruction-like line), and when fewer than a quarter of the goal's call cap is left, research during the meeting is turned off: a question is answered "not checked" without a call (`check.status: 'low'`), with one line in the goal's progress log.

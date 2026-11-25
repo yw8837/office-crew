@@ -74,9 +74,10 @@ test('회의 2바퀴: 의견 3 → 차례 2 → 결론 1, 차례 발언은 앞�
   const heads = (p) => [...p.matchAll(/^### (.+)$/gm)].map((m) => m[1]);
   const tp = ps.filter((p) => p.includes('[회의 — 차례 발언 (2/2바퀴)]'));
   assert.equal(tp.length, 2);
-  assert.deepEqual(heads(tp[0]), ['하늘', '바다', '구름'], '첫 차례는 세 의견(자기 글 포함)을 본다');
+  // 차례는 자기 CLI 대화를 이어 가니 자기 의견(대화에 답으로 있다)은 다시 보내지 않는다(결정 0023)
+  assert.deepEqual(heads(tp[0]), ['하늘', '바다'], '첫 차례는 다른 두 의견을 본다');
   assert.doesNotMatch(tp[0], /^## 2바퀴$/m, '첫 차례에는 두 번째 차례 답이 없다');
-  assert.deepEqual(heads(tp[1]), ['하늘', '바다', '구름', '구름'], '두 번째 차례는 세 의견과 첫 차례(반대편) 답을 본다');
+  assert.deepEqual(heads(tp[1]), ['바다', '구름', '구름'], '두 번째 차례는 다른 두 의견과 첫 차례(반대편) 답을 본다');
   assert.match(tp[1], /^## 2바퀴\n\n### 구름$/m);
   for (const p of tp) {
     const mark = p.match(/--- 의견 ([0-9a-f]{8}) 시작 ---/)?.[1];
@@ -94,7 +95,7 @@ test('회의 2바퀴: 의견 3 → 차례 2 → 결론 1, 차례 발언은 앞�
   assert.equal(cc.length, 1);
   assert.match(cc[0], /## 1바퀴/);
   assert.match(cc[0], /## 2바퀴/);
-  assert.equal(heads(cc[0]).length, 5, '의견 셋과 차례 답 둘 전부');
+  assert.deepEqual(heads(cc[0]), ['하늘', '구름', '구름', '하늘'], '진행자 자기 의견은 빼고(대화에 있다) 다른 의견 둘과 차례 답 둘');
   assert.match(cc[0], /^반대편: 구름\.$/m, '반대편이 말한 회의의 결론에는 반대편 이름이 들어간다');
   assert.match(cc[0], /하나를 고름 \/ 합침 \/ 전부 버림 \/ 새 안/);
   assert.match(cc[0], /버린 안: 무엇을 왜 버렸는지/);

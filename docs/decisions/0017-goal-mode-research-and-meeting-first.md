@@ -8,6 +8,10 @@
 
 Research during a goal meeting is also turned off when the research agent's set AI is near its usage limit (`check.status: 'near'`, [0022](0022-goal-mode-records-and-block-allow-list.md)), not only when fewer than a quarter of the calls are left.
 
+## Revision 2026-11-25: where the per-call lines go
+
+([0023](0023-prompt-assembly-for-cache-and-fresh-meeting-turns.md)) The read-only lines of these steps ("this research run is read-only…", "this turn is read-only…", and the variants for AIs the app can't hold read-only or without tools) are no longer in the system instructions. The system instructions of an agent are the same on every call and keep the sentence for the agent's saved permission; the read-only line for this call goes at the front of the prompt, with the same words. A goal's meeting opinions, turns, verdicts and conclusion get system instructions without skill bodies (the scan, the research and research during a meeting keep them). What each AI is held to (`--permission-mode plan`, the read-only sandbox and the rest) is unchanged.
+
 ## Context
 
 After 0014 to 0016 a confirmed goal goes straight into the team's stage list. Nobody first looks up what the goal depends on (rules, similar cases, competitors, what users complain about), and nothing decides what to make before making it; for a contest entry that is most of the work. Meetings so far continue each participant's session conversation: in a long session one meeting turn cost about 12 dollars (API price, 2026-11-11 run), and the turns stay in the agents' conversations.

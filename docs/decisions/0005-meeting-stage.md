@@ -4,6 +4,10 @@
 - Date: 2026-11-11
 - Related: `server/orchestrator.js` (`#meeting`), `test/meeting.test.js`
 
+## Revision 2026-11-25: long sessions run meeting turns in a new conversation
+
+Outside goal mode, a meeting in a long session (more earlier messages than the recent-conversation window, `historyTurns` × 2, 16 by default) runs every turn once in a new conversation, like a goal's meeting ([0023](0023-prompt-assembly-for-cache-and-fresh-meeting-turns.md)): no conversation id is read or saved, and each turn gets the request, the results of earlier stages, what was said in the meeting, and up to 3,000 characters of picked earlier messages instead of the earlier conversation. Only the conclusion goes to the next stage, as before. In a shorter session participants still continue their conversation, and a turn that does so no longer gets again what that conversation already holds (0010). Meeting turns that run in a new conversation get system instructions without skill bodies.
+
 ## Revision 2026-11-20: meetings inside a goal run start a new conversation
 
 In a goal's work run ([0017](0017-goal-mode-research-and-meeting-first.md)) every meeting turn, in the pre-work meeting and in a team's own meeting stage, runs once in a new conversation (since 2026-11-22 every turn runs read-only for that call, the opinion also ends with a position line, and the turn rounds are skipped when everyone, the opposing side included, takes the same position in round 1, see 0010): it gets the agenda, the research note and everything said so far, and doesn't continue or change the participant's session conversation. Meetings outside goal mode work as below.

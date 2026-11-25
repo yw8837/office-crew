@@ -14,7 +14,7 @@ import path from 'node:path';
 import { createApp } from '../server/index.js';
 import { bindLang } from '../server/i18n.js';
 import { stageDiff, sameStages, teamRoles, resumePoint, pastOutputs, cutMission, newMission } from '../server/mission.js';
-import { startTestApp, freePort } from './helpers.js';
+import { startTestApp, freePort, promptBody } from './helpers.js';
 
 bindLang(() => 'ko'); // 순수 함수의 문구(한국어 원문)를 검사한다
 let t = null;
@@ -71,7 +71,7 @@ const calls = (from) => {
   for (const l of t.fakeLog().slice(from)) {
     if (l.cli === 'codex') out.push({ cli: 'codex', args: l.args, texts: [l.prompt] });
     else if (l.cli === 'claude' && l.args) out.push({ cli: 'claude', args: l.args, texts: [] });
-    else if (l.cli === 'claude' && l.text !== undefined) out.findLast((x) => x.cli === 'claude')?.texts.push(l.text);
+    else if (l.cli === 'claude' && l.text !== undefined) out.findLast((x) => x.cli === 'claude')?.texts.push(promptBody(l.text)); // 본문만(결정 0023)
   }
   return out;
 };

@@ -9,7 +9,7 @@ import { PhoneNotify } from '../server/notify.js';
 import { reviewPlan, reviewCard, parseReview, reviewPrompt, reviewBlock, applyReview, tally, allPass, returnItems, returnPrompt, prevPrompt, sameDroppable, newMission, MISSION_CALL_CAP } from '../server/mission.js';
 import { hideReview } from '../public/js/chat-tools.js';
 import { attentionOf } from '../server/store.js';
-import { startTestApp, freePort } from './helpers.js';
+import { startTestApp, freePort, promptBody } from './helpers.js';
 
 bindLang(() => 'ko'); // 순수 함수의 문구(한국어 원문)를 검사한다
 let t = null;
@@ -33,7 +33,8 @@ const waitHold = (sid, reason) => t.waitFor(() => S(sid).runs.at(-1)?.hold?.reas
 const cardOf = (sid) => S(sid).messages.findLast((m) => m.role === 'proposal' && m.kind === 'goal');
 const shown = (c) => ({ goal: c.goal, criteria: c.criteria, outOfScope: c.outOfScope, userDecides: c.userDecides });
 const confirm = (sid, body) => t.api('POST', `/api/sessions/${sid}/mission/confirm`, body);
-const prompts = (from) => t.fakeLog().slice(from).filter((l) => l.cli === 'claude' && l.text !== undefined).map((l) => l.text);
+// 본문만 본다: 새 대화의 첫 프롬프트 맨 앞에 붙는 호출마다 달라지는 지시(결정 0023)는 promptBody 로 뗀다
+const prompts = (from) => t.fakeLog().slice(from).filter((l) => l.cli === 'claude' && l.text !== undefined).map((l) => promptBody(l.text));
 const reviews = (from) => prompts(from).filter((p) => p.startsWith('[기준 판정') || p.includes('\n[기준 판정 — '));
 const reviewMsgs = (sid) => S(sid).messages.filter((m) => m.role === 'agent' && m.review);
 // 요청 → 카드 → (목표 문장을 신호어가 든 것으로 고쳐서) 확인. 카드가 보여 주던 검수 줄을 그대로 보낸다(drop: 지정하지 않으면 뺄 수 있는 단계 전부)
@@ -197,13 +198,13 @@ test('4. 통과: 일 단계 → 한 번 실행 검수 → 전부 통과 → done
   assert.equal(t.app.store.sessionMeta(s).preview, '판정했어.', '사이드바 미리보기에서 판정 블록을 자른다');
   // 검수 CLI: --resume 없이, 프롬프트는 코드가 만든 것만(앞 대화·놓친 대화·사용자 요청·기억 없음), 시스템 지시에 질문 안내 없음
   const logs = t.fakeLog().slice(from).filter((l) => l.cli === 'claude');
-  const at = logs.findIndex((l) => l.text?.startsWith('[기준 판정 — 1번째 검수]'));
+  const at = logs.findIndex((l) => l.text !== undefined && promptBody(l.text).startsWith('[기준 판정 — 1번째 검수]'));
   assert.ok(at > 0);
   const args = logs.slice(0, at).filter((l) => Array.isArray(l.args)).at(-1).args;
   assert.ok(!args.includes('--resume'), '이어 가지 않는다');
   const system = logs.slice(0, at).filter((l) => l.system).at(-1).system;
-  assert.ok(system.includes(`"${a.name}"`) && !system.includes('oc-ask'), '질문 안내 없음');
-  const p = logs[at].text;
+  assert.ok(system.includes(`"${a.name}"`) && !system.includes('oc-ask') && !logs[at].text.includes('oc-ask'), '질문 안내 없음');
+  const p = promptBody(logs[at].text);
   for (const x of ['[이전 대화]', '[네가 지난번 답한 뒤 오간 대화]', '[사용자 요청]', '[프로젝트 기억]', '[확정된 목표와 합격 기준', '보고서 정리해 줘']) assert.ok(!p.includes(x), x);
   assert.ok(p.includes('목표: CUMUL 목표\n\n합격 기준:\n- c1: 가짜 기준 1\n- c2: 가짜 기준 2\n\n범위 밖:\n- 가짜 범위 밖'));
   assert.ok(p.includes('권한: 읽기 전용이라 명령은 못 돌려'), '검수자가 plan 권한');
@@ -402,7 +403,7 @@ test('9. 한 번 실행의 예외: 빈 답은 같은 프롬프트로 다시 요�
   await waitEnd(e);
   assert.equal(S(e).mission.status, 'done');
   const logs = t.fakeLog().slice(from).filter((l) => l.cli === 'claude');
-  const nudge = logs.findIndex((l) => l.text?.startsWith('[기준 판정 — 1번째 검수]') && l.text.includes('[중요]'));
+  const nudge = logs.findIndex((l) => l.text !== undefined && promptBody(l.text).startsWith('[기준 판정 — 1번째 검수]') && l.text.includes('[중요]'));
   assert.ok(nudge > 0, '다시 요청한 검수 프롬프트');
   assert.ok(logs[nudge].text.includes('"nonce":"'), '정해진 프롬프트를 다시 준다');
   assert.ok(!logs.slice(0, nudge).filter((l) => Array.isArray(l.args)).at(-1).args.includes('--resume'));

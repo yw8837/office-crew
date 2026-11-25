@@ -10,7 +10,7 @@ Keep a record under about 100 lines. When a decision changes, add a dated "Revis
 | [0002](0002-no-antigravity-cli.md) | Google Antigravity CLI isn't supported | Accepted |
 | [0003](0003-dual-license.md) | AGPL-3.0 or a commercial license | Accepted |
 | [0004](0004-project-memory-on-disk.md) | Project memory is verbatim text on disk with a rebuildable keyword index | Accepted |
-| [0005](0005-meeting-stage.md) | A team stage can be a meeting with fixed rounds and a chair | Accepted (its flow from round 2 is replaced by 0010) |
+| [0005](0005-meeting-stage.md) | A team stage can be a meeting with fixed rounds and a chair | Accepted (its flow from round 2 is replaced by 0010; revised by 0023) |
 | [0006](0006-hire-proposal-in-chat.md) | A hire request in the chat becomes a proposal the user approves | Accepted |
 | [0007](0007-local-only-user-messages.md) | What you type to a local model stays away from cloud AIs | Accepted |
 | [0008](0008-handoff-to-another-ai.md) | Another AI that takes over a session gets the earlier conversation three ways | Accepted |
@@ -18,7 +18,7 @@ Keep a record under about 100 lines. When a decision changes, add a dated "Revis
 | [0010](0010-meetings-take-turns.md) | Meetings take turns, and the chair judges after each round (replaces the flow part of 0005) | Accepted |
 | [0011](0011-meetings-pause-for-research.md) | A meeting turn can ask a question, and the team's researcher looks it up once | Accepted |
 | [0012](0012-claude-usage-counts-the-whole-tree.md) | Claude usage counts sub-agents and is not counted twice in a continued conversation | Accepted |
-| [0013](0013-agents-keep-role-notes.md) | Agents keep short role notes, and only what the user accepts goes into their work | Accepted |
+| [0013](0013-agents-keep-role-notes.md) | Agents keep short role notes, and only what the user accepts goes into their work | Accepted (revised by 0023) |
 | [0014](0014-goal-mode-confirmed-goal-card.md) | Goal mode turns a request into a goal card the user confirms, and only the confirmed values become instructions | Accepted |
 | [0015](0015-goal-mode-fresh-review.md) | Goal mode checks each confirmed criterion with a fresh reviewer, returns the work once, then asks | Accepted |
 | [0016](0016-goal-mode-continue-a-cut-goal.md) | A goal cut off by closing the app continues from where it stopped, only when the user asks | Accepted |
@@ -28,3 +28,4 @@ Keep a record under about 100 lines. When a decision changes, add a dated "Revis
 | [0020](0020-flow-stage-default-picture.md) | The split view shows a flow stage above the chat; the village stays in the Large office view | Accepted |
 | [0021](0021-no-demo-team.md) | No demo team; the simulated AI stays for tests and is hidden from the screens | Accepted |
 | [0022](0022-goal-mode-records-and-block-allow-list.md) | Goal mode keeps one table of the blocks each step takes, records who actually ran and why, and names failures only by facts the code knows | Accepted |
+| [0023](0023-prompt-assembly-for-cache-and-fresh-meeting-turns.md) | An agent's system instructions stay the same on every call; per-call lines go at the front of the prompt, meeting turns send only what is new, and long sessions hold meetings in new conversations | Accepted |

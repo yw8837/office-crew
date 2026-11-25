@@ -10,7 +10,7 @@ import { bindLang } from '../server/i18n.js';
 import { parseGoal, cleanGoal, sameCard, pickLead, mixedLocal, logLine, cutMission, alive, newMission, goalWarn, LOG_MAX } from '../server/mission.js';
 import { hideGoal } from '../public/js/chat-tools.js';
 import { suspicious } from '../server/notes.js';
-import { startTestApp, freePort, addMockTeam, MOCK } from './helpers.js';
+import { startTestApp, freePort, addMockTeam, MOCK, promptBody } from './helpers.js';
 
 bindLang(() => 'ko'); // 순수 함수의 문구(한국어 원문)를 검사한다
 let t = null;
@@ -36,7 +36,8 @@ const waitRuns = (sid, n) => t.waitFor(() => S(sid).runs.length >= n && S(sid).r
 const cardOf = (sid) => S(sid).messages.findLast((m) => m.role === 'proposal' && m.kind === 'goal');
 const shown = (c) => ({ goal: c.goal, criteria: c.criteria, outOfScope: c.outOfScope, userDecides: c.userDecides });
 const confirm = (sid, body) => t.api('POST', `/api/sessions/${sid}/mission/confirm`, body);
-const prompts = (from) => t.fakeLog().slice(from).filter((l) => l.cli === 'claude' && l.text !== undefined).map((l) => l.text);
+// 본문만 본다: 새 대화의 첫 프롬프트 맨 앞에 붙는 호출마다 달라지는 지시(결정 0023)는 promptBody 로 뗀다
+const prompts = (from) => t.fakeLog().slice(from).filter((l) => l.cli === 'claude' && l.text !== undefined).map((l) => promptBody(l.text));
 
 test('1. 순수 함수: 목표 블록 읽기·다듬기 경계, 카드 대조, 진행자 고르기, 섞임, 진행 기록 상한, 끊김', () => {
   // 기준 1개도 받는다(사용자가 고칠 수 있다). 8개면 7개까지
@@ -146,7 +147,14 @@ const OFF_PROMPTS = [
 ];
 const OFF_SYSTEM = (name, role) => `너는 로컬 앱 "오피스 크루"에서 일하는 에이전트 "${name}"(역할: ${role})야.\n작업 폴더: <ROOT>/home/workspaces/<SID>\n권한: 읽기 전용이야. 명령 실행·파일 수정은 거부되니 시도하지 말고, 받은 자료와 네 지식으로 답해.\n작업 폴더에 CLAUDE.md·AGENTS.md 같은 프로젝트 규칙 파일이 있으면 먼저 읽어.\n도구가 실패하거나 거부돼도 마지막엔 반드시 최종 답변을 글로 남겨.\n사용자가 쓴 언어로 답하고, 결과는 읽기 쉬운 마크다운으로 써.\n사용자에게 묻기: 사용자만 정할 수 있는 것(취향·범위·돈이 드는 일·되돌릴 수 없는 일)이고, 파일이나 대화에서 네가 찾을 수 없을 때만 물어. 네가 정해도 되는 것은 묻지 말고 가정을 적은 뒤 진행해.\n물을 때는 답 맨 끝에 아래 형식의 블록 하나만 쓰고 거기서 멈춰. 블록 뒤에는 아무것도 쓰지 마. 질문은 1~4개, 보기는 2~6개, 추천하는 보기는 맨 앞에 두고 label 끝에 "(추천)"을 붙여. 사용자는 보기 대신 직접 써서 답할 수도 있어. 답을 받으면 이어서 진행하게 돼.\n\`\`\`oc-ask\n{"questions":[{"header":"…","question":"…?","options":[{"label":"…","description":"…"},{"label":"…","description":"…"}],"multi":false}]}\n\`\`\``;
 
-test('2. 끄면 그대로: 목표 모드가 꺼진 세션의 프롬프트·시스템 지시가 예전과 글자까지 같고, 검수 단계도 그대로 돈다. 켰다 끈 세션도 같다. 목표 모드 세션의 @이름 요청은 보통 실행', async () => {
+// 결정 0023: 시스템 지시는 에이전트마다 고정하고, 호출마다 달라지는 줄(읽기 전용 에이전트의 규칙 파일 읽기, 묻기 안내)은 새 대화의 첫 프롬프트 맨 앞으로 글자 그대로 옮겼다.
+// 위 원문에서 그 줄만 옮긴 모양과 글자까지 같아야 한다(모델이 받는 글은 같고 자리만 바뀐다)
+const MOVED = (l, i, all) => l.startsWith('작업 폴더에 CLAUDE.md') || i >= all.findIndex((x) => x.startsWith('사용자에게 묻기:'));
+const OFF_SYSTEM_NOW = (name, role) => OFF_SYSTEM(name, role).split('\n').filter((l, i, all) => !MOVED(l, i, all)).join('\n');
+const OFF_HEAD = OFF_SYSTEM('', '').split('\n').filter(MOVED).join('\n');
+const OFF_PROMPTS_NOW = OFF_PROMPTS.map((p) => `${OFF_HEAD}\n\n${p}`);
+
+test('2. 끄면 그대로: 목표 모드가 꺼진 세션의 프롬프트·시스템 지시가 예전과 글자까지 같고(결정 0023 의 자리 옮김만), 검수 단계도 그대로 돈다. 켰다 끈 세션도 같다. 목표 모드 세션의 @이름 요청은 보통 실행', async () => {
   const t = await app();
   const a = await mk('정리담당', '정리');
   const b = await mk('분석담당', '분석');
@@ -163,8 +171,8 @@ test('2. 끄면 그대로: 목표 모드가 꺼진 세션의 프롬프트·시�
     assert.equal(r.json.mission, undefined);
     await waitRuns(sid, 1);
     const logs = t.fakeLog().slice(from).filter((l) => l.cli === 'claude');
-    assert.deepEqual(logs.filter((l) => l.text !== undefined).map((l) => norm(l.text, sid)), OFF_PROMPTS, flip ? '켰다 끈 세션' : '꺼진 세션');
-    assert.deepEqual(logs.filter((l) => l.system).map((l) => norm(l.system, sid)), [OFF_SYSTEM('정리담당', '정리'), OFF_SYSTEM('분석담당', '분석')]);
+    assert.deepEqual(logs.filter((l) => l.text !== undefined).map((l) => norm(l.text, sid)), OFF_PROMPTS_NOW, flip ? '켰다 끈 세션' : '꺼진 세션');
+    assert.deepEqual(logs.filter((l) => l.system).map((l) => norm(l.system, sid)), [OFF_SYSTEM_NOW('정리담당', '정리'), OFF_SYSTEM_NOW('분석담당', '분석')]);
     assert.ok(logs.every((l) => !JSON.stringify(l).includes('확정된 목표') && !JSON.stringify(l).includes('[목표 잡기]')));
     assert.equal(S(sid).mission, undefined, '목표를 만들지 않는다');
     assert.equal(S(sid).runs.at(-1).mission, undefined);

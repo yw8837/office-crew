@@ -235,6 +235,8 @@ export default {
       h.resolve({ text, providerSessionId: sessionId, error: err, stopped });
     });
 
+    // 이어 간 대화는 첫 요청 때 기록한 시스템 지시를 압축 전까지 그대로 쓴다(Claude Code CLI 문서 "System prompt flags in resumed conversations").
+    // 그래서 위의 지시 파일은 이어 간 대화에 닿지 않는다. 바뀐 역할 노트처럼 그 대화가 못 받은 것은 오케스트레이터가 프롬프트 앞에 붙여 준다(결정 0013 개정, 0023)
     feeder.send(prompt, images);
     return {
       done: h.done,

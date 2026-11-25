@@ -5,6 +5,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { newId } from './store.js';
 import { PROVIDERS } from './providers/index.js';
 import { detectHire, draftHire } from './hire.js';
+import { detectTeamDoc, teamPlan, writeTeamDraft } from './teamdoc.js';
 import { toolCategory, resolveCommand } from './providers/util.js';
 import { resolveRoute, roleKind, aiKey, baseProvider } from './routing.js';
 import { Cooldown, isQuotaError, nearLimit, avoidUntil, resetTime, resetFromText, limitResetAt, availableCatalog, pickFallback, continuationPrompt, handoffFacts } from './failover.js';
@@ -52,7 +53,8 @@ const noteLine = (s) => wide(String(s ?? '').replace(/\s+/g, ' ').trim());
 // 둘 다 밖에서 읽은 글이 섞일 수 있고, 조사 노트·회의 결론·[이전 단계 결과]로 무작위 표식 안에 따로 간다
 // 일 카드(결정 0018)의 답도 그 목표가 살아 있는 동안은 싣지 않는다(뒤 카드에는 기다린 카드의 결과만 표식 안으로 간다. 끊긴 목표를 이어서 할 때도).
 // 목표가 끝난 뒤에는 보통 답처럼 대화에 남는다. 긴 세션의 보통 회의 차례(freshMeet, 결정 0023)는 한 번 실행이어도 보통 답처럼 싣는다
-const notTalk = (m, s = null) => !!m.prep || (!!m.once && !!m.meeting && !m.freshMeet) || (!!m.card && !!s && alive(s.mission) && s.mission.id === m.card.missionId);
+// 문서로 팀 짜기(결정 0024)의 사용자 말(teamDoc)도 싣지 않는다(영입 말과 같다. 초안 답은 prep 표시로 빠진다)
+const notTalk = (m, s = null) => !!m.prep || !!m.teamDoc || (!!m.once && !!m.meeting && !m.freshMeet) || (!!m.card && !!s && alive(s.mission) && s.mission.id === m.card.missionId);
 // 배정 기록(결정 0022): 에이전트 설정 하나의 AI·모델·노력, 진행 기록에 쓰는 한 줄, 이유 코드의 이름. 이유 코드는 코드가 한 일만 적는다
 const aiOf = (a) => ({ provider: String(a?.provider || ''), model: String(a?.model || ''), effort: String(a?.effort || '') });
 const sameAi = (a, b) => a.provider === b.provider && a.model === b.model && a.effort === b.effort;
@@ -167,6 +169,8 @@ export class Orchestrator {
       }
     }
     let ctx = this.ctx.get(sessionId);
+    // 문서로 팀 짜기(결정 0024): 채팅에서 글 문서를 붙여 "이걸로 팀 짜 줘"라고 하면(낱말 규칙) 보통 실행 대신 팀 초안을 쓴다. 목표 모드·영입 감지보다 먼저, 도는 실행이 없을 때만
+    if (detect && !ctx && !mention && !handoff && detectTeamDoc(text, attachments)) return this.#teamDoc(s, text, attachments);
     // 목표 모드(결정 0014): @이름 지목·인수인계·예약 실행이 아닌 말은 지금 끼어들기·영입 감지보다 먼저 본다.
     // 도는 목표가 있으면 추가 지시로 받고, 끊긴 목표가 있으면 막는다. 목표 초안을 쓰는 중에 온 말은 모드("지금 끼어들기"/"다음 차례로")와 상관없이 진행자에게 넣는다(새 목표로 갈아치우지 않는다).
     // 그 밖은 목표 차례가 된다(카드를 기다리던 목표는 닫는다. 다른 실행이 도는 중이면 대기열에 넣고, 차례가 오면 목표 차례로 돈다)
@@ -718,6 +722,43 @@ export class Orchestrator {
     return { proposed: true, messageId: card.id };
   }
 
+  // 문서로 팀 짜기(결정 0024): 사용자 말은 teamDoc 표시를 달아 남기고(에이전트에게 넘기는 대화·기억에서 뺀다. 영입과 같다), 쓰는 사람 혼자인 실행 하나로 팀 초안을 쓴다.
+  // 쓸 사람이 없으면(가상 AI 뿐) 말을 남기기 전에 400
+  #teamDoc(s, text, attachments) {
+    teamPlan(this.store, s);
+    const userMsg = { id: newId('m'), role: 'user', text, mention: null, createdAt: Date.now(), status: 'done', teamDoc: true,
+      attachments: attachments.map((a) => ({ id: a.id, name: a.name, mime: a.mime, size: a.size, path: a.path })) };
+    s.messages.push(userMsg);
+    if ((s.title === '새 세션' || s.title === tr('새 세션')) && text.trim()) { s.title = text.trim().replace(/\s+/g, ' ').slice(0, 40); s.titleFrom = userMsg.id; }
+    this.#premark(s, userMsg);
+    this.store.saveSession(s, 50);
+    this.bus.emit('message', { sessionId: s.id, message: userMsg });
+    this.bus.emit('session', this.store.sessionMeta(s));
+    this.#start(s, userMsg);
+    return { started: true, teamDoc: true, messageId: userMsg.id };
+  }
+
+  // 팀 초안 실행(결정 0024): 쓰는 사람의 한 번 실행(읽기 전용, 대화 id·기억·역할 노트 없음)으로 oc-team 블록을 받아 팀 제안 카드를 낸다(server/teamdoc.js)
+  async #teamDraft(ctx) {
+    const { s, run } = ctx;
+    const st = run.stages[0];
+    const id = st.agentIds[0];
+    st.status = 'running';
+    this.#emitRun(ctx);
+    const end = await writeTeamDraft({
+      store: this.store, s, userMsg: ctx.userMsg, writerId: id, uploads: this.dirs.uploads,
+      catalog: async () => (this.providers ? this.providers.catalog() : { providers: [], models: {} }),
+      run: (prompt, retried) => this.#prepOnce(ctx, 0, id, prompt, { kind: 'team', ...(retried ? { retried: true } : {}) }),
+      stopped: () => ctx.stopped,
+      notice: (msg, text) => this.#notice(s, msg, text),
+      emit: (message) => this.bus.emit('message', { sessionId: s.id, message }),
+      note: (text) => this.#systemNote(s, text),
+    });
+    st.status = end;
+    run.status = end;
+    if (end === 'done') this.#state(s.id, id, 'done', tr('팀 초안 씀'));
+  }
+
   // 제안 카드의 '그대로 보내기': 새 메시지를 만들지 않고, 대화에 이미 있는 그 말로 실행한다(같은 말이 두 번 남지 않게)
   sendProposed(sessionId, userMessageId) {
     const s = this.store.getSession(sessionId);
@@ -732,6 +773,7 @@ export class Orchestrator {
       if (why) throw Object.assign(new Error(why), { status: 400 });
     }
     delete userMsg.hire;
+    delete userMsg.teamDoc; // 팀 제안 카드의 "그냥 보내기"(결정 0024)도 같은 길
     if (goal) userMsg.mission = true; // 목표 차례로 돌 요청(#start 가 본다)
     else this.#autoNote(s, userMsg.mention);
     const ctx = this.ctx.get(sessionId);
@@ -797,7 +839,7 @@ export class Orchestrator {
         if (why) throw new Error(why);
         goal = true;
         plan = this.#goalPlan(s);
-      } else plan = this.#plan(s, userMsg.mention);
+      } else plan = userMsg.teamDoc ? teamPlan(this.store, s) : this.#plan(s, userMsg.mention); // 팀 초안(결정 0024)은 쓰는 사람 혼자
     } catch (e) {
       this.#systemNote(s, e.message);
       this.#remember(s, userMsg);
@@ -850,7 +892,7 @@ export class Orchestrator {
     this.store.pin(s.id); // 실행 중엔 메모리에서 내리지 않는다
     for (const st of run.stages) for (const id of st.agentIds) this.#state(s.id, id, 'idle', tr('대기 중'));
     this.#emitRun(ctx);
-    (goal ? this.#goalTurn(ctx) : work ? this.#missionRun(ctx, resume?.at || null) : this.#execute(ctx))
+    (goal ? this.#goalTurn(ctx) : work ? this.#missionRun(ctx, resume?.at || null) : userMsg.teamDoc ? this.#teamDraft(ctx) : this.#execute(ctx))
       .catch((e) => { run.status = 'error'; this.#systemNote(s, tr('실행 오류: {msg}', { msg: e.message })); })
       .finally(() => {
         run.endedAt = Date.now();
@@ -2677,7 +2719,9 @@ export class Orchestrator {
     const researchTurn = ['scan', 'research'].includes(given?.prep?.kind) || (goalMeetTurn && ctx.meet.get(agentId).phase === 'research');
     // 일 카드의 계획 대목(결정 0018)도 조사 질문처럼 그 실행만 읽기 전용
     // savedPermission: 시스템 지시의 권한 문장은 저장된 권한으로 고정한다(결정 0023. 이 실행만 읽기 전용이라는 문장은 프롬프트 앞머리로)
-    if (base && (researchTurn || goalMeetTurn || given?.prep?.kind === 'questions' || given?.prep?.kind === 'plan')) base = { ...base, permission: 'plan', readOnlyRun: researchTurn ? 'research' : 'talk', savedPermission: base.permission };
+    // 문서로 팀 짜기의 초안(결정 0024)도 그 실행만 읽기 전용이고, 역할 노트·스킬·커넥터 없이(코드의 지시와 문서만) 돈다
+    if (base && (researchTurn || goalMeetTurn || ['questions', 'plan', 'team'].includes(given?.prep?.kind))) base = { ...base, permission: 'plan', readOnlyRun: researchTurn ? 'research' : 'talk', savedPermission: base.permission };
+    if (base && given?.prep?.kind === 'team') base = { ...base, noNotes: true, skills: [], connectors: [] };
     // 배정 기록의 "요청한 AI"(결정 0022)는 아래에서 바꾸기 전의 설정으로 적는다
     const asked = base;
     // 뺀 Codex 계정을 가리키는 에이전트는 기본 Codex 로 실행한다(배정 기록의 이유: 지운 계정 account-gone)
@@ -3103,7 +3147,7 @@ export class Orchestrator {
   //     key: 노트 전체(하는 일과 받을 수 있는 확정 항목, notesKey. 요청마다 달라지는 고른 묶음이 아니라 사용자가 고친 내용으로 노트가 바뀌었는지 본다), error?: 노트 파일을 못 읽음 }
   #roleNotes(agent, request) {
     const none = { text: '', refs: '', rules: [], refItems: [], ids: [], key: '' };
-    if (!this.notes || !agent?.id) return none;
+    if (!this.notes || !agent?.id || agent.noNotes) return none; // noNotes: 문서로 팀 짜기의 초안(결정 0024)
     let n;
     try { n = this.notes.get(agent.id); } catch { return { ...none, error: true }; } // 노트 파일을 못 읽어도(깨짐 등) 노트 없이 실행은 한다
     const out = [];
@@ -3417,6 +3461,7 @@ export class Orchestrator {
     if (m.goalDraft) return; // 목표 카드 초안(사용자가 확인하기 전의 글)은 기억에 넣지 않는다
     if (m.review) return; // 목표의 기준 판정 답도 넣지 않는다(결정 0015)
     if (m.prep) return; // 일하기 전 조사·회의의 답(훑어보기·조사 질문·조사·준비 회의)도 넣지 않는다(결정 0017)
+    if (m.teamDoc) return; // 문서로 팀을 짜 달라던 말(결정 0024). "그냥 보내기"로 표시가 지워지면 그 실행이 끝날 때 넣는다
     if (m.role === 'user') { if (m.remembered) return; m.remembered = true; } // 같은 말을 두 번 넣지 않는다(끊긴 실행을 다시 켠 뒤 정리할 때)
     const job = this.memory.of(this.memoryFolder(s))
       .then((mem) => mem.add(m.text, { sessionId: s.id, messageId: m.id, agentId: m.agentId || '', role: m.role, provider: m.provider || (m.local ? 'local' : ''), at: m.createdAt || Date.now(), title: s.titleLocal ? '' : (s.title || '') }))

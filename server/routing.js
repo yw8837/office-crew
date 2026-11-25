@@ -2,7 +2,7 @@
 // 모델 등급(tier): fast(빠르고 저렴) · balanced(일반) · top(최상) · local(내 PC)
 
 export const PROFILES = ['economy', 'balanced', 'best'];
-const EFFORT_ORDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+export const EFFORT_ORDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 
 // 같은 AI 판단 기준: CLI 는 한 회사 AI라 프로바이더가 같으면 같은 AI(모델이 달라도).
 // API 키 모델·ACP·로컬은 한 프로바이더에 여러 회사 모델이 섞이니 프로필·에이전트·모델까지 같아야 같은 AI

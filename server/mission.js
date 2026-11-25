@@ -980,7 +980,8 @@ export function resumePoint(at, stages) {
   if (!phase || (phase === 'work' && (i >= end || isPrep(stages[i]) || stages[i].mission === 'plan')) || (phase === 'review' && i !== (rv >= 0 ? rv : end - 1))) return null;
   const w = at.wait && typeof at.wait === 'object' ? at.wait : null;
   let wait = null;
-  if (w?.reason === 'cap') wait = { reason: 'cap', ...(w.kind === 'rate' ? { kind: 'rate' } : {}) };
+  // quota: 한도 대기 뒤 다시 하기 앞의 호출 상한 질문(결정 0019. 이어서 하면 한도에 걸린 사람만 다시 돌고 일 카드 시작 수에 세지 않는다)
+  if (w?.reason === 'cap') wait = { reason: 'cap', ...(w.kind === 'rate' ? { kind: 'rate' } : {}), ...(w.quota === true ? { quota: true } : {}) };
   else if (w?.reason === 'mission' && (w.kind === 'verdict' || w.kind === 'notes') && phase === 'review') wait = { reason: 'mission', kind: w.kind };
   // 일 단계 뒤 막힘(oc-blocked)과 일 카드의 되풀이 상한(결정 0018): 그 단계에서 끝낸 답으로 같은 질문을 다시 묻는다(이미 끝낸 답은 finished 에 있다)
   else if (w?.reason === 'mission' && (w.kind === 'blocked' || w.kind === 'limit') && phase === 'work') wait = { reason: 'mission', kind: w.kind };

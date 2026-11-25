@@ -46,6 +46,7 @@ const DEFAULT_H = 156; // 기본 높이
 const MIN_H = 120;
 const MAX_H = 240;
 const SMALL_H = 140; // 이보다 낮으면 작은 모양(이름 숨김, 맨 위 줄 한 줄)
+const STEP_H = 8; // 높이 손잡이를 화살표 한 번에 옮기는 양
 const FLY_MS = 900; // 넘기기·되돌림 카드가 날아가는 시간(1초 이내)
 
 const reduced = () => !!state.settings.reducedMotion || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -168,7 +169,7 @@ function Pill({ m, compact }) {
   const k = m.ask;
   if (k) {
     const lead = k.cls === 'me' ? t('내 차례 · {title}', { title: k.title }) : k.title;
-    const go = k.kind === 'error' || k.kind === 'cut' ? t('보기') : t('답하기');
+    const go = k.kind === 'error' || k.kind === 'cut' || k.kind === 'paused' ? t('보기') : t('답하기'); // 오류·끊김·일시정지는 답할 창이 아니라 볼(재개할) 창으로 간다
     return html`<span class=${`stg-pill ${k.cls}`} role="status" title=${k.short ? `${lead} — ${k.short}` : lead}>
       <${Ico} n=${k.icon} /><span class="tx">${lead}${!compact && k.short && html`<span class="sh"> — ${k.short}</span>`}</span>
       <button type="button" class="go" aria-label=${`${lead} — ${go}`} onClick=${() => goAnswer(k)}>${go}</button>
@@ -237,13 +238,14 @@ function Station({ st, small }) {
     ? html`<span key=${p.id} class="stg-p seat" title=${`${p.name} · ${t('조사하러 감')}`}><span class="stg-seat"></span>${!small && html`<span class="nm">${t('비움')}</span>`}</span>`
     : html`<${Person} key=${p.id} p=${p} small=${small} />`));
   const moreLabel = st.more > 0 ? `${t('{n}명 더', { n: st.more })}: ${st.hiddenNames.join(', ')}` : '';
-  return html`<div class=${`stg-st ${st.state}${st.meeting ? ' meet' : ''}${st.review ? ' rev' : ''}${st.ask ? ' ask' : ''}${st.cur ? ' cur' : ''}`} data-st=${st.i} role="group" aria-label=${`${st.label} · ${info.text} · ${st.names.join(', ')}`} title=${tip}>
+  // 상태 클래스는 stg- 를 붙인다(app.css 의 전역 .limit 같은 규칙이 역에 먹지 않게)
+  return html`<div class=${`stg-st stg-${st.state}${st.meeting ? ' meet' : ''}${st.review ? ' rev' : ''}${st.ask ? ' ask' : ''}${st.cur ? ' cur' : ''}`} data-st=${st.i} role="group" aria-label=${`${st.label} · ${info.text} · ${st.names.join(', ')}`} title=${tip}>
     <div class="stg-hd">
       ${info.icon ? html`<${Badge} info=${info} hidden=${true} />` : html`<span class="num" aria-hidden="true">${st.i + 1}</span>`}
       <span class="lab">${st.label}</span>${st.parallel > 1 && html`<span class="x">×${st.parallel}</span>`}${tag}
     </div>
     <div class="stg-body">
-      ${seats}${st.more > 0 && html`<span class="more" title=${moreLabel} aria-label=${moreLabel}>+${st.more}</span>`}
+      ${seats}${st.more > 0 && html`<span class="more" title=${moreLabel}><span aria-hidden="true">+${st.more}</span><span class="sr">${moreLabel}</span></span>`}
       ${st.meeting && !small && html`<span class="stg-mb"><${Say} m=${st.meeting} /></span>`}
       ${st.review?.length > 0 && html`<${Crits} list=${st.review} small=${small} />`}
     </div>
@@ -253,7 +255,7 @@ function Station({ st, small }) {
 function Link({ l, ask }) {
   if (!l.gate) return html`<div class=${`stg-link${l.done ? ' done' : ''}${l.cut ? ' cut' : ''}`} aria-hidden="true"></div>`;
   const label = `${t('내 차례')} · ${ask.title}${ask.short ? ` — ${ask.short}` : ''}`;
-  return html`<div class=${`stg-link gate${l.done ? ' done' : ''}`} data-gate="1">
+  return html`<div class=${`stg-link stg-link-gate${l.done ? ' done' : ''}`} data-gate="1">
     <button type="button" class="stg-gate" title=${label} aria-label=${`${label} — ${t('답하기')}`} onClick=${() => goAnswer(ask)}>
       <span class="stg-bd s-wait pulse"><${Ico} n=${l.gate.icon} /></span><span class="gl">${t('내 차례')}</span>
     </button>
@@ -276,7 +278,7 @@ function Top({ m, small, onCollapse, foldRef }) {
   const cr = m.meta.criteria;
   const meta = !small && (cr || c) && html`<span class="stg-meta">
     ${cr && html`<span>${cr.judged ? t('기준 {pass}/{total} 통과', cr) : t('기준 {n}개', { n: cr.total })}</span>`}
-    ${c && html`<span class=${`mono${c.cap && c.used >= c.cap ? ' over' : ''}`}>${t('호출 {used}/{cap}', c)}</span>`}
+    ${c && html`<span class=${`stg-calls${c.cap && c.used >= c.cap ? ' over' : ''}`}>${t('호출 {used}/{cap}', c)}</span>`}
   </span>`;
   const right = pillShown ? html`<${Pill} m=${m} compact=${small} />`
     : !small && html`<span class="stg-now"><${Badge} info=${{ cls: m.now.cls, icon: m.now.icon, text: m.now.text }} hidden=${true} /><span class="t" title=${m.now.text}>${m.now.text}</span></span>`;
@@ -328,24 +330,37 @@ export function FlowStage({ s, onCollapse }) {
     return () => ro.disconnect();
   }, []);
   const collapse = () => { focusNext = 'unfold'; onCollapse?.(); };
+  const saveH = (h) => { try { localStorage.setItem('ui.stageH', String(h)); } catch { /* 저장 못 해도 이번 화면은 그대로 */ } };
   const startDrag = (e) => {
     e.preventDefault();
     const y0 = e.clientY;
     const h0 = height;
     const mv = (ev) => setHeight(Math.max(MIN_H, Math.min(MAX_H, Math.round(h0 + ev.clientY - y0))));
+    // 끝(pointerup)이든 취소(pointercancel: 터치가 스크롤로 넘어감 등)든 이동 리스너를 남기지 않는다
     const up = () => {
       removeEventListener('pointermove', mv);
       removeEventListener('pointerup', up);
-      try { localStorage.setItem('ui.stageH', String(Math.round(wrap.current?.offsetHeight || h0))); } catch { /* 저장 못 해도 이번 화면은 그대로 */ }
+      removeEventListener('pointercancel', up);
+      saveH(Math.round(wrap.current?.offsetHeight || h0));
     };
     addEventListener('pointermove', mv);
     addEventListener('pointerup', up);
+    addEventListener('pointercancel', up);
+  };
+  // 키보드: 위아래 화살표로 높이를 STEP_H 씩(손잡이를 위로 올리면 그림이 낮아진다)
+  const keyResize = (e) => {
+    const d = e.key === 'ArrowUp' ? -STEP_H : e.key === 'ArrowDown' ? STEP_H : 0;
+    if (!d) return;
+    e.preventDefault();
+    const h = Math.max(MIN_H, Math.min(MAX_H, height + d));
+    setHeight(h);
+    saveH(h);
   };
   const reset = () => { try { localStorage.removeItem('ui.stageH'); } catch { /* 무시 */ } setHeight(DEFAULT_H); };
   // 역 줄의 자식: 카드가 날아가는 층(Preact 가 자식을 그리지 않는다) → 접힌 역 → 맨 앞 문 → 역·연결선 → 끝 깃발. 모두 key 를 준다
   const first = m.stations[0]?.i ?? 0;
   const kids = [html`<div key="fly" class="stg-fly" ref=${layer} aria-hidden="true"></div>`];
-  if (m.folded > 0) kids.push(html`<div key="folded" class="stg-folded" title=${t('지난 단계 {n}개 접음', { n: m.folded })} aria-label=${t('지난 단계 {n}개 접음', { n: m.folded })}>+${m.folded}</div>`);
+  if (m.folded > 0) kids.push(html`<div key="folded" class="stg-folded" title=${t('지난 단계 {n}개 접음', { n: m.folded })}><span aria-hidden="true">+${m.folded}</span><span class="sr">${t('지난 단계 {n}개 접음', { n: m.folded })}</span></div>`);
   for (const l of m.links.filter((x) => x.after < first)) kids.push(html`<${Link} key=${`g${l.after}`} l=${l} ask=${m.ask} />`);
   for (const st of m.stations) {
     kids.push(html`<${Station} key=${`s${st.i}`} st=${st} small=${small} />`);
@@ -353,10 +368,11 @@ export function FlowStage({ s, onCollapse }) {
     if (l) kids.push(html`<${Link} key=${`l${st.i}`} l=${l} ask=${m.ask} />`);
   }
   kids.push(html`<${End} key="end" end=${m.end} />`);
-  return html`<div ref=${wrap} class=${`stg-wrap${small ? ' small' : ''}${m.lost ? ' lost' : ''}${m.cut ? ' cut' : ''}${reduced() ? ' rm' : ''}`} style=${`height:${height}px`} role="group" aria-label=${t('작업 흐름')}>
+  return html`<div ref=${wrap} class=${`stg-wrap${small ? ' stg-small' : ''}${m.lost ? ' lost' : ''}${m.cut ? ' cut' : ''}${reduced() ? ' rm' : ''}`} style=${`height:${height}px`} role="group" aria-label=${t('작업 흐름')}>
     <${Top} m=${m} small=${small} onCollapse=${collapse} foldRef=${foldRef} />
     <div class="stg-track" ref=${track}>${kids}</div>
-    <div class="resizer" onPointerDown=${startDrag} onDblClick=${reset} title=${t('드래그해서 높이 조절 · 두 번 누르면 기본 크기')}></div>
+    <div class="resizer" role="separator" aria-orientation="horizontal" tabindex="0" aria-label=${t('위쪽 그림 높이')} aria-valuenow=${height} aria-valuemin=${MIN_H} aria-valuemax=${MAX_H}
+      onPointerDown=${startDrag} onKeyDown=${keyResize} onDblClick=${reset} title=${t('드래그해서 높이 조절 · 두 번 누르면 기본 크기')}></div>
   </div>`;
 }
 
@@ -368,7 +384,7 @@ export function StageStrip({ s, onExpand }) {
   useEffect(() => { if (focusNext === 'unfold') { focusNext = null; unfold.current?.focus(); } }, []);
   const expand = () => { focusNext = 'fold'; onExpand?.(); };
   return html`<div class=${`stg-strip${m.lost ? ' lost' : ''}${m.cut ? ' cut' : ''}${reduced() ? ' rm' : ''}`} role="group" aria-label=${t('작업 흐름 (접음)')}>
-    <span class="segs" aria-hidden="true">${m.segs.map((g) => html`<i key=${g.i} class=${`sg ${g.state}`} title=${`${g.i + 1}. ${g.label} · ${stationInfo(g.state).text}`}></i>`)}</span>
+    <span class="segs" aria-hidden="true">${m.segs.map((g) => html`<i key=${g.i} class=${`sg stg-${g.state}`} title=${`${g.i + 1}. ${g.label} · ${stationInfo(g.state).text}`}></i>`)}</span>
     <span class="prog" title=${m.progress}>${m.progress}</span>
     <span class="grow"></span>
     <${Pill} m=${m} compact=${true} />

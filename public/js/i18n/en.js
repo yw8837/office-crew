@@ -1715,6 +1715,7 @@ export default {
   "검수 {mark} 끝": "Review {mark} end",
   "판정 근거": "Evidence",
   "검수자나 건너뛸 단계가 화면에 보이던 것과 달라. 지금 값을 다시 보여 줄게.": "The reviewer or the stages to skip differ from what the screen showed. Showing the current values.",
+  "팀이 바뀌어서 호출 어림이 화면에 보이던 것과 달라. 지금 값을 다시 보여 줄게.": "The team changed, so the call estimate differs from what the screen showed. Showing the current estimate.",
   "기준 {n}개 중 {n}개 통과. 목표를 끝냈어.": "{n} of {n} criteria passed. The goal is done.",
   "받아들여서 끝냈어. 기준 {total}개 중 통과 {pass}개, 남은 {left}개는 판정 그대로 둬.": "Accepted and ended. {pass} of {total} criteria passed; the other {left} keep their verdicts.",
   "되돌림 {n}번째: \"{label}\" 단계가 걸린 기준 {k}개를 고쳐.": "Return {n}: stage \"{label}\" works on the {k} criteria that didn't pass.",
@@ -2201,4 +2202,7 @@ export default {
   "위쪽 그림 펼치기": "Show the picture above",
   "펼치기": "Show",
   "흐름 무대 + 채팅": "Flow stage + chat",
+  "도착": "Finish",
+  "목표 카드가 나오기 전에 끝나서 이 목표는 닫았어.": "It ended before the goal card was ready, so this goal was closed.",
+  "위쪽 그림 높이": "Height of the picture above",
 };

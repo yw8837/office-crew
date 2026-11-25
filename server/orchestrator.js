@@ -430,6 +430,12 @@ export class Orchestrator {
     // 호출 어림(결정 0019): 확인 시점에 고른 값으로(카드가 보여 준 것과 같은 함수). 끝난 뒤 실제 호출 수 옆에 보인다
     const spentCalls = Number.isFinite(m.calls?.used) ? m.calls.used : 0;
     const estimate = estimateCalls(team, agents, { work, prep, keep, lead: m.leadId, spent: spentCalls, cap: Number.isFinite(m.calls?.cap) ? m.calls.cap : MISSION_CALL_CAP });
+    // 화면이 보여 주던 어림(estimate: { min, max })이 지금 팀으로 다시 센 값과 다르면 409 와 지금 조각(위의 대조에 안 걸리는 팀 변경: 단계에 사람이 늘거나 회의 바퀴 수가 바뀜 등).
+    // estimate 가 없는 요청(옛 화면)은 그대로 통과한다
+    if (body.estimate !== undefined && body.estimate !== null) {
+      const seen = typeof body.estimate === 'object' && !Array.isArray(body.estimate) ? body.estimate : {};
+      if (seen.min !== estimate.min || seen.max !== estimate.max) throw fail(409, tr('팀이 바뀌어서 호출 어림이 화면에 보이던 것과 달라. 지금 값을 다시 보여 줄게.'), { estimate: estNow() });
+    }
     const first = plan.stages[0];
     const phase0 = isPrep(first) || first.mission === 'plan' ? first.mission : 'work';
     Object.assign(m, {
@@ -575,9 +581,10 @@ export class Orchestrator {
     else if (at.wait?.reason === 'error') stage = { wait: 'error', keep: kept, failed: at.wait.failed.map((f) => ({ agent: this.store.get('agents', f.agentId) || { id: f.agentId, name: f.agentId }, error: f.error })) };
     // 일 단계의 한도 대기(결정 0019): 그 단계에서 끝낸 답과 한도에 걸린 사람으로 같은 질문을 다시(호출 없음, 초기화 시각은 저장된 값). 기준 판정의 한도 대기는 #missionRun 이 묻는다
     else if (at.wait?.reason === 'quota' && at.phase === 'work') stage = { wait: 'quota', keep: kept, until: at.wait.until, failed: at.wait.failed.map((f) => ({ agent: this.store.get('agents', f.agentId) || { id: f.agentId, name: f.agentId }, error: f.error, ...(f.provider ? { provider: f.provider } : {}) })) };
-    else if (at.phase === 'work' && !meetingRedo && kept.length) {
+    // 한도 대기 뒤 다시 하기 앞의 호출 상한 질문(cap, quota 표시. 결정 0019)에서 끊겼으면 끝낸 답이 없어도 한도에 걸린 사람(끝내지 못한 사람)만 다시 돈다(일 카드는 시작 수에 세지 않는다)
+    else if (at.phase === 'work' && !meetingRedo && (kept.length || (at.wait?.reason === 'cap' && at.wait.quota))) {
       const base = at.back && st.meeting ? [st.agentIds.includes(String(m.leadId)) ? String(m.leadId) : st.agentIds[0]] : st.agentIds;
-      stage = { ids: base.filter((id) => !doneIds.has(String(id))), keep: kept };
+      stage = { ids: base.filter((id) => !doneIds.has(String(id))), keep: kept, ...(at.wait?.reason === 'cap' && at.wait.quota ? { quota: true } : {}) };
     }
     // 다시 돌지 않는 단계의 표시: 끊긴 실행에서 끝났거나 건너뛴 그대로, 아니면 결과를 찾았는지로(준비 대목은 끝난 것으로). 판정 뒤 묻기에서 끊겼으면 기준 판정 단계도
     const keepStatus = (k) => (['done', 'skipped'].includes(cutRun.stages[k]?.status) ? cutRun.stages[k].status : isPrep(plan.stages[k]) || outputs[k]?.length ? 'done' : 'skipped');
@@ -601,7 +608,7 @@ export class Orchestrator {
           : at.back ? tr('이어서: "{label}" 단계의 되돌림부터.', { label }) : tr('이어서: "{label}" 단계부터.', { label }), m.cardMsgId);
     if (meetingRedo) logLine(m, 'resume', tr('회의 단계 "{label}"는 1바퀴부터 다시 해. 회의 차례는 늘 새 대화라 참석자의 저장된 대화는 그대로 둬.', { label }));
     else if (fresh.length) logLine(m, 'resume', tr('끊긴 단계 담당({names})은 새 대화로 시작해.', { names: fresh.map(name).join(', ') }));
-    if (stage?.ids) logLine(m, 'resume', tr('"{label}" 단계에서 이미 끝낸 {names}의 답은 다시 돌지 않고 그대로 써.', { label, names: [...doneIds].map(name).join(', ') }));
+    if (stage?.ids && doneIds.size) logLine(m, 'resume', tr('"{label}" 단계에서 이미 끝낸 {names}의 답은 다시 돌지 않고 그대로 써.', { label, names: [...doneIds].map(name).join(', ') }));
     // 정상으로 건너뛴 단계는 못 찾은 것으로 세지 않는다. 준비 대목은 모으는 단계가 아니다(조사 노트·회의 결론은 목표에 적어 둔 메시지에서 다시 만든다)
     const work = (k) => !isPrep(plan.stages[k]) && plan.stages[k].mission !== 'plan';
     const missing = past.map((x, k) => (work(k) && !x.length && cutRun.stages[k]?.status !== 'skipped' ? plan.stages[k].label : null)).filter((x) => x !== null);
@@ -918,8 +925,9 @@ export class Orchestrator {
         }
         // 한도 대기(결정 0019): 목표 일 실행의 일 단계(단계표·일 카드. 준비 대목과 회의 단계는 빼고 지금처럼 오류 대기)에서 실패한 사람이 모두 사용량 한도 오류면
         // (이어받을 AI 도 없었다) 보통 오류 대기 대신 한도 대기로 묻는다. 다시 하면(호출 상한을 본 뒤) 한도에 걸린 사람만 다시 돌고, 끝낸 사람의 답은 그대로 쓴다.
-        // 건너뛰기는 오류 대기의 건너뛰기와 같다(일 카드면 한도에 걸린 카드를 구멍으로 빼고 이어 간다. 막힘 받아들이기와 같은 처리)
-        if (work && !isPrep(st) && !st.meeting && st.mission !== 'review' && st.mission !== 'plan' && failed.every((f) => isQuotaError(f.error))) {
+        // 건너뛰기는 오류 대기의 건너뛰기와 같다(일 카드면 한도에 걸린 카드를 구멍으로 빼고 이어 간다. 막힘 받아들이기와 같은 처리).
+        // 끊긴 한도 대기를 이어서 다시 물을 때(quotaSaved 가 있다)는 다시 판정하지 않는다(저장된 오류 문구는 600자로 잘려 한도 문구가 빠졌을 수 있다)
+        if (work && !isPrep(st) && !st.meeting && st.mission !== 'review' && st.mission !== 'plan' && (quotaSaved !== undefined || failed.every((f) => isQuotaError(f.error)))) {
           const q = await this.#quotaAsk(ctx, i, { phase: 'work', back, failed, until: quotaSaved });
           quotaSaved = undefined;
           if (q === 'stop') { ctx.stopped = true; break; }
@@ -1609,7 +1617,8 @@ export class Orchestrator {
     const parts = [count.done && tr('끝 {n}', { n: count.done }), count.blocked && tr('막힘 {n}', { n: count.blocked }), count.hole && tr('구멍 {n}', { n: count.hole }), count.skipped && tr('건너뜀 {n}', { n: count.skipped })].filter(Boolean);
     if (parts.length) logLine(m, 'card', tr('"{label}" 카드: {parts}', { label: st.label, parts: parts.join(' · ') }));
     if (count.skipped && count.skipped < (st.cardIds || []).length) st.note = tr('{n}장 건너뜀', { n: count.skipped });
-    if (st.status === 'skipped' && (st.cardIds || []).some((id) => ['done', 'hole', 'blocked'].includes((m.cards || []).find((c) => c.id === id)?.status))) st.status = 'done'; // 오류 난 카드만 건너뛰었다: 끝낸 카드가 있으면 단계는 끝
+    // 오류 난 카드만 건너뛰었다: 끝낸 카드가 있으면 단계는 끝. 한도 대기에서 건너뛴 카드(구멍, 사유 한도)는 끝낸 카드로 세지 않는다(전부 그렇다면 단계는 건너뜀 그대로. 결정 0019)
+    if (st.status === 'skipped' && (st.cardIds || []).some((id) => { const c = (m.cards || []).find((x) => x.id === id); return !!c && ['done', 'hole', 'blocked'].includes(c.status) && c.by !== 'quota'; })) st.status = 'done';
     this.emitMission(s);
   }
 
@@ -1681,7 +1690,8 @@ export class Orchestrator {
     for (let pass = 0; ; pass++) {
       // 일 카드 단계: 이번에 돌릴 카드의 되풀이 상한·시간당 시작 수를 먼저 본다(돌리지 않는 카드는 이전 결과 그대로). 시작 수는 호출 상한까지 통과한 뒤에 센다
       let gate = null;
-      if (st.mission === 'cards' && !first?.wait) {
+      // first.quota: 한도 대기 뒤 다시 하기 앞의 호출 상한 질문에서 끊겼다 이어서 한다(결정 0019). 한도에 걸린 카드만 같은 시작을 잇는 것이라 되풀이 상한·시작 수를 보지 않는다
+      if (st.mission === 'cards' && !first?.wait && !first?.quota) {
         const want = first?.ids || st.agentIds;
         gate = await this.#cardGate(ctx, i, want, back);
         if (!gate) { st.status = st.status === 'done' ? 'done' : 'stopped'; return; }
@@ -1689,8 +1699,9 @@ export class Orchestrator {
       }
       // 호출 상한은 그 단계가 쓸 호출 수로 본다: 보통 단계는 인원, 회의를 여는 단계는 회의 호출 수 식(결정 0017. 준비 회의와 같다). 이어서 하는 첫 바퀴는 다시 돌릴 사람 수
       const need = first?.ids ? first.ids.length : st.meeting && !ids ? meetingCalls(st.agentIds.length, st.meeting.rounds) : (ids || st.agentIds).length;
-      if (!first?.wait && !(await this.#capCheck(ctx, i, need, 'work', back))) return;
+      if (!first?.wait && !(await this.#capCheck(ctx, i, need, 'work', back, !!first?.quota))) return;
       gate?.commit();
+      if (st.mission === 'cards' && first?.quota) for (const c of (m.cards || []).filter((x) => (st.cardIds || []).includes(x.id) && first.ids.includes(x.ownerId))) c.status = 'running';
       m.phase = 'work';
       if (!first?.wait) this.#missionStage(ctx, i, back || pass ? 'again' : 'start');
       // 일하는 사람은 CLI 를 띄울 때 넣고 끝나면 뺀다(#atWorking). 이어서 그대로 쓰는 답은 처음부터 끝낸 답으로
@@ -1747,7 +1758,8 @@ export class Orchestrator {
   }
 
   // 호출 상한(결정 0015): 단계를 시작하기 전에 남은 호출 수가 그 단계 인원보다 적으면 묻는다("20번 더" / 그만). 단계 안에서 넘는 양(다시 시도·이어받기)은 막지 않는다.
-  // phase·back: 끊긴 자리에 적을 그 단계의 차례(일·기준 판정, 되돌림인지). keepDone: 그 단계에서 끝낸 답(finished)을 끊긴 자리에 남긴다(한도 대기 뒤 다시 하기 앞, 결정 0019)
+  // phase·back: 끊긴 자리에 적을 그 단계의 차례(일·기준 판정, 되돌림인지). keepDone: 한도 대기 뒤 다시 하기 앞(결정 0019). 그 단계에서 끝낸 답(finished)을 끊긴 자리에 남기고
+  // 대기에 quota 표시를 단다(끊겼다 이어서 해도 한도에 걸린 사람만 다시 돌고, 일 카드는 같은 시작을 잇는 것이라 시작 수에 세지 않게)
   async #capCheck(ctx, i, need, phase = 'work', back = false, keepDone = false) {
     const m = ctx.mission;
     const c = m.calls;
@@ -1755,7 +1767,7 @@ export class Orchestrator {
       m.status = 'waiting';
       logLine(m, 'cap', tr('호출 {used}번에 닿았어(상한 {cap}번). 다음 단계에 {need}번이 들어서 물어봤어.', { used: c.used, cap: c.cap, need }));
       this.emitMission(ctx.s);
-      this.#missionAt(ctx, { stageIndex: i, phase, back, ...(keepDone ? { finished: m.at?.finished || [] } : {}), wait: { reason: 'cap' } });
+      this.#missionAt(ctx, { stageIndex: i, phase, back, ...(keepDone ? { finished: m.at?.finished || [] } : {}), wait: { reason: 'cap', ...(keepDone ? { quota: true } : {}) } });
       const d = await this.#hold(ctx, 'waiting', { reason: 'cap', stageIndex: i, used: c.used, cap: c.cap, step: CAP_STEP });
       if (ctx.stopped || d.action !== 'more') { ctx.stopped = true; break; }
       c.cap += CAP_STEP;
@@ -1806,8 +1818,9 @@ export class Orchestrator {
     logLine(m, 'quota', until ? tr('{names}이(가) 사용량 한도에 걸려 멈췄어. 이어받을 다른 AI가 없어. 한도는 {time}에 초기화돼.', { names, time: clock(until) })
       : tr('{names}이(가) 사용량 한도에 걸려 멈췄어. 이어받을 다른 AI가 없고, 초기화 시각은 몰라.', { names })).fail = 'outside';
     this.emitMission(ctx.s);
-    // 끊긴 자리: 이 단계에서 끝낸 답(finished)은 그대로 두고 한도에 걸린 사람과 그 AI·오류 문구, 초기화 시각을 적는다
-    this.#missionAt(ctx, { ...m.at, stageIndex: i, phase, back, working: [], wait: { reason: 'quota', until, failed: who.map((w) => ({ agentId: w.agentId, error: [...String(failed.find((f) => String(f.agent?.id || '') === w.agentId)?.error || '')].slice(0, 600).join(''), ...(w.provider ? { provider: w.provider } : {}) })) } });
+    // 끊긴 자리: 이 단계에서 끝낸 답(finished)은 그대로 두고 한도에 걸린 사람과 그 AI·오류 문구, 초기화 시각을 적는다.
+    // 시각은 지났어도 그대로 적는다(passed. 또 끊겼다 이어서 해도 "모름"이 아니라 "지났어"로 보이게)
+    this.#missionAt(ctx, { ...m.at, stageIndex: i, phase, back, working: [], wait: { reason: 'quota', until: until || passed, failed: who.map((w) => ({ agentId: w.agentId, error: [...String(failed.find((f) => String(f.agent?.id || '') === w.agentId)?.error || '')].slice(0, 600).join(''), ...(w.provider ? { provider: w.provider } : {}) })) } });
     const at = Date.now(); // 자동 이어서를 골라 다시 띄워도 같은 대기로(알림을 다시 보내지 않는다)
     const out = phase === 'review' ? 'accept' : 'skip'; // 예전 출구: 일 단계는 건너뛰기(오류 대기와 같다), 판정은 받아들이기(판정 없이 끝낸다)
     let autoAt = 0;
@@ -1845,7 +1858,12 @@ export class Orchestrator {
           logLine(m, 'answer', tr('초기화 시각이 지났지만 일시정지를 눌러 둬서 시작하지 않고 기다려.'));
           this.emitMission(ctx.s);
           const p = await this.#hold(ctx, 'paused', { reason: 'pause', stageIndex: i });
-          if (p.action === 'stop' || ctx.stopped) { ctx.stopped = true; return 'stop'; }
+          if (p.action === 'stop' || ctx.stopped) {
+            // 한도 대기에서 온 일시정지라 한도 대기의 그만처럼 사무실 표시(한도에 걸린 사람의 오류)도 푼다(#hold 는 일시정지 대기의 그만에서는 풀지 않는다)
+            for (const id of ctx.run.stages[i].agentIds) this.#state(ctx.s.id, id, 'idle', tr('중지됨'));
+            ctx.stopped = true;
+            return 'stop';
+          }
         }
         // 다시 하기 앞에 호출 상한(모자라면 "20번 더"부터. 그 단계에서 끝낸 답은 끊긴 자리에 남긴다)
         if (!(await this.#capCheck(ctx, i, Math.max(1, failed.length), phase, back, true))) return 'stop';
@@ -1920,11 +1938,13 @@ export class Orchestrator {
     const labelOf = (x, o) => { const id = cardIdOf(x, o); return id ? `${x.label} · ${id}` : x.label; };
     const works = run.stages.slice(0, i).flatMap((x, k) => {
       if (isPrep(x) || x.mission === 'plan') return [];
-      const outs = (ctx.outputs[k] || []).filter((o) => !o.error && o.text && o.text.trim());
+      // 한도 대기에서 건너뛴 카드(결정 0019): 결과가 비었다고 코드가 알린다(막힘 받아들이기와 같다). 이 실행의 결과가 아니라 카드 표시로 본다(끊겼다 이어서 다시 모은 결과에는
+      // 오류 답이 없다). 그 담당의 답은 결과로 넣지 않는다(이어서 다시 모으면 되돌림 전의 옛 답이 들어올 수 있다)
+      const holes = x.mission === 'cards' ? (m.cards || []).filter((c) => (x.cardIds || []).includes(c.id) && c.by === 'quota' && c.status === 'hole') : [];
+      const holeOwners = new Set(holes.map((c) => c.ownerId));
+      const outs = (ctx.outputs[k] || []).filter((o) => !o.error && o.text && o.text.trim() && !holeOwners.has(String(o.agent?.id)));
       if (ctx.returnedAt >= 0 && k > ctx.returnedAt) return outs.length ? [{ label: x.label, name: [...new Set(outs.map((o) => o.agent?.name || ''))].join(', '), text: '', stale: true }] : [];
-      // 한도 대기에서 건너뛴 카드(결정 0019): 결과가 비었다고 코드가 알린다(막힘 받아들이기와 같다)
-      const skippedCards = x.mission === 'cards' ? (ctx.outputs[k] || []).filter((o) => o.error && (m.cards || []).find((c) => (x.cardIds || []).includes(c.id) && c.ownerId === String(o.agent?.id))?.by === 'quota')
-        .map((o) => ({ label: labelOf(x, o), name: o.agent?.name || '', quotaSkip: true })) : [];
+      const skippedCards = holes.map((c) => ({ label: `${x.label} · ${c.id}`, name: this.store.get('agents', c.ownerId)?.name || '', quotaSkip: true }));
       // 막혔다고 해서 사용자가 받아들인 답(결정 0018): 결과 대신 비었다는 코드의 줄과, 막힌 이유(표식 안의 참고 자료)만
       const accepted = (o) => [o.msgId, o.tailMsgId].map((id) => (id ? s.messages.find((y) => y.id === id) : null)).find((y) => y?.blockedBlock?.accepted);
       return [...outs.map((o) => { const a = accepted(o); return a ? { label: labelOf(x, o), name: o.agent?.name || '', blocked: a.blockedBlock.reason || '' } : { label: labelOf(x, o), name: o.agent?.name || '', text: o.text }; }), ...skippedCards];

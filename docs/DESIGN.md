@@ -41,6 +41,8 @@ server/providers/feeder.js  stdin 스트림 JSON 다중 턴(작업 중 지시 �
 public/index.html           앱 셸(import map)
 public/js/*.js              UI(Preact+htm)
 public/js/mission-numbers.js 목표 카드의 숫자: 호출 어림 더하기(sumEstimate, 서버 estimateCalls 도 이 함수를 부른다), 받은 한도 기록에서 보일 창 고르기(limitRows), 기록 나이 단위(recordAge)(결정 0019)
+public/js/stage-model.js    흐름 무대의 모델(DOM 없음): 마지막 실행·실시간 상태·목표·질문·팀 → 역·사람·내 차례·문 자리·끝 깃발. 회의 차례 이름(meetLabel)·목표 대기 표시(goalWait)도 여기(결정 0020)
+public/js/views/stage.js    흐름 무대(나눠 보기의 위쪽 그림, FlowStage)와 접은 한 줄 띠(StageStrip)(결정 0020)
 public/js/office/*.js       사무실 렌더러(독립 모듈)
 public/css/*.css
 test/*.test.js              node:test
@@ -225,6 +227,12 @@ POST /api/plugins/import, POST /api/plugins/export
 POST /api/sessions/:id/open-folder
 ```
 
+## 세션 화면 위쪽 그림(결정 0020)
+- 보기(`settings.viewMode`): `split`(기본) = 흐름 무대(`FlowStage`, 156px, 손잡이로 120~240px, 140px 아래는 작은 모양, 높이는 `ui.stageH`) / `chat` = 접은 한 줄 띠(`StageStrip`, 30px) / `office` = 마을·스킨 그림(`VillagePanel`, 아래 계약). `session.js` 의 `OfficePanel` 이 보기에 따라 둘 중 하나를 그려서, 마을은 `office` 보기에 들어갈 때 만들어지고 나올 때 치워진다. 흐름 무대는 스킨이 아니다(`settings.skin` 기본값 `village` 그대로).
+- 아래 진행 바(`RunBar`): `office` 보기만 단계 띠를 그리고, `split`·`chat` 은 일시정지·재개·중지·회의 끝내기와 기억·사용량만(`.runbar.thin`).
+- 모델(`stageModel({ run, live, mission, questions, agents, team, solo, conn, now, prev, request })`): 역 = 마지막 실행의 단계(실행이 없으면 팀 단계표를 할 일로, 팀이 없으면 에이전트 하나, 목표 카드 확인 대기면 팀 단계표를 할 일로). 역 상태 todo·run·done·wait·limit·error·skipped·stopped·cut(목표의 판정 뒤 묻기·한도 대기 단계는 wait, 자동 이어서를 고른 한도 대기는 limit, 끊긴 목표의 멈춘 단계는 cut). 사람 상태는 지금 역(과 대기가 가리키는 역)에만: think·write·tool(search·read·run·edit·other)·meet·wait·limit·error·done·off·idle, 회의는 `meetingNow` 로 진행자·반대편·말하는 사람·조사하러 간 빈자리. 역마다 4명(넘으면 +n), 역 6개를 넘으면 지금 역 하나 앞까지 남기고 지난 역을 접는다. 내 차례(`ask.kind`)와 문 자리: approve·verdict = 그 단계 뒤, cap = 그 단계 앞, error·quota·question = 역 안, confirm = 맨 앞, cut = 전체 점선, paused = 알약만. `prev` 와 지금 단계가 다르면 `fly`(hand, 거꾸로면 ret).
+- 내 차례 알약·문을 누르면 답 창(채팅 안의 승인·오류·목표 대기 창, 입력창 위 질문 창, 끊긴 목표 알림, 목표 카드)으로 내려 첫 단추에 초점. 움직임은 카드 날기(0.9초)와 내 차례 맥박뿐이고 움직임 줄이기면 멈춘다. 색은 앱 테마 변수에서만 섞는다(`public/css/stage.css`). 시험: `test/stage-model.test.js`.
+
 ## 사무실 렌더러 계약(public/js/office/index.js)
 ```js
 createOffice(container, { skin, reducedMotion, onSelect(agentId), onCard(messageId) }) -> office
@@ -237,7 +245,7 @@ office.setBoard([{ id, text }], { quiet }?)                    // 모임 자리 
                                                                // 카드(button)를 누르면 onCard(id)
 office.handoff(fromId, toId, label) -> Promise                 // 서류 들고 걸어가 전달
 office.setSkin(skinIdOrObject); office.select(id|null); office.destroy()
-SKINS (내장 3종 + custom: 배경 이미지 + 책상 좌표)
+SKINS (내장 4종: 크루 마을·모던·코지·나이트 + custom: 배경 이미지 + 책상 좌표)
 createSkinEditor(container, { skin, onSave(skinObj), onCancel })
 ```
 SVG 아이소메트릭(2.5D) 일러스트, CSS transform 애니메이션, 탭 숨김 시 정지, 줄이기 모드 지원.

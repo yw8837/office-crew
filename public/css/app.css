@@ -495,6 +495,26 @@ pre.raw { background: var(--code-bg); padding: 10px 12px; border-radius: 10px; f
 .hire-check input { margin-top: 3px; }
 .hire-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 @media (max-width: 560px) { .hire-fields { grid-template-columns: 1fr; } }
+/* 팀 제안 카드(결정 0024): 표는 카드 안에서만 가로로 밀리고, 좁은 창에서는 사람마다 한 덩어리로 */
+.hire.team-card { width: min(860px, 100%); }
+.team-table-wrap { overflow-x: auto; }
+.team-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.team-table th, .team-table td { text-align: left; vertical-align: top; padding: 6px 8px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.team-table th { color: var(--muted); font-weight: 600; font-size: 12px; white-space: nowrap; }
+.team-table tr.team-warn td { color: var(--text-2); background: var(--warn-soft); font-size: 12px; }
+.team-table td:nth-child(2) { white-space: nowrap; }
+.team-perm { min-width: 108px; padding: 4px 8px; font-size: 12.5px; }
+.team-opts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; }
+.team-all { align-items: center; }
+.team-all .team-perm { width: auto; }
+@media (max-width: 560px) {
+  .team-table thead { display: none; }
+  .team-table, .team-table tbody, .team-table tr, .team-table td { display: block; width: 100%; }
+  .team-table tr { padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .team-table td { border: 0; padding: 2px 0; }
+  .team-table td[data-label]::before { content: attr(data-label); display: block; color: var(--muted); font-size: 11px; }
+  .team-table tr.team-warn td { padding: 4px 6px; border-radius: 6px; }
+}
 
 /* 목표 카드(영입 제안 카드와 같은 틀)와 진행 기록 탭, 입력창 옆의 "목표까지" 스위치 */
 .goal-sec { display: flex; flex-direction: column; gap: 2px; }

@@ -85,6 +85,7 @@ const hideBlock = (name) => (text, block = null, streaming = false) => {
 };
 export const hidePlan = hideBlock('oc-cards');
 export const hideBlocked = hideBlock('oc-blocked');
+export const hideTeam = hideBlock('oc-team'); // 문서로 팀 짜기의 초안 블록은 팀 제안 카드로 보여 준다(결정 0024)
 
 // 검수 답 끝의 판정 블록(oc-review)은 기준표로 보여 주니 본문에서는 뺀다(hideGoal 과 같은 방식, 결정 0015).
 // block: 서버가 판정으로 받은 블록의 자리({ from, to }). 받지 않은 블록(일회용 값이 틀렸거나 형식이 깨진 것)은 그대로 보인다. 쓰는 중이면 끝의 블록도 감춘다

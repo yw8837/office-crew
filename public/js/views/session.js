@@ -8,8 +8,9 @@ import { renderMarkdown } from '../markdown.js';
 import { t, getLang, locale, tmap } from '../i18n/index.js';
 import { MemoryBadge } from './memory.js';
 import { DraftChip } from './rolenotes.js';
-import { continueList, findInMessages, hideAsks, hideCheck, hideGoal, hideReview, hideResearch, hidePlan, hideBlocked, routeTip, agentWrote } from '../chat-tools.js';
+import { continueList, findInMessages, hideAsks, hideCheck, hideGoal, hideReview, hideResearch, hidePlan, hideBlocked, routeTip, agentWrote, hideTeam } from '../chat-tools.js';
 import { GoalCard, MissionLog, MissionGate, ReviewTable, CutBox, ResearchCard, PlanCard } from './mission.js';
+import { TeamCard } from './teamdoc.js';
 import { researcherOf, meetingView, boardCards } from '../office/meeting.js';
 import { meetLabel, goalWait } from '../stage-model.js';
 import { FlowStage, StageStrip } from './stage.js';
@@ -405,7 +406,7 @@ class Message extends Component {
           </span></div>
       </div></div>`;
     }
-    if (m.role === 'proposal') return m.kind === 'goal' ? html`<${GoalCard} m=${m} />` : m.kind === 'research' ? html`<${ResearchCard} m=${m} />` : m.kind === 'plan' ? html`<${PlanCard} m=${m} />` : html`<${HireCard} m=${m} />`;
+    if (m.role === 'proposal') return m.kind === 'goal' ? html`<${GoalCard} m=${m} />` : m.kind === 'research' ? html`<${ResearchCard} m=${m} />` : m.kind === 'plan' ? html`<${PlanCard} m=${m} />` : m.kind === 'team' ? html`<${TeamCard} m=${m} />` : html`<${HireCard} m=${m} />`;
     if (m.role === 'system') return html`<div class="msg system"><span>${m.text}</span></div>`;
     const a = agentById(m.agentId) || { name: t('삭제된 에이전트'), emoji: '❔' };
     const streaming = m.status === 'streaming';
@@ -421,7 +422,7 @@ class Message extends Component {
     // 일하기 전 조사 질문 블록(결정 0017)은 글 아래 질문 목록으로 보여 준다
     // 일 카드의 계획 블록(결정 0018)은 계획 카드로, 일 단계 답 끝의 막힘 블록은 "막힘: 이유" 줄로 보여 준다
     const body = m.review ? hideReview(m.text, m.reviewBlock, streaming) : m.prep?.kind === 'questions' ? hideResearch(m.text, m.researchBlock, streaming)
-      : m.prep?.kind === 'plan' ? hidePlan(m.text, m.planBlock, streaming)
+      : m.prep?.kind === 'plan' ? hidePlan(m.text, m.planBlock, streaming) : m.prep?.kind === 'team' ? hideTeam(m.text, m.teamBlock, streaming) // 팀 초안 블록은 팀 제안 카드로(결정 0024)
         : hideBlocked(hideCheck(hideAsks(hideGoal(m.text, m.goalBlock, streaming), m.asks, streaming), m.check, streaming), m.blockedBlock, streaming);
     // 조사 결과: 누구의 어떤 질문에 답했는지(질문이 든 차례 글에서 찾는다)
     const asker = m.checkOf ? state.sessionData[state.currentId]?.messages.find((x) => x.id === m.checkOf) : null;

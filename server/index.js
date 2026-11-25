@@ -12,6 +12,7 @@ import { Usage } from './usage.js';
 import { Catalog } from './catalog.js';
 import { Orchestrator, normMeeting } from './orchestrator.js';
 import { uniqueName, STAGE_MAX } from './hire.js';
+import { resolveTeamProposal } from './teamdoc.js';
 import { ProviderRegistry, PROVIDERS, HIDDEN_PROVIDERS, syncCodexAccounts, accountProviderId, codexAccountHome } from './providers/index.js';
 import { defaultCodexHome } from './providers/codex.js';
 import { resolveRoute, roleKind } from './routing.js';
@@ -581,10 +582,16 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   route('POST', '/api/sessions/([\\w-]+)/proposals/([\\w-]+)', async (req, url, [id, mid]) => {
     // 본문을 먼저 읽는다. 그 뒤로는 기다리는 곳이 없어서, 같은 제안을 두 곳에서 동시에 눌러도 한 번만 처리된다
     const b = await readJson(req);
+    // 팀 제안(결정 0024)의 만들기는 지금 AI 목록으로 초안을 다시 정리한다. 목록은 여기서 먼저 읽는다(그 뒤로 기다리는 곳이 없게)
+    const cat = b.action === 'accept' && store.getSession(id)?.messages.some((m) => m.id === mid && m.kind === 'team') ? await providers.catalog() : null;
     const s = store.getSession(id);
     if (!s) throw new HttpError(404, tr('세션 없음'));
     const p = s.messages.find((m) => m.id === mid && m.role === 'proposal');
     if (!p) throw new HttpError(404, tr('그 제안이 없어.'));
+    if (p.kind === 'team') {
+      if (p.status !== 'open') throw new HttpError(409, tr('이미 처리한 제안이야.'));
+      return resolveTeamProposal({ store, bus, orch, s, p, body: b, catalog: cat, cleanAgent, cleanTeam });
+    }
     // 목표 카드는 이 길로 처리하지 않는다(확인은 mission/confirm 에서 본 것과 저장된 것을 대조한 뒤에만)
     if ((p.kind || 'hire') !== 'hire') throw new HttpError(409, tr('이 카드는 영입 제안이 아니야.'));
     if (p.status !== 'open') throw new HttpError(409, tr('이미 처리한 제안이야.'));

@@ -29,3 +29,4 @@ Keep a record under about 100 lines. When a decision changes, add a dated "Revis
 | [0021](0021-no-demo-team.md) | No demo team; the simulated AI stays for tests and is hidden from the screens | Accepted |
 | [0022](0022-goal-mode-records-and-block-allow-list.md) | Goal mode keeps one table of the blocks each step takes, records who actually ran and why, and names failures only by facts the code knows | Accepted |
 | [0023](0023-prompt-assembly-for-cache-and-fresh-meeting-turns.md) | An agent's system instructions stay the same on every call; per-call lines go at the front of the prompt, meeting turns send only what is new, and long sessions hold meetings in new conversations | Accepted |
+| [0024](0024-team-proposal-from-a-document.md) | A document attached in the chat becomes a team proposal the user approves | Accepted |

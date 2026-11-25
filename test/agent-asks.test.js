@@ -84,7 +84,9 @@ test('물으면 멈춰서 기다리고, 답하면 같은 답 안에서 이어 �
   assert.equal(hideAsks(m.text, m.asks).includes('oc-ask'), false, '화면에서는 그 자리를 뺀다');
   assert.equal(sess(id).messages.filter((x) => x.role === 'agent').length, 1, '답 하나로 이어진다');
   const log = t.fakeLog();
-  assert.ok(log.some((l) => l.system?.includes('oc-ask')), '지침에 묻는 방법이 들어간다');
+  // 묻는 방법은 실행마다 켜지고 꺼져서 시스템 지시가 아니라 새 대화의 첫 프롬프트 맨 앞에 들어간다(결정 0023)
+  assert.ok(log.some((l) => l.text?.includes('사용자에게 묻기:') && l.text.includes('```oc-ask')), '프롬프트에 묻는 방법이 들어간다');
+  assert.ok(!log.some((l) => l.system?.includes('oc-ask')), '시스템 지시에는 없다');
   const turn = log.findLast((l) => l.text?.includes('[사용자 답변]'));
   assert.match(turn.text, /1\. 어디까지 할까\?\n {3}→ 전부 \(추천\)\n2\. 무엇을 넣을까\?\n {3}→ 표, 요약, 직접 입력: 각주도/);
   assert.ok(!turn.text.includes('[사용자 요청]'), '같은 CLI 대화를 이어 가서 요청을 다시 보내지 않는다');
@@ -154,7 +156,7 @@ test('설정을 끄면 묻는 방법을 알려 주지 않고 선택창도 띄우
     await ended(id);
     assert.equal(reply(id).asks, undefined);
     assert.equal(run(id).status, 'done');
-    assert.ok(!t.fakeLog().slice(before).some((l) => l.system?.includes('oc-ask')));
+    assert.ok(!t.fakeLog().slice(before).some((l) => l.system?.includes('oc-ask') || l.text?.includes('사용자에게 묻기:')));
   } finally {
     await t.api('PUT', '/api/settings', { agentAsks: true });
   }

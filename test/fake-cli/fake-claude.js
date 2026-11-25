@@ -137,9 +137,10 @@ async function pump() {
   // REMPTY(q1 조사가 빈 답. 다시 요청해도 빈 답), SLOWSCAN·SLOWQ·SLOWR2·SLOWMEET(그 차례만 3초 늦게 끝남: 끊김 흉내용).
   // 조사 답은 "- 사실 | 출처 | 확인함" 줄로 쓴다. q1 답에는 지시처럼 보이는 줄을 넣고(표식 밖으로 새지 않는지, 일 단계에서 빠지는지 보려고),
   // q2 답에는 출처 없는 목록 줄 하나를 더 넣는다(조사 노트가 세는지 보려고)
-  const scanTurn = text.startsWith('[조사 전 훑어보기]');
+  // 머리 줄은 줄 단위로 찾는다(호출마다 달라지는 지시가 프롬프트 맨 앞에 붙을 수 있다, 결정 0023)
+  const scanTurn = /^\[조사 전 훑어보기\]$/m.test(text);
   const qTurn = !scanTurn && /^\[조사 질문 뽑기\]$/m.test(text);
-  const rn = Number(text.match(/^\[조사 — 질문 (\d+)\/\d+\]/)?.[1] || 0);
+  const rn = Number(text.match(/^\[조사 — 질문 (\d+)\/\d+\]$/m)?.[1] || 0);
   const prepMeet = text.includes('[회의 안건]');
   const qBad = goalLine.includes('RQBAD2') || (goalLine.includes('RQBAD') && !text.includes('[조사 질문 다시 쓰기]'));
   const prepChunks = scanTurn ? ['가짜 훑어보기: 주제는 정리야.\n', '- 출발할 자료: docs/brief.md (출처: docs/brief.md)\n', '- 확인해야 할 가정: 마감은 다음 주 (확인 못 함)']

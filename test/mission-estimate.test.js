@@ -11,7 +11,7 @@ import { estimateParts, estimateCalls, reviewPlan, resumePoint, quotaDelay, MISS
 import { limitResetAt } from '../server/failover.js';
 import { sumEstimate, limitRows, recordAge } from '../public/js/mission-numbers.js';
 import { attentionOf } from '../server/store.js';
-import { startTestApp, freePort } from './helpers.js';
+import { startTestApp, freePort, promptBody } from './helpers.js';
 
 bindLang(() => 'ko'); // 순수 함수의 문구(한국어 원문)를 검사한다
 let t = null;
@@ -35,7 +35,8 @@ const holdOf = (sid, pred = () => true) => t.waitFor(() => { const h = S(sid).ru
 const lift = (on) => { const f = `${process.env.FAKE_LOG}.lift`; if (on) fs.writeFileSync(f, ''); else fs.rmSync(f, { force: true }); };
 // 한도 기록·쉬는 표시·풀림 표시를 지운다(앞 테스트의 가짜 한도 오류가 뒤 테스트의 초기화 시각에 섞이지 않게)
 const clean = () => { lift(false); t.app.orch.cooldown.map.clear(); t.app.store.usage.limits = {}; };
-const prompts = (from) => t.fakeLog().slice(from).filter((l) => l.cli === 'claude' && l.text !== undefined).map((l) => l.text);
+// 본문만 본다: 새 대화의 첫 프롬프트 맨 앞에 붙는 호출마다 달라지는 지시(결정 0023)는 promptBody 로 뗀다
+const prompts = (from) => t.fakeLog().slice(from).filter((l) => l.cli === 'claude' && l.text !== undefined).map((l) => promptBody(l.text));
 // 요청 → 카드. 확인은 따로(어림 조각을 먼저 본다)
 async function draft(teamId, request = '정리해 줘') {
   const s = (await t.api('POST', '/api/sessions', { teamId })).json;

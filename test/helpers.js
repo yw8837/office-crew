@@ -53,6 +53,16 @@ export async function waitFor(cond, { timeout = 15000, interval = 25, what = '�
   }
 }
 
+// 새 대화의 첫 프롬프트 맨 앞에는 호출마다 달라지는 지시가 붙는다(결정 0023: 그 실행만 읽기 전용인 차례의 권한 문장, 규칙 파일 읽기, 묻기 안내, 역할 노트의 참고 블록).
+// 그 덩어리는 빈 줄 없이 이어지고 빈 줄 하나로 본문과 갈린다. 본문의 모양을 보는 테스트는 이걸로 덩어리를 떼고 본다(덩어리 자체는 test/prompt-assembly.test.js 가 본다)
+const HEAD_STARTS = ['권한: ', '이번 조사는 도구 없이', '작업 폴더에 CLAUDE.md', '사용자에게 묻기:', '아래 "참고 '];
+export function promptBody(p) {
+  const s = String(p ?? '');
+  if (!HEAD_STARTS.some((h) => s.startsWith(h))) return s;
+  const at = s.indexOf('\n\n');
+  return at < 0 ? s : s.slice(at + 2);
+}
+
 // 가상 AI(mock, 사용량 0) 에이전트 넷과 그 팀을 API로 만든다. 첫 실행 데이터에는 이제 가상 에이전트가 없어서(결정 0021) 필요한 테스트가 직접 만든다.
 // 모양은 예전 데모 팀과 같다: 조사 → 정리·분석(둘이 병렬, 끝나면 승인 대기) → 빌드. id 는 고정이라 테스트가 이름 대신 id 로 가리킨다
 export const MOCK = { team: 'team-mock', researcher: 'mock-researcher', organizer: 'mock-organizer', analyst: 'mock-analyst', builder: 'mock-builder' };

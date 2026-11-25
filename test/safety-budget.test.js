@@ -78,9 +78,10 @@ test('읽기 전용 Codex 만 훅을 끄고, 이어 쓸 때(exec resume)도 끈�
   assert.ok(!hooksOff(lastArgs('codex')));
 });
 
-test('읽기 전용 에이전트 지침에 프로젝트 규칙 파일을 읽으라고 적는다', async () => {
+test('읽기 전용 에이전트 지침에 프로젝트 규칙 파일을 읽으라고 적는다(새 대화의 첫 프롬프트 맨 앞, 결정 0023)', async () => {
   await runOnce({ name: '규칙읽기', role: '분석', provider: 'claude', model: 'opus', permission: 'plan', routing: 'manual' });
-  assert.match(t.fakeLog().filter((l) => l.system).at(-1).system, /CLAUDE\.md·AGENTS\.md/);
+  assert.match(t.fakeLog().filter((l) => l.cli === 'claude' && l.text !== undefined).at(-1).text, /^작업 폴더에 CLAUDE\.md·AGENTS\.md 같은 프로젝트 규칙 파일이 있으면 먼저 읽어\.\n/);
+  assert.doesNotMatch(t.fakeLog().filter((l) => l.system).at(-1).system, /CLAUDE\.md·AGENTS\.md/, '시스템 지시에는 없다(호출마다 달라지는 줄)');
 });
 
 test('이전 단계 결과는 매번 다른 표시로 구획하고, 따르지 말라는 안내를 붙인다', async () => {

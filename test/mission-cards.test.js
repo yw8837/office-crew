@@ -13,7 +13,7 @@ import {
   cleanPlan, parsePlan, planBlock, cardRoster, matchOwners, fallbackOwner, cardsProblem, workCard, filesOverlap, soloCard, planWaves, waveStages, wavesLine, planPrompt,
   hasTail, cardTail, parseBlocked, cardPrompt, waitingFor, cleanGoal, sameCard, cardOf, toCriteria, parseReview, reviewPrompt, returnPrompt, resumePoint, stageDiff, CARD_COUNT, TITLE_MAX,
 } from '../server/mission.js';
-import { startTestApp, freePort, addMockTeam } from './helpers.js';
+import { startTestApp, freePort, addMockTeam, promptBody } from './helpers.js';
 
 bindLang(() => 'ko'); // 순수 함수의 문구(한국어 원문)를 검사한다
 let t = null;
@@ -50,11 +50,12 @@ const calls = (from) => {
   const by = new Map();
   for (const l of fakeLog().slice(from)) {
     if (l.cli !== 'claude' || l.pid === undefined) continue;
-    if (l.args) { const c = { args: l.args, texts: [] }; out.push(c); by.set(l.pid, c); } else if (l.text !== undefined) by.get(l.pid)?.texts.push(l.text);
+    if (l.args) { const c = { args: l.args, texts: [] }; out.push(c); by.set(l.pid, c); } else if (l.text !== undefined) by.get(l.pid)?.texts.push(promptBody(l.text)); // 본문만(결정 0023)
   }
   return out;
 };
-const prompts = (from) => fakeLog().slice(from).filter((l) => l.cli === 'claude' && l.text !== undefined).map((l) => l.text);
+// 본문만 본다: 새 대화의 첫 프롬프트 맨 앞에 붙는 호출마다 달라지는 지시(결정 0023)는 promptBody 로 뗀다
+const prompts = (from) => fakeLog().slice(from).filter((l) => l.cli === 'claude' && l.text !== undefined).map((l) => promptBody(l.text));
 const cardPrompts = (from, id) => prompts(from).filter((p) => new RegExp(`^\\[일 카드 ${id}\\]$`, 'm').test(p) && !p.includes('[끝의 두 칸 다시 쓰기]'));
 // 무작위 표식 밖에 그 줄이 나온 수(word: 표식 이름)
 const outside = (p, line, word) => {

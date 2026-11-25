@@ -107,8 +107,8 @@
 .stg-p .away { font-size: 10.5px; font-weight: 700; color: var(--s-tool-ink); white-space: nowrap; }
 .stg-p .chair { position: absolute; left: 1px; top: -5px; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; background: var(--panel); color: var(--text); box-shadow: 0 0 0 1px var(--border-2); z-index: 2; }
 .stg-p .chair .stg-ico { width: 10px; height: 10px; }
-.stg-p .card { position: absolute; right: 0; top: -6px; width: 18px; height: 18px; border-radius: 5px; background: var(--panel); color: var(--accent-2); display: grid; place-items: center; box-shadow: 0 0 0 1.5px var(--accent); z-index: 2; }
-.stg-p .card .stg-ico { width: 12px; height: 12px; }
+.stg-p .stg-card { position: absolute; right: 0; top: -6px; width: 18px; height: 18px; border-radius: 5px; background: var(--panel); color: var(--accent-2); display: grid; place-items: center; box-shadow: 0 0 0 1.5px var(--accent); z-index: 2; }
+.stg-p .stg-card .stg-ico { width: 12px; height: 12px; }
 .stg-p.seat, .stg-p.gone { cursor: default; }
 .stg-seat { width: 30px; height: 30px; border-radius: 50%; border: 2px dashed var(--s-idle); display: block; }
 .stg-mb { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; padding-top: 2px; }
@@ -181,7 +181,7 @@
 .stg-strip .stg-pill { height: 28px; font-size: 12px; }
 .stg-strip .stg-pill .go { padding: 0 8px; font-size: 12px; min-height: 24px; }
 .stg-strip.lost > :not(.stg-pill) { filter: grayscale(1); }
-.stg-unfold { flex: none; border: 0; background: none; color: var(--muted); display: inline-flex; align-items: center; gap: 3px; font-size: 12px; cursor: pointer; padding: 0 2px; }
+.stg-unfold { flex: none; border: 0; background: none; color: var(--muted); display: inline-flex; align-items: center; gap: 3px; font-size: 12px; cursor: pointer; padding: 0 4px; min-height: 24px; border-radius: 6px; }
 .stg-unfold:hover { color: var(--text); }
 .stg-unfold .stg-ico { width: 13px; height: 13px; }
 

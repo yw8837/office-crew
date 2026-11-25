@@ -191,7 +191,7 @@ function Person({ p, small }) {
       : mins ? html`<span class="lim">${t('{m}분 남음', { m: mins })}</span>`
         : html`<span class="nm">${p.name}</span>`;
   const inner = html`<span class="av"><${Avatar} agent=${a || { id: p.id, name: p.name }} size=${small ? 24 : 30} />${info && html`<${Badge} info=${info} pulse=${p.st === 'wait'} />`}</span>
-    ${p.held && html`<span class="card" aria-hidden="true"><${Ico} n="doc" /></span>`}
+    ${p.held && html`<span class="stg-card" aria-hidden="true"><${Ico} n="doc" /></span>`}
     ${p.chair && html`<span class="chair" aria-hidden="true"><${Ico} n="gavel" /></span>`}
     ${!small && under}`;
   const cls = `stg-p${info ? '' : ' dim'}${p.speaker ? ' talk' : ''}${p.held ? ' held' : ''}${p.gone ? ' gone' : ''}`;

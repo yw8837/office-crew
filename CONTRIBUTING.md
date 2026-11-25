@@ -15,7 +15,7 @@ For anything larger than a small fix, please open an issue first so we can agree
 
 ## Development setup
 
-Requirements: **Node.js 20 or newer** and Git. You don't need any AI CLI. The built-in demo provider and the test suite run without one.
+Requirements: **Node.js 20 or newer** and Git. You don't need any AI CLI to work on the code: the test suite runs on fake CLIs (`test/fake-cli/`) and the built-in simulated AI, which is kept for the tests and doesn't show in the app's screens. To have the app itself do any work, connect at least one AI.
 
 ```bash
 git clone https://github.com/yw8837/office-crew.git
@@ -161,7 +161,7 @@ This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md). Please be k
 
 기여해 주셔서 감사합니다. 버그 제보, 프로바이더 어댑터, 사무실 스킨, 번역, 문서 수정 모두 환영합니다.
 
-- **개발 환경:** Node.js 20 이상과 Git만 있으면 됩니다. AI CLI는 없어도 됩니다.
+- **개발 환경:** Node.js 20 이상과 Git만 있으면 됩니다. 코드를 고치고 테스트하는 데는 AI CLI가 없어도 됩니다(테스트는 가짜 CLI와 테스트용 가상 AI로 돌고, 가상 AI는 앱 화면에 보이지 않습니다). 앱에서 실제로 일을 시키려면 AI를 하나 이상 연결해야 합니다.
   ```bash
   git clone https://github.com/yw8837/office-crew.git
   cd office-crew

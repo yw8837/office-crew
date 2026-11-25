@@ -106,18 +106,25 @@ export class Store {
     this.#dropDemo();
   }
 
-  // 없앤 데모 팀과 데모 에이전트(결정 0021). 데모 팀은 사용자가 고쳤어도 지운다.
+  // 없앤 데모 팀과 데모 에이전트(결정 0021). 한 번만 돈다: 끝나면 설정에 demoDropped 표시를 남기고, 그 뒤에는 API 로 같은 id 를 다시 만들었거나
+  // 백업에서 되살린 것을 지우지 않는다(droppedDemo: 이번에 켤 때 돌았는지. index.js 가 역할 노트 이름 바꾸기를 이때만 한다).
   // 데모 에이전트는 아직 가상 AI(mock)로 직접 설정된 것만 지우고(진짜 AI로 바꿨거나 자동 라우팅으로 돌린 건 남긴다), 다른 팀의 단계에서도 뺀다.
+  // 데모 팀은 단계에 든 에이전트가 전부 데모 에이전트이고 그들이 이번에 지워지거나 이미 없을 때만 지운다. 사용자가 진짜 에이전트를 넣었거나
+  // 남긴 데모 에이전트가 들어 있으면 팀은 남기고 다른 팀처럼 지운 에이전트만 뺀다(이름은 사용자 데이터라 그대로 둔다).
   // 단계 정리는 에이전트 삭제(DELETE /api/agents/:id)와 같다: 비게 된 단계는 빠지고, 단계가 하나도 안 남은 팀도 지우지 않는다.
   // 역할 노트는 앱이 켜질 때 index.js 가 이름을 바꿔 둔다(에이전트 삭제와 같게). 데모 팀으로 하던 세션은 기록으로 그대로 둔다
   #dropDemo() {
+    if (this.settings.demoDropped) return;
+    this.droppedDemo = true;
     const gone = new Set(DEMO_AGENT_IDS.filter((id) => { const a = this.get('agents', id); return a && a.provider === 'mock' && a.routing !== 'auto'; }));
     if (gone.size) {
       this.cols.agents = this.cols.agents.filter((a) => !gone.has(a.id));
       this.#saveCol('agents');
     }
     let teamsDirty = false;
-    if (this.get('teams', DEMO_TEAM_ID)) { this.cols.teams = this.cols.teams.filter((t) => t.id !== DEMO_TEAM_ID); teamsDirty = true; }
+    const demoTeam = this.get('teams', DEMO_TEAM_ID);
+    const onlyDemo = (demoTeam?.stages || []).flatMap((s) => s.agentIds || []).every((id) => DEMO_AGENT_IDS.includes(id) && !this.get('agents', id));
+    if (demoTeam && onlyDemo) { this.cols.teams = this.cols.teams.filter((t) => t.id !== DEMO_TEAM_ID); teamsDirty = true; }
     if (gone.size) {
       this.cols.teams = this.cols.teams.map((t) => {
         const stages = (t.stages || []).map((s) => ({ ...s, agentIds: (s.agentIds || []).filter((x) => !gone.has(x)) })).filter((s) => s.agentIds.length);
@@ -128,18 +135,16 @@ export class Store {
     }
     if (teamsDirty) this.#saveCol('teams');
     // 기본 팀·기본 에이전트가 지운 것을 가리키면 기본 팀(없으면 남은 첫 팀)과 그 팀의 첫 에이전트(없으면 남은 첫 에이전트)로
-    let settingsDirty = false;
     if (this.settings.defaultTeamId === DEMO_TEAM_ID && !this.get('teams', DEMO_TEAM_ID)) {
       this.settings.defaultTeamId = (this.get('teams', 'team-default') || this.cols.teams[0])?.id || null;
-      settingsDirty = true;
     }
     if (DEMO_AGENT_IDS.includes(this.settings.defaultAgentId) && !this.get('agents', this.settings.defaultAgentId)) {
       const t = this.get('teams', this.settings.defaultTeamId);
       const first = (t?.stages || []).flatMap((s) => s.agentIds || []).find((id) => this.get('agents', id));
       this.settings.defaultAgentId = first || this.cols.agents[0]?.id || '';
-      settingsDirty = true;
     }
-    if (settingsDirty) this.saveSettings();
+    this.settings.demoDropped = true;
+    this.saveSettings();
   }
 
   #file(name) { return path.join(this.dirs.home, `${name}.json`); }

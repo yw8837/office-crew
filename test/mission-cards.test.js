@@ -13,7 +13,7 @@ import {
   cleanPlan, parsePlan, planBlock, cardRoster, matchOwners, fallbackOwner, cardsProblem, workCard, filesOverlap, soloCard, planWaves, waveStages, wavesLine, planPrompt,
   hasTail, cardTail, parseBlocked, cardPrompt, waitingFor, cleanGoal, sameCard, cardOf, toCriteria, parseReview, reviewPrompt, returnPrompt, resumePoint, stageDiff, CARD_COUNT, TITLE_MAX,
 } from '../server/mission.js';
-import { startTestApp, freePort } from './helpers.js';
+import { startTestApp, freePort, addMockTeam } from './helpers.js';
 
 bindLang(() => 'ko'); // 순수 함수의 문구(한국어 원문)를 검사한다
 let t = null;
@@ -630,7 +630,7 @@ test('14. 끊김·이어서: 계획 중 끊기면 계획부터 다시, 계획 �
   assert.equal(h6.S(s5).mission.status, 'cut');
 });
 
-test('15. 그대로인 것: 목표 모드를 끈 세션과 단계표 방식 목표는 계획·카드 없이 돈다. 데모 팀도 계획·카드를 흉내 낸다(사용량 0)', async () => {
+test('15. 그대로인 것: 목표 모드를 끈 세션과 단계표 방식 목표는 계획·카드 없이 돈다. 가상 AI(테스트용) 팀도 계획·카드를 흉내 낸다(사용량 0)', async () => {
   await app();
   const { tm } = await team3('그대로');
   const s0 = (await t.api('POST', '/api/sessions', { teamId: tm.id })).json;
@@ -638,29 +638,17 @@ test('15. 그대로인 것: 목표 모드를 끈 세션과 단계표 방식 목�
   await t.api('POST', `/api/sessions/${s0.id}/messages`, { text: '그냥 해 줘' });
   await t.waitFor(() => idle(s0.id) && S(s0.id).runs.length === 1 && S(s0.id).runs[0].status === 'done', 30000, '보통 실행');
   assert.ok(prompts(from).every((p) => !p.includes('[일 계획]') && !p.includes('[일 카드') && !p.includes('oc-blocked')), '목표 모드가 아니면 계획·카드·막힘 출구가 없다');
-  // 데모: 데모 에이전트로 짠 팀(조사·빌드·검수)으로 일 카드 목표
-  const agents = t.app.store.all('agents');
-  const demo = (k) => agents.find((a) => a.provider === 'mock' && a.role && (k === 'review' ? /검수|리뷰|review/i.test(a.role) : k === 'research' ? /조사|research/i.test(a.role) : /빌드|build/i.test(a.role)));
-  const [dr, db, dv] = [demo('research'), demo('build'), demo('review')];
-  if (dr && db && dv) {
-    const dt = await mkTeam('데모카드팀', [{ label: '조사', agentIds: [dr.id] }, { label: '빌드', agentIds: [db.id] }, { label: '검수', agentIds: [dv.id] }]);
-    const sid = await goal(dt.id, '');
-    await done(sid);
-    const m = S(sid).mission;
-    assert.equal(m.status, 'done');
-    assert.ok(m.cards.length >= 2 && m.cards.every((c) => c.status === 'done'), JSON.stringify(m.cards));
-    assert.ok(!planCard(sid).fallback);
-  } else {
-    // 데모 에이전트가 시드되지 않은 데이터 폴더면 직접 만든다
-    const x = await mk('데모조사', '조사', { provider: 'mock', model: 'mock-fast' });
-    const y = await mk('데모빌드', '빌드', { provider: 'mock', model: 'mock-fast' });
-    const z = await mk('데모검수', '검수', { provider: 'mock', model: 'mock-fast' });
-    const dt = await mkTeam('데모카드팀', [{ label: '조사', agentIds: [x.id] }, { label: '빌드', agentIds: [y.id] }, { label: '검수', agentIds: [z.id] }]);
-    const sid = await goal(dt.id, '');
-    await done(sid);
-    assert.equal(S(sid).mission.status, 'done');
-    assert.ok(S(sid).mission.cards.length >= 2 && S(sid).mission.cards.every((c) => c.status === 'done'));
-  }
+  // 가상 AI(mock): 테스트용 가상 에이전트로 짠 팀(조사·빌드·검수)으로 일 카드 목표. 시드에는 이제 가상 에이전트가 없어서(결정 0021) addMockTeam 으로 만든다
+  // (addMockTeam 에는 검수 역할이 없어서 가상 검수 에이전트 하나만 따로)
+  const v = await addMockTeam(t.api);
+  const z = await mk('가상검수', '검수', { provider: 'mock', model: 'mock-fast' });
+  const dt = await mkTeam('가상카드팀', [{ label: '조사', agentIds: [v.researcher] }, { label: '빌드', agentIds: [v.builder] }, { label: '검수', agentIds: [z.id] }]);
+  const sid = await goal(dt.id, '');
+  await done(sid);
+  const m = S(sid).mission;
+  assert.equal(m.status, 'done');
+  assert.ok(m.cards.length >= 2 && m.cards.every((c) => c.status === 'done'), JSON.stringify(m.cards));
+  assert.ok(!planCard(sid).fallback, '가상 AI 도 계획 블록을 써서 대체 계획이 아니다');
 });
 
 test('16. 검토 반영(순수 함수): git -z 경로 읽기·테스트 파일 판별, 꼬리는 답 끝에서만, 명단에 없던 담당 이름은 표식 안, 막힘을 받아들인 담당은 검수에 비었다는 줄', async () => {

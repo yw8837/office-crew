@@ -122,12 +122,14 @@ function Sidebar() {
 }
 
 function Home() {
+  // 시작 단추는 팀을 정하지 않는다: 서버가 설정의 새 세션 기본 팀으로 만든다. 그 팀이 없으면(팀 없이로 두었거나 지운 팀) 기본 에이전트 한 명이라 "새 세션"
+  const tm = state.teams.find((x) => x.id === state.settings.defaultTeamId);
   return html`<div class="page"><div class="page-inner"><div class="empty">
     <div style="font-size:52px">🏢</div>
     <h2>${t('오피스 크루에 온 걸 환영해')}</h2>
     <p>${t('Claude·ChatGPT(Codex)·Gemini·Hermes·로컬 모델을 한 사무실에 모아 팀으로 일 시켜봐.')}</p>
     <div class="row" style="justify-content:center;margin-top:16px;flex-wrap:wrap">
-      <button class="btn primary" onClick=${() => newSession({ teamId: 'team-default' })}>👥 ${t('기본 팀으로 시작')}</button>
+      <button class="btn primary" title=${tm ? tm.name : undefined} onClick=${() => newSession()}>${tm ? html`👥 ${t('기본 팀으로 시작')}` : html`<${Icon} name="plus" /> ${t('새 세션')}`}</button>
       <button class="btn" onClick=${openImport}>⬇️ ${t('하던 세션 불러오기')}</button>
       <button class="btn" onClick=${() => go('settings')}>🔑 ${t('AI 계정 확인')}</button>
     </div>

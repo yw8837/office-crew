@@ -20,7 +20,7 @@
 ```
 bin/office-crew.js            실행기(서버 + 앱 창)
 server/index.js             HTTP 라우팅, 정적 파일, 보안
-server/store.js             JSON 저장소(원자적 쓰기, 디바운스). 켤 때 옛 데이터 이전 처리(없앤 데모 팀·데모 에이전트 정리, 결정 0021)
+server/store.js             JSON 저장소(원자적 쓰기, 디바운스). 켤 때 옛 데이터 이전 처리(없앤 데모 팀·데모 에이전트 정리는 한 번만, 결정 0021)
 server/bus.js               SSE 이벤트 허브
 server/orchestrator.js      실행(run) 엔진: 단계 진행, 병렬, 승인 게이트, 개입
 server/ask.js               에이전트가 사용자에게 묻기: 답 끝의 oc-ask 블록 읽기, 답을 돌려주는 글(결정 0009)

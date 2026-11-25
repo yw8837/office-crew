@@ -1,5 +1,5 @@
 // 데모 팀·데모 에이전트를 없애고 가상 AI(mock)를 화면 목록에서 숨긴 것(결정 0021):
-// 새 설치 시드에 데모가 없다 / 옛 데이터의 이전 처리(규칙마다, 두 번 돌아도 같다) / 화면에 주는 목록에 mock 이 없다(저장·실행은 된다).
+// 새 설치 시드에 데모가 없다 / 옛 데이터의 이전 처리(규칙마다, 두 번 돌아도 같고, 한 번 돈 뒤에는 다시 돌지 않는다) / 화면에 주는 목록에 mock 이 없다(저장·실행은 된다).
 // 가짜 CLI 와 가상 AI 만 쓴다(실제 AI 사용량 0)
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -17,6 +17,22 @@ before(async () => { t = await startTestApp(); });
 after(async () => { try { await t.close(); } catch { /* 윈도우 파일 잠금 무시 */ } });
 
 const readJson = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));
+
+// 옛 데이터 폴더로 앱을 켠다(이전 처리는 켤 때 돈다)
+async function startHome(home) {
+  const app = createApp({ home, port: 0, detect: false });
+  app.store.settings.lang = 'ko';
+  app.store.settings.mockSpeed = 0.05;
+  const port = await app.listen(await freePort());
+  const api = async (method, p, body) => {
+    const r = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: { 'Content-Type': 'application/json', 'X-Office-Token': app.token }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const text = await r.text();
+    let json = null;
+    try { json = JSON.parse(text); } catch { /* 비JSON */ }
+    return { status: r.status, json };
+  };
+  return { app, api };
+}
 
 // 예전 첫 실행 데이터에 있던 데모 에이전트·데모 팀(옛 시드와 같은 모양)
 const oldDemoAgent = (id, role, extra = {}) => ({
@@ -119,9 +135,9 @@ test('3. 이전 처리(저장소만): 기본 팀·기본 에이전트가 지운 
       want: ['team-mine', 'analyst'],
     },
     {
-      what: '진짜 AI 로 바꿔 쓰는 데모 에이전트를 가리키면 그대로',
+      what: '진짜 AI 로 바꿔 쓰는 데모 에이전트를 가리키면 그대로(그 에이전트가 들지 않은 데모 팀은 지운다. 든 경우는 5번)',
       agents: [oldDemoAgent('demo-analyst', '분석', { provider: 'claude', model: 'sonnet' })],
-      teams: [seedData().teams[0], oldDemoTeam()],
+      teams: [seedData().teams[0], oldDemoTeam({ stages: [oldDemoTeam().stages[0]] })],
       settings: { defaultTeamId: DEMO_TEAM_ID, defaultAgentId: 'demo-analyst' },
       want: ['team-default', 'demo-analyst'],
     },
@@ -139,7 +155,7 @@ test('3. 이전 처리(저장소만): 기본 팀·기본 에이전트가 지운 
   }
 });
 
-test('4. 이전 처리(앱): 데모 팀은 지우고, 가상 AI 그대로인 데모 에이전트만 지워 다른 팀 단계에서도 빼고, 역할 노트는 에이전트 삭제처럼, 옛 세션은 기록으로 남기고, 두 번 돌아도 같다', async () => {
+test('4. 이전 처리(앱): 담당이 전부 지워지는 데모 에이전트인 데모 팀은 지우고, 가상 AI 그대로인 데모 에이전트만 지워 다른 팀 단계에서도 빼고, 역할 노트는 에이전트 삭제처럼, 옛 세션은 기록으로 남기고, 두 번 돌아도 같다', async () => {
   const home = path.join(t.root, 'old-home');
   const T = Date.now() - 86400_000;
   const real = seedData().agents.map((a) => ({ ...a, routing: a.routing || 'manual' }));
@@ -152,7 +168,8 @@ test('4. 이전 처리(앱): 데모 팀은 지우고, 가상 AI 그대로인 데
   ];
   const teams = [
     ...seedData().teams,
-    oldDemoTeam({ name: '내가 고친 데모 팀', stages: [...oldDemoTeam().stages, { id: 'st-d4', label: '검수', agentIds: ['reviewer-x'] }] }), // 손댄 흔적이 있어도 지운다
+    // 이름·단계를 고쳤어도 담당이 전부 이번에 지우는 데모 에이전트면 지운다(남기는 경우는 5번)
+    oldDemoTeam({ name: '내가 고친 데모 팀', stages: [oldDemoTeam().stages[0], { ...oldDemoTeam().stages[2], approve: true }] }),
     {
       id: 'team-mixed', name: '섞인 팀', description: '',
       stages: [
@@ -180,21 +197,7 @@ test('4. 이전 처리(앱): 데모 팀은 지우고, 가상 AI 그대로인 데
   ns.addItem('demo-researcher', { kind: 'method', text: '출처를 꼭 붙여', source: { type: 'user' } });
   ns.addItem('demo-analyst', { kind: 'method', text: '위험부터 본다', source: { type: 'user' } });
   const notesDir = path.join(home, 'notes');
-
-  const start = async () => {
-    const app = createApp({ home, port: 0, detect: false });
-    app.store.settings.lang = 'ko';
-    app.store.settings.mockSpeed = 0.05;
-    const port = await app.listen(await freePort());
-    const api = async (method, p, body) => {
-      const r = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: { 'Content-Type': 'application/json', 'X-Office-Token': app.token }, body: body === undefined ? undefined : JSON.stringify(body) });
-      const text = await r.text();
-      let json = null;
-      try { json = JSON.parse(text); } catch { /* 비JSON */ }
-      return { status: r.status, json };
-    };
-    return { app, api };
-  };
+  const start = () => startHome(home);
 
   let { app, api } = await start();
   let snapshot;
@@ -206,7 +209,7 @@ test('4. 이전 처리(앱): 데모 팀은 지우고, 가상 AI 그대로인 데
     assert.equal(app.store.get('agents', 'demo-analyst').name, '내 분석가', '진짜 AI 로 바꾼 데모 에이전트는 그대로 남긴다');
     for (const a of real) assert.ok(ids.includes(a.id), `기본 에이전트 ${a.id} 는 그대로`);
     // 팀: 데모 팀은 지우고, 다른 팀 단계에서 지운 에이전트를 뺀다(에이전트 삭제와 같은 규칙: 빈 단계는 빠지고 팀은 남는다)
-    assert.equal(app.store.get('teams', DEMO_TEAM_ID), null, '손댄 데모 팀도 지운다');
+    assert.equal(app.store.get('teams', DEMO_TEAM_ID), null, '담당이 전부 이번에 지우는 데모 에이전트인 데모 팀은 이름을 고쳤어도 지운다');
     const mixed = app.store.get('teams', 'team-mixed');
     assert.deepEqual(mixed.stages.map((s) => [s.id, s.agentIds]), [['m2', ['researcher']], ['m3', ['demo-analyst']]]);
     assert.equal(mixed.stages[0].approve, true, '남은 단계의 다른 값은 그대로');
@@ -270,4 +273,100 @@ test('4. 이전 처리(앱): 데모 팀은 지우고, 가상 AI 그대로인 데
     assert.ok(app.store.get('agents', 'demo-analyst') && app.store.get('agents', 'demo-organizer'), '남긴 데모 에이전트는 두 번째에도 남는다');
     assert.equal((await api('GET', `/api/sessions/${oldSession.id}`)).status, 200);
   } finally { await app.close(); }
+});
+
+test('5. 이전 처리(저장소만): 데모 팀은 담당이 전부 데모 에이전트이고 그들이 지워지거나(이미 없거나) 할 때만 지운다. 사람이 손대 남긴 팀은 지운 에이전트만 빠지고 이름은 그대로', () => {
+  const real = seedData().agents.map((a) => ({ ...a, routing: a.routing || 'manual' }));
+  const mocks = (except = []) => DEMO_AGENT_IDS.filter((id) => !except.includes(id)).map((id) => oldDemoAgent(id, '조사'));
+  const cases = [
+    { what: '그대로인 데모 팀과 데모 에이전트 넷 → 지운다', agents: mocks(), team: oldDemoTeam(), gone: true },
+    { what: '데모 에이전트 일부를 사용자가 이미 지웠어도 남은 담당이 전부 지워지면 지운다', agents: mocks(['demo-organizer', 'demo-builder']), team: oldDemoTeam(), gone: true },
+    {
+      what: '진짜 에이전트를 넣은 데모 팀은 남긴다(데모 에이전트만 빠진다)',
+      agents: mocks(),
+      team: oldDemoTeam({ stages: [...oldDemoTeam().stages, { id: 'st-d4', label: '검수', agentIds: ['builder', 'demo-builder'], instruction: '', approve: false }] }),
+      gone: false, stages: [['st-d4', ['builder']]],
+    },
+    {
+      what: '진짜 AI 로 바꾼 데모 에이전트가 든 데모 팀은 남긴다',
+      agents: [...mocks(['demo-analyst']), oldDemoAgent('demo-analyst', '분석', { provider: 'claude', model: 'sonnet' })],
+      team: oldDemoTeam(), gone: false, stages: [['st-d2', ['demo-analyst']]],
+    },
+    {
+      what: '자동 라우팅으로 돌린 데모 에이전트가 든 데모 팀은 남긴다',
+      agents: [...mocks(['demo-researcher']), oldDemoAgent('demo-researcher', '조사', { routing: 'auto' })],
+      team: oldDemoTeam(), gone: false, stages: [['st-d1', ['demo-researcher']]],
+    },
+  ];
+  for (const c of cases) {
+    const home = fs.mkdtempSync(path.join(t.root, 'oc-demo-keep-'));
+    const dirs = writeOldHome(home, { agents: [...real, ...c.agents], teams: [seedData().teams[0], c.team], settings: { defaultTeamId: DEMO_TEAM_ID, defaultAgentId: 'demo-organizer' } });
+    const st = new Store(dirs).init();
+    try {
+      const tm = st.get('teams', DEMO_TEAM_ID);
+      assert.equal(!tm, c.gone, c.what);
+      // 가상 AI 그대로인 데모 에이전트는 어느 경우든 지운다
+      for (const a of c.agents) assert.equal(!!st.get('agents', a.id), a.provider !== 'mock' || a.routing === 'auto', `${c.what}: ${a.id}`);
+      if (c.gone) {
+        assert.deepEqual([st.settings.defaultTeamId, st.settings.defaultAgentId], ['team-default', 'researcher'], `${c.what}: 기본 팀·에이전트는 기본 팀으로`);
+      } else {
+        assert.deepEqual(tm.stages.map((s) => [s.id, s.agentIds]), c.stages, `${c.what}: 지운 에이전트만 빠지고 빈 단계는 빠진다`);
+        assert.equal(tm.name, '데모 팀 (사용량 0)', `${c.what}: 이름은 사용자 데이터라 그대로`);
+        assert.equal(st.settings.defaultTeamId, DEMO_TEAM_ID, `${c.what}: 남긴 팀을 가리키던 기본 팀 설정은 그대로`);
+        assert.equal(st.settings.defaultAgentId, st.get('agents', 'demo-organizer') ? 'demo-organizer' : c.stages[0][1][0], `${c.what}: 지운 기본 에이전트는 남긴 팀의 첫 에이전트로`);
+        assert.ok(readJson(path.join(home, 'teams.json')).some((x) => x.id === DEMO_TEAM_ID), `${c.what}: 파일에도 남는다`);
+      }
+    } finally { st.close(); }
+  }
+});
+
+test('6. 이전 처리는 한 번만: 돈 뒤에는 API 로 같은 id 를 다시 만들거나 백업에서 되살린 데모 팀·에이전트·역할 노트를 다음에 켤 때 지우지 않는다', async () => {
+  const home = path.join(t.root, 'old-home-once');
+  const real = seedData().agents.map((a) => ({ ...a, routing: a.routing || 'manual' }));
+  writeOldHome(home, { agents: [...real, ...DEMO_AGENT_IDS.map((id) => oldDemoAgent(id, '조사'))], teams: [...seedData().teams, oldDemoTeam()], settings: { defaultTeamId: DEMO_TEAM_ID, defaultAgentId: 'demo-researcher' } });
+  let { app, api } = await startHome(home);
+  try {
+    assert.equal(app.store.get('teams', DEMO_TEAM_ID), null, '처음 켤 때는 지운다');
+    assert.equal(readJson(path.join(home, 'settings.json')).demoDropped, true, '한 번 했다는 표시가 설정 파일에 남는다');
+    // 화면의 설정 저장으로는 그 표시를 바꾸지 못한다
+    assert.equal((await api('PUT', '/api/settings', { demoDropped: false })).status, 200);
+    assert.equal(app.store.settings.demoDropped, true);
+    // API 로 같은 id 를 다시 만든다(가상 AI 에이전트와 그 에이전트만 든 데모 팀)
+    assert.equal((await api('POST', '/api/agents', { id: 'demo-researcher', name: '다시 만든 조사봇', role: '조사', provider: 'mock', model: 'mock-fast', skills: [] })).json.id, 'demo-researcher');
+    assert.equal((await api('POST', '/api/teams', { id: DEMO_TEAM_ID, name: '다시 만든 데모 팀', stages: [{ label: '조사', agentIds: ['demo-researcher'] }] })).json.id, DEMO_TEAM_ID);
+  } finally { await app.close(); }
+  // 백업에서 되살린 것처럼: 지운 데모 에이전트(가상 AI 그대로)와 그 역할 노트를 파일에 다시 넣는다
+  const agentsFile = path.join(home, 'agents.json');
+  fs.writeFileSync(agentsFile, JSON.stringify([...readJson(agentsFile), oldDemoAgent('demo-builder', '빌드')], null, 2));
+  new NoteStore(path.join(home, 'notes')).addItem('demo-builder', { kind: 'method', text: '백업에서 되살린 노트', source: { type: 'user' } });
+  ({ app, api } = await startHome(home));
+  try {
+    assert.equal(app.store.get('teams', DEMO_TEAM_ID)?.name, '다시 만든 데모 팀', 'API 로 다시 만든 데모 팀은 남는다');
+    assert.equal(app.store.get('agents', 'demo-researcher')?.name, '다시 만든 조사봇', 'API 로 다시 만든 가상 에이전트는 남는다');
+    assert.ok(app.store.get('agents', 'demo-builder'), '백업에서 되살린 데모 에이전트는 남는다');
+    assert.ok(fs.existsSync(path.join(home, 'notes', 'demo-builder.json')), '되살린 역할 노트는 이름을 바꾸지 않는다');
+    assert.equal((await api('GET', '/api/agents/demo-builder/notes')).json.items.length, 1);
+  } finally { await app.close(); }
+});
+
+test('7. 시작 화면의 시작 단추는 팀을 정하지 않고 서버 기본값(설정의 새 세션 기본 팀)을 따른다. 없는 팀 id 로는 세션을 만들지 않는다', async () => {
+  const main = fs.readFileSync(new URL('../public/js/main.js', import.meta.url), 'utf8');
+  assert.ok(!/newSession\(\{\s*teamId:/.test(main), '시작 화면이 팀 id 를 박아 넣지 않는다');
+  // 설정의 기본 팀을 바꾸면 팀을 고르지 않은 새 세션이 그 팀으로
+  const mine = (await t.api('POST', '/api/teams', { name: '기본으로 쓸 팀', stages: [{ label: '1', agentIds: ['analyst'] }] })).json;
+  const before = t.app.store.settings.defaultTeamId;
+  try {
+    assert.equal((await t.api('PUT', '/api/settings', { defaultTeamId: mine.id })).status, 200);
+    const s1 = (await t.api('POST', '/api/sessions', {})).json;
+    assert.equal(s1.teamId, mine.id);
+    await t.api('DELETE', `/api/sessions/${s1.id}`);
+    // 없는 팀 id 를 직접 주면 거절(세션 수정·예약·보드와 같은 말)
+    const bad = await t.api('POST', '/api/sessions', { teamId: 'team-nope' });
+    assert.deepEqual([bad.status, bad.json.error], [400, '없는 팀이야.']);
+    // 설정의 기본 팀이 지워졌으면 팀 없이(기본 에이전트 한 명) 만든다
+    assert.equal((await t.api('DELETE', `/api/teams/${mine.id}`)).status, 200);
+    const s2 = (await t.api('POST', '/api/sessions', {})).json;
+    assert.deepEqual([s2.teamId, s2.agentId], [null, null]);
+    await t.api('DELETE', `/api/sessions/${s2.id}`);
+  } finally { await t.api('PUT', '/api/settings', { defaultTeamId: before }); }
 });

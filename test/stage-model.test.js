@@ -431,12 +431,12 @@ const cardsM = (k1, at = { stageIndex: 1 }) => M({ at, cards: [{ id: 'k1', owner
 
 test('28. 일 카드 끝 두 칸 다시 요청 앞의 호출 상한은 이미 돈 단계라 역 안, 되돌림으로 다시 하기 전이면 단계 앞', () => {
   const cap = { reason: 'cap', used: 40, cap: 40 };
-  // 첫 바퀴: 서버는 단계를 done 으로 끝낸 뒤(#cardsAfter) 끝 두 칸이 없는 카드(아직 running)를 다시 부르기 전에 묻는다
-  const tail = stageModel({ agents: AG, run: cardRun('done', cap), mission: cardsM('running') });
+  // 첫 바퀴: 서버는 단계를 done 으로 끝낸 뒤(#cardsAfter) 끝 두 칸이 없는 카드(아직 running)를 다시 부르기 전에 묻고, 이미 돈 단계라고 알린다(ran)
+  const tail = stageModel({ agents: AG, run: cardRun('done', { ...cap, ran: true }), mission: cardsM('running') });
   assert.deepEqual([tail.ask.kind, tail.ask.station, gates(tail), st(tail, 1).state, st(tail, 1).ask], ['cap', 1, [], 'wait', true]);
   assert.equal(tail.progress, '2/3 일 1/1 ×2 · 기다림');
   // 되돌림 바퀴의 끝 두 칸 다시 요청도 역 안
-  const backTail = stageModel({ agents: AG, run: cardRun('done', cap), mission: cardsM('running', { stageIndex: 1, back: true }) });
+  const backTail = stageModel({ agents: AG, run: cardRun('done', { ...cap, ran: true }), mission: cardsM('running', { stageIndex: 1, back: true }) });
   assert.deepEqual([backTail.ask.station, gates(backTail)], [1, []]);
   // 되돌림으로 다시 하기 전: 지난 바퀴의 done 이 남아 있어도 아직 시작 전이라 단계 앞 문
   const redo = stageModel({ agents: AG, run: cardRun('done', cap), mission: cardsM('done', { stageIndex: 1, back: true }) });
@@ -469,9 +469,12 @@ test('31. 목표 잡기가 오류·중지로 끝나 카드 없이 닫힌 목표�
   const noCard = (status) => model({ run: goalTurn(status), mission: M({ status: 'cancelled', goal: '', criteria: [], cardMsgId: null }) });
   const err = noCard('error');
   assert.deepEqual([err.end, err.now.text, err.now.cls, err.progress], [{ kind: 'error', text: '오류로 끝' }, '목표 카드가 나오기 전에 끝나서 이 목표는 닫았어.', 'error', '오류로 끝']);
+  // 서버는 진행자를 건너뛰어도(orchestrator #goalTurn: 건너뛴 답은 stopped), 초안을 쓰는 중에 앱이 꺼져도(#fixStale) 목표 잡기 실행을 stopped 로 끝낸다
   const stopped = noCard('stopped');
   assert.deepEqual([stopped.end, stopped.now.text, stopped.now.cls], [{ kind: 'stopped', text: '중지됨' }, '목표 카드가 나오기 전에 끝나서 이 목표는 닫았어.', 'off']);
-  assert.deepEqual(noCard('done').end, { kind: 'stopped', text: '닫힘' }, '진행자를 건너뛰었거나 초안을 못 읽었으면 닫힘');
+  // 초안 블록을 못 읽으면 서버는 요청 글로 카드를 만든다. 카드가 나온 뒤(목표 잡기 실행 done) 사용자가 닫은 목표는 "닫힘"과 "목표 카드를 닫았어."
+  const dropped = model({ run: goalTurn('done'), mission: M({ status: 'cancelled', cardMsgId: 'card1' }) });
+  assert.deepEqual([dropped.end, dropped.now.text], [{ kind: 'stopped', text: '닫힘' }, '목표 카드를 닫았어.']);
 });
 
 test('32. 되돌림을 끝내고 판정 앞에서 일시정지하면(서버가 바뀐 자리를 아직 안 알림) 되돌린 역에 "되돌림 n/상한"이 남지 않는다', () => {
@@ -481,6 +484,41 @@ test('32. 되돌림을 끝내고 판정 앞에서 일시정지하면(서버가 �
   // 되돌림 단계를 시작하기 전 일시정지(지금 단계가 되돌릴 단계)는 되돌림 표시 그대로
   const before = model({ run: runOf(['done', 'done', 'done', 'pending'], { missionId: 'G', stageIndex: 2, status: 'paused', hold: { reason: 'pause', stageIndex: 2, at: 1 } }, rv), mission: M({ at: { stageIndex: 2, back: true }, returns: 1, returnCap: 1 }) });
   assert.deepEqual(st(before, 2).ret, { n: 1, of: 1 });
+});
+
+test('34. 이미 돈 단계에서 묻는 상한(서버가 hold.ran 으로 알린다)은 카드 되풀이 상한·호출 상한 모두 그 역 안, 시작하기 전이면 단계 앞', () => {
+  const rv = { 3: { mission: 'review' } };
+  const at = (statuses, hold, mission = M()) => model({ run: runOf(statuses, { missionId: 'G', stageIndex: hold.stageIndex, status: 'waiting', hold: { at: 1, ...hold } }, rv), mission });
+  const inside = (m, kind) => assert.deepEqual([m.ask.kind, m.ask.station, gates(m), st(m, 2).state, st(m, 2).ask], [kind, 2, [], 'wait', true]);
+  const before = (m, kind, state) => assert.deepEqual([m.ask.kind, m.ask.station, gates(m), st(m, 2).state, st(m, 2).ask], [kind, undefined, [[1, kind]], state, false]);
+  const limit = { reason: 'mission', kind: 'limit', stageIndex: 2, cards: [{ id: 'k1' }] };
+  const cap = { reason: 'cap', stageIndex: 2, used: 40, cap: 40 };
+  // 막힘 "한 번 더" 뒤 두 번째 바퀴: 단계는 이번 바퀴에서 done 으로 끝났다
+  inside(at(['done', 'done', 'done', 'pending'], { ...limit, ran: true }), 'limit');
+  inside(at(['done', 'done', 'done', 'pending'], { ...cap, ran: true }), 'cap');
+  // 되돌림 바퀴: 시작하기 전(지난 바퀴의 done 이 남아 있다)은 단계 앞, 그 바퀴에서 막힘 "한 번 더" 앞은 역 안
+  const backM = M({ at: { stageIndex: 2, back: true }, returns: 1, returnCap: 1 });
+  before(at(['done', 'done', 'done', 'pending'], cap, backM), 'cap', 'done');
+  before(at(['done', 'done', 'done', 'pending'], limit, backM), 'limit', 'done');
+  inside(at(['done', 'done', 'done', 'pending'], { ...cap, ran: true }, backM), 'cap');
+  inside(at(['done', 'done', 'done', 'pending'], { ...limit, ran: true }, backM), 'limit');
+  // 끊겼다 이어서 한 뒤 한도 다시 하기 앞의 상한: 이어서 한 실행은 그 단계를 pending 으로 다시 만들지만 이미 돈 단계다
+  inside(at(['done', 'done', 'pending', 'pending'], { ...cap, ran: true }), 'cap');
+  // 처음 시작하기 전(pending, 표시 없음)은 그대로 단계 앞, 오류 다시 하기 앞(error)은 표시가 없어도 역 안
+  before(at(['done', 'done', 'pending', 'pending'], cap), 'cap', 'todo');
+  before(at(['done', 'done', 'pending', 'pending'], limit), 'limit', 'todo');
+  inside(at(['done', 'done', 'error', 'pending'], limit), 'limit');
+  inside(at(['done', 'done', 'error', 'pending'], cap), 'cap');
+});
+
+test('35. 끊긴 목표가 되돌림 중이었어도 그 뒤의 다른 실행 역에는 "되돌림 n/상한"·되돌림 줄이 붙지 않는다', () => {
+  const cutM = M({ status: 'cut', at: { stageIndex: 2, back: true }, returns: 1, returnCap: 1 });
+  const other = model({ run: runOf(['done', 'done', 'running', 'pending'], { id: 'mention', stageIndex: 2 }), mission: cutM, live: { m: { state: 'thinking', at: 2 } } });
+  assert.deepEqual([st(other, 2).ret, st(other, 2).note], [null, null]);
+  assert.notEqual(other.now.icon, 'ret');
+  // 그 목표의 실행이면 되돌림 표시
+  const own = model({ run: runOf(['done', 'done', 'running', 'pending'], { missionId: 'G', stageIndex: 2 }), mission: M({ at: { stageIndex: 2, back: true }, returns: 1, returnCap: 1 }) });
+  assert.deepEqual(st(own, 2).ret, { n: 1, of: 1 });
 });
 
 // ── 서버가 실제로 만드는 실행 모양(가짜 CLI) ──
@@ -549,7 +587,7 @@ async function goalTeam() {
   return gt;
 }
 // 요청 → 목표 카드(확인 전 모델을 같이 돌려준다) → 목표 문장에 신호어를 넣어 확인
-async function goal(signal) {
+async function goal(signal, work = 'stages') {
   const { tm } = await goalTeam();
   const sid = (await t.api('POST', '/api/sessions', { teamId: tm.id })).json.id;
   assert.equal((await t.api('PATCH', `/api/sessions/${sid}`, { goalMode: true })).status, 200);
@@ -560,7 +598,7 @@ async function goal(signal) {
   const c = S.messages.findLast((m) => m.role === 'proposal' && m.kind === 'goal');
   const shown = { goal: c.goal, criteria: c.criteria, outOfScope: c.outOfScope, userDecides: c.userDecides };
   const review = { reviewerId: c.review.reviewerId, droppable: c.review.droppable, drop: c.review.droppable.map((d) => d.index) };
-  const r = await t.api('POST', `/api/sessions/${sid}/mission/confirm`, { missionId: S.mission.id, expected: shown, review, work: 'stages', edited: { ...shown, goal: `${signal} 목표` } });
+  const r = await t.api('POST', `/api/sessions/${sid}/mission/confirm`, { missionId: S.mission.id, expected: shown, review, work, edited: { ...shown, goal: `${signal} 목표` } });
   assert.equal(r.status, 200, JSON.stringify(r.json));
   return { sid, draft, cardId: c.id };
 }
@@ -604,4 +642,23 @@ test('15. (서버 모양) 한도 대기: 자동 이어서를 고르기 전에는
   }
   const stopped = (await modelOf(sid)).m;
   assert.deepEqual([stopped.ask, stopped.limit, stopped.goal.kind], [null, null, 'stopped']);
+});
+
+test('36. (서버 모양) 막힘 "한 번 더"를 거듭해 이미 돈 카드 단계에서 되풀이 상한을 물으면 문은 그 역 안(서버가 hold.ran 으로 알린다)', async () => {
+  const { sid } = await goal('CARDBLOCK', 'cards'); // k1 이 늘 막힘으로 끝난다
+  try {
+    for (let n = 0; n < 3; n++) {
+      await runAt(sid, (r) => r.hold?.reason === 'mission' && r.hold.kind === 'blocked');
+      assert.equal((await ctl(sid, 'more')).json.ok, true);
+      await runAt(sid, (r) => r.hold?.kind !== 'blocked' || r.status !== 'waiting');
+    }
+    const run = await runAt(sid, (r) => r.hold?.reason === 'mission' && r.hold.kind === 'limit');
+    const i = run.hold.stageIndex;
+    assert.deepEqual([run.hold.ran, run.stages[i].status], [true, 'done'], '이번 바퀴에서 이미 돌아 done 인 단계');
+    const m = (await modelOf(sid)).m;
+    assert.deepEqual([m.ask.kind, m.ask.station, gates(m), st(m, i).state, st(m, i).ask], ['limit', i, [], 'wait', true]);
+  } finally {
+    await ctl(sid, 'stop');
+    await t.waitFor(() => idle(sid), 30000, '그만');
+  }
 });

@@ -139,17 +139,17 @@ export function stageModel(input = {}) {
   const errand = curStage?.meetingNow ? researcherOf(curStage.meetingNow) : null; // 회의 중 조사하러 간 사람(결정 0011)
   // 되돌림 중(결정 0015). 지금 단계가 되돌릴 단계일 때만: 서버는 되돌림 단계를 끝낸 뒤 바뀐 자리(at)를 저장만 하고 알리지 않아서,
   // 판정 앞 일시정지 동안 화면의 목표에는 옛 at.back 이 남아 있다
-  const back = !!(mis && active && mis.at?.back && mis.at.stageIndex === cur);
+  // 그 목표의 실행일 때만(끊긴 목표가 되돌림 중이었어도 그 뒤의 다른 실행에는 붙이지 않는다)
+  const back = !!(mis && active && run.missionId === mis.id && mis.at?.back && mis.at.stageIndex === cur);
   // 지금 실행에서 일하는 사람: 지금 단계·대기가 가리키는 단계의 담당과 조사하러 간 사람. 다른 사람의 지난 상태는 "지금" 줄·한도 표시에 섞지 않는다
   const inRun = new Set([...(curStage?.agentIds || []), ...(holdStage?.agentIds || []), ...(errand ? [errand] : [])].map(String));
-  // 호출 상한: 보통은 단계를 시작하기 전에 묻는다(문은 그 단계 앞). 이미 돈 단계에서 물으면 그 역 안에서 기다린다. 단계 상태로 가른다:
-  // 시작 전은 pending(되돌림으로 다시 하기 전이면 지난 바퀴의 done·skipped 가 남아 있고, 목표의 at.back 이 그 단계를 가리킨다),
-  // error 는 오류·한도 대기 뒤 다시 하기 앞, done 은 일 카드의 끝 두 칸 다시 요청 앞(그 단계의 카드가 아직 running)
-  const redo = !!(hold && mis?.at?.back && mis.at.stageIndex === hold.stageIndex);
-  const tailAsk = holdStage?.mission === 'cards' && (mis?.cards || []).some((c) => (holdStage.cardIds || []).includes(c.id) && c.status === 'running');
-  const capInside = hold?.reason === 'cap' && (holdStage?.status === 'error' || (holdStage?.status === 'done' && (!redo || tailAsk)));
-  // 카드 되풀이 상한: 오류 다시 하기 앞이면 오류 난 역 안, 그 밖(처음·되돌림으로 시작하기 전)은 단계 앞
-  const limitInside = hold?.reason === 'mission' && hold.kind === 'limit' && holdStage?.status === 'error';
+  // 호출 상한·카드 되풀이 상한(시간당 카드 시작 수 포함): 보통은 단계를 시작하기 전에 묻는다(문은 그 단계 앞). 이미 돈 단계에서 물으면 그 역 안에서 기다린다.
+  // 둘 다 같은 규칙: 서버가 이미 돈 단계라고 알리거나(hold.ran: 막힘 "한 번 더"의 다음 바퀴, 일 카드의 끝 두 칸 다시 요청, 한도 대기 뒤 다시 하기,
+  // 끊긴 한도 대기를 이어서 다시 하기 앞) 단계가 오류로 멈춘 채(error: 오류 다시 하기 앞)면 역 안. 단계 상태만으로는 못 가른다
+  // (되돌림 바퀴의 done 은 지난 바퀴 것일 수도 이번 바퀴 것일 수도 있고, 이어서 한 실행은 그 단계를 pending 으로 다시 만든다)
+  const ran = !!hold && (hold.ran === true || holdStage?.status === 'error');
+  const capInside = hold?.reason === 'cap' && ran;
+  const limitInside = hold?.reason === 'mission' && hold.kind === 'limit' && ran;
 
   const stations = src.map((st, i) => {
     const ids = (st.agentIds || []).map(String);
@@ -236,7 +236,7 @@ export function stageModel(input = {}) {
         : k === 'blocked' ? (hold.blocked || []).map((b) => b.name).filter(Boolean).join(', ')
           : k === 'limit' ? (hold.cards || []).map((c) => c.id).join(', ')
             : t('남은 기준 {n}개', { n: (hold.left || []).length });
-      // 판정·추가 지시는 판정 역 뒤, 막힘은 막힌 일 단계 뒤, 카드 되풀이 상한은 그 카드 단계를 시작하기 전(앞). 오류 다시 하기 앞의 되풀이 상한은 역 안
+      // 판정·추가 지시는 판정 역 뒤, 막힘은 막힌 일 단계 뒤, 카드 되풀이 상한은 그 카드 단계를 시작하기 전(앞). 이미 돈 단계에서 묻는 되풀이 상한은 역 안(limitInside)
       ask = { kind: k === 'limit' ? 'limit' : k === 'blocked' ? 'blocked' : k === 'notes' ? 'notes' : 'verdict', icon: k === 'limit' ? 'gauge' : 'target', cls: 'me', title, short, target: 'gate', ...(limitInside ? { station: i } : { gateAfter: k === 'limit' ? i - 1 : i }) };
     } else if (hold.reason === 'cap') {
       const short = hold.kind === 'rate' ? t('한 시간에 카드 {used}장 시작함', { used: hold.used }) : t('{used}/{cap} 다 씀', { used: hold.used, cap: hold.cap });

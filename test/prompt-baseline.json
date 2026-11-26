@@ -24,7 +24,7 @@
       "goalPrompt": 607,
       "goalHead": 113,
       "meetOpinion": 255,
-      "meetJudge": 702,
+      "meetJudge": 818,
       "meetTurn": 767,
       "meetConclude": 789
     },
@@ -50,7 +50,7 @@
       "resumeHead": 164,
       "goalHead": 259,
       "meetOpinion": 548,
-      "meetJudge": 1371,
+      "meetJudge": 1551,
       "meetTurn": 1543,
       "meetConclude": 1571,
       "goalPrompt": 1178

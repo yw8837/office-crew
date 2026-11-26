@@ -694,3 +694,26 @@ test('넘기기 보기·번호 키(결정 0027): 서버 항목을 보기마다 �
   assert.equal(gateKeys({ reason: 'cap' }), null);
   assert.deepEqual(raiseChoices({ reason: 'cap', raise: [{ card: 'k1', to: 'w' }] }), []);
 });
+
+test('37. 회의에서 사용자에게 묻기(결정 0028): 진행자의 판정 메시지에 달린 질문은 회의 역 안의 문이고 진행자만 기다린다. 끊겼다 다시 묻는 질문은 항목에 적힌 실행·단계로. 정체로 결론 낸 회의 역에는 정체 표시', () => {
+  const run = runOf(['done', 'running', 'pending', 'pending'], { stageIndex: 1 }, { 1: { meetingNow: { phase: 'judge', round: 2, rounds: 3, opposerId: 'm' } } });
+  const qs = openQuestions([{ id: 'j', role: 'agent', agentId: 'p', runId: 'run1', stageIndex: 1, meeting: { phase: 'judge' }, asks: [{ id: 'k', status: 'open', meeting: true, questions: [{ header: '회의 질문', question: '어느 안?' }] }] }]);
+  const m = model({ run, questions: qs, live: { p: { state: 'waiting' } } });
+  assert.deepEqual([m.ask.kind, m.ask.target, m.ask.station, st(m, 1).ask, gates(m)], ['question', 'ask', 1, true, []], '문은 회의 역 안(역과 역 사이가 아니다)');
+  assert.deepEqual([who(st(m, 1), 'p').st, who(st(m, 1), 'r').st, who(st(m, 1), 'm').st], ['wait', 'meet', 'meet'], '진행자만 내 답을 기다리고 나머지는 회의 중');
+  assert.equal(m.ask.short, '기획: 어느 안?');
+  assert.equal(st(m, 1).meeting.label, '판정 2/3');
+  // 끊긴 뒤 다시 묻는 질문: 앞 실행의 판정 메시지에 달리고, 항목의 runId·stageIndex 가 먼저다
+  const again = openQuestions([{ id: 'j0', role: 'agent', agentId: 'p', runId: 'old', stageIndex: 1, asks: [{ id: 'k2', status: 'open', meeting: true, runId: 'run1', stageIndex: 1, questions: [{ question: '다시?' }] }] }]);
+  assert.deepEqual(again.map((q) => [q.runId, q.stageIndex]), [['run1', 1]]);
+  assert.equal(model({ run, questions: again }).ask?.station, 1);
+  const stale = openQuestions([{ id: 'j1', role: 'agent', agentId: 'p', runId: 'old', stageIndex: 1, asks: [{ id: 'k3', status: 'open', questions: [{ question: '옛 질문' }] }] }]);
+  assert.equal(model({ run, questions: stale }).ask, null, '항목에 실행이 없으면 메시지의 실행으로 본다(다른 실행의 질문은 문을 그리지 않는다)');
+  // 정체: 결론 차례 동안과 끝난 뒤
+  const concl = model({ run: runOf(['done', 'running', 'pending', 'pending'], { stageIndex: 1 }, { 1: { stall: { round: 2 }, meetingNow: { phase: 'conclude', round: 2, rounds: 3, stall: true } } }) });
+  assert.deepEqual([st(concl, 1).stall, st(concl, 1).meeting.label], [true, '결론']);
+  const after = model({ run: runOf(['done', 'done', 'running', 'pending'], { stageIndex: 2 }, { 1: { stall: { round: 2 } } }) });
+  assert.deepEqual([st(after, 1).stall, st(after, 1).meeting, st(after, 1).state], [true, null, 'done']);
+  assert.equal(st(model({ run: runOf(['done', 'done', 'running', 'pending'], { stageIndex: 2 }) }), 1).stall, false);
+  assert.equal(st(model({}), 1).stall, false, '쉬는 세션(팀 단계표)에는 없다');
+});

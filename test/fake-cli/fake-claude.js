@@ -121,6 +121,8 @@ async function pump() {
     let results = ids.map((id) => ({ id, verdict: 'pass', evidence: `가짜 확인: ${id} 결과 파일을 열어 봤어` }));
     const set = (id, verdict, evidence) => { results = results.map((r) => (r.id === id ? { id, verdict, evidence } : r)); };
     if (has('REVIEWFAIL2') || (has('REVIEWFAIL') && round === 1)) set('c1', 'fail', `가짜 불합격 사유 ${round}회차`);
+    // REVIEWSAME: 늘 c1 불합격이고 근거도 회차마다 같다(공백·전각만 다르게. 진전 없음, 결정 0028)
+    if (has('REVIEWSAME')) set('c1', 'fail', round % 2 ? '가짜: 같은 이유로  걸림 (src/app.js:3)' : '가짜: 같은 이유로 걸림 （src/app.js:3）');
     if (has('REVIEWUNK')) set('c1', 'unknown', '가짜: 확인하지 못했어');
     if (has('REVIEWNOEVID')) set('c1', 'pass', '');
     if (has('REVIEWDUP')) results.push({ id: 'c1', verdict: 'FAIL', evidence: '가짜: 두 번째 판정' });
@@ -240,7 +242,15 @@ async function pump() {
   // CONCLUDEFMT: 목표 회의의 결론 차례("[회의 — 결론 내기]")가 결론 프롬프트의 다섯 머리말 형식으로 답한다(결정 0025, 근거는 여러 줄 목록, 버린 안은 "없음")
   const concludeChunks = text.includes('[회의 — 결론 내기]') && goalLine.includes('CONCLUDEFMT') ? ['## 회의 결론\n\n', '- **결정**: 가짜 결정: A안으로 간다\n', '- **근거**:\n  - 가짜 근거 1\n  - 가짜 근거 2\n',
     '- **남은 이견**: 가짜 이견: 범위\n', '- **버린 안**: 없음\n', '- **다음 할 일**: 가짜 다음: 빌드가 만든다'] : null;
+  // 회의 판정에서 사용자에게 묻기(결정 0028): JUDGEQ 는 아직 사용자 답(또는 답하지 않은 질문) 블록이 없을 때만 ask, JUDGEQMORE 는 늘 ask(질문 상한),
+  // JUDGEQBAD 는 보기 하나, JUDGEQ5 는 보기 다섯(둘 다 형식 깨짐)
+  const askedBefore = /^\[사용자가 (?:정한 것|답하지 않은 질문)/m.test(text);
+  const judgeAsk = !text.includes('[회의 — 판정') ? null
+    : req.includes('JUDGEQBAD') ? { verdict: 'ask', reason: '가짜', question: 'JUDGEQBAD 보기 하나', options: ['하나'] }
+      : req.includes('JUDGEQ5') ? { verdict: 'ask', reason: '가짜', question: 'JUDGEQ5 보기 다섯', options: ['1', '2', '3', '4', '5'] }
+        : req.includes('JUDGEQMORE') || (req.includes('JUDGEQ') && !askedBefore) ? { verdict: 'ask', reason: '가짜: 팀이 아니라 사용자가 정할 일', question: 'JUDGEQ 어느 안으로 갈까?', options: ['A안 (추천)', { label: 'B안', description: '느리지만 싸다' }] } : null;
   const chunks = teamChunks || goalChunks || reviewChunks || prepChunks || planChunks || cardChunks || workBlock || fakeWork || foreignWork || concludeChunks || (koItems ? ['```json\n', JSON.stringify(Object.fromEntries(koItems.map((x) => [String(x.i), `가짜 한글 설명 ${x.i}`]))), '\n```']
+    : judgeAsk ? ['물어볼게.\n\n', '```oc-verdict\n' + JSON.stringify(judgeAsk) + '\n```']
     // 회의 판정 차례: 판정 블록으로 답한다. AGREEFAST 는 합의, BADVERDICT 는 틀린 형식, 그 밖은 계속.
     // 목표 회의의 1바퀴 뒤 판정("1바퀴 의견만 보고")은 신호어 대신 프롬프트에 든 "입장: …" 줄(반대편 포함 모두)이 둘 이상이고 모두 같을 때만 합의
     : text.includes('[회의 — 판정') ? ['판정할게.\n\n', req.includes('BADVERDICT') ? '```oc-verdict\n{"verdict":"글쎄"}\n```' : '```oc-verdict\n{"verdict":"' + (text.includes('1바퀴 의견만 보고 차례 바퀴를 건너뛸지 판정해')
@@ -258,8 +268,14 @@ async function pump() {
     : text.includes('도구를 더 쓰지 말고') ? ['조사 결과 ', '정리했어'] : text.includes('EMPTYANSWER') ? [] : ['안녕', '하세요 ', `turn${turn}`]);
   // LONGANSWER(이번 요청): 보통 답을 길게(앞에 LONGHEAD, 가운데 2,500자, 끝에 LONGTAIL). 앞 단계 결과의 끝부분만 넘기는지 보려고(결정 0026)
   if (chunks.length && req.includes('LONGANSWER') && !goalTurn && !reviewTurn) chunks.splice(0, chunks.length, `LONGHEAD p${process.pid} `, '긴 답 줄이야. '.repeat(312), ` LONGTAIL p${process.pid}`);
-  // 목표 회의의 1바퀴 의견("입장" 줄을 맨 끝에 쓰라는 형식): 입장 한 줄을 붙인다. 요청에 STANCEB:<이 에이전트 이름> 이 있으면 B안, 아니면 A안
-  if (text.includes('[회의 — 의견 내기') && text.includes('- 입장: 지금 미는 안 한 줄(맨 끝 줄로)')) chunks.push(`\n입장: ${myName && req.includes(`STANCEB:${myName}`) ? 'B안' : 'A안'}`);
+  // 목표 회의의 1바퀴 의견("입장" 줄을 맨 끝에 쓰라는 형식): 입장 한 줄을 붙인다. 요청에 STANCEB:<이 에이전트 이름> 이 있으면 B안, 아니면 A안.
+  // 보통 회의의 의견도 같은 형식 줄을 받지만(결정 0028), 입장 신호어(POSSAME·POSMOVE)가 있을 때만 붙인다(앞 테스트들의 의견 글을 그대로 두려고)
+  const stance = myName && req.includes(`STANCEB:${myName}`) ? 'B안' : 'A안';
+  const posSignal = /POSSAME|POSMOVE/.test(req);
+  if (text.includes('[회의 — 의견 내기') && text.includes('- 입장: 지금 미는 안 한 줄(맨 끝 줄로)') && (text.includes('[확정된 목표와 합격 기준') || posSignal)) chunks.push(`\n입장: ${stance}`);
+  // 회의 차례 발언의 입장 줄(결정 0028): POSSAME 은 바퀴마다 같은 입장, POSMOVE 는 바퀴마다 바뀌는 입장, POSNONE:<이름> 은 그 사람만 입장 줄을 빼먹는다
+  const turnRound = Number(text.match(/\[회의 — 차례 발언 \((\d+)\//)?.[1] || 0);
+  if (turnRound && posSignal && !(myName && req.includes(`POSNONE:${myName}`))) chunks.push(`\n- 입장: ${req.includes('POSMOVE') ? `${stance} ${turnRound}바퀴` : stance}`);
   for (const ch of chunks) {
     out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: ch } } });
     await sleep(20);

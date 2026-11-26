@@ -321,6 +321,7 @@ function TeamEditor({ team, onClose }) {
               return html`<label>${t('반대편')}<select class="select" value=${others.includes(st.meeting.opposeId) ? st.meeting.opposeId : ''} onChange=${(e) => setStage(i, 'meeting', { ...st.meeting, opposeId: e.target.value || null })}><option value="">${t('자동')}</option>${others.map((id) => html`<option value=${id}>${state.agents.find((a) => a.id === id)?.name || id}</option>`)}</select></label>`;
             })()}
             <label>${t('사용량 상한 (환산 토큰, 0이면 없음)')}<input class="input" type="number" min="0" step="100000" value=${st.meeting.tokenCap ?? 1000000} onInput=${(e) => setStage(i, 'meeting', { ...st.meeting, tokenCap: Math.max(0, Number(e.target.value) || 0) })} /></label>
+            <div class="row" style="grid-column:1 / -1"><${Toggle} checked=${st.meeting.stall !== false} onChange=${(v) => setStage(i, 'meeting', { ...st.meeting, stall: v ? undefined : false })} /><span class="small">${t('입장이 앞 바퀴와 그대로면 판정 없이 결론으로 (정체 감지)')}</span></div>
             <div class="small muted">${t('첫 바퀴는 서로의 글을 보지 않고 각자 써. 그다음 바퀴부터는 한 명씩 차례로 앞사람 말에 답해. 바퀴가 끝날 때마다 진행자가 합의인지 보고, 합의면 남은 바퀴를 건너뛰고 결론을 내. 한 명은 반대편에 서서 약점을 찾아.')}</div>
             <div class="small muted">${t('상한은 새로 읽고 쓴 토큰에, 앞 대화를 다시 읽은 토큰의 10분의 1을 더해서 세. 대화가 긴 세션에서는 한 바퀴에 수십만 토큰이 들 수 있어.')}</div>
           </div>`}

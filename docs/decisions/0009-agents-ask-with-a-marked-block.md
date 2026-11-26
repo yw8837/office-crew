@@ -4,6 +4,10 @@
 - Date: 2026-11-15
 - Related: `server/ask.js`, `server/orchestrator.js` (`#ask`, the ask loop in `#runAgent`, `control` action `answer`), `server/store.js` (`attentionOf`), `public/js/views/session.js` (`AskPanel`), `public/js/chat-tools.js` (`hideAsks`), `test/agent-asks.test.js`
 
+## Revision 2026-11-26: a meeting's chair can ask through the same box
+
+([0028](0028-stalled-meetings-and-asking-the-user.md)) Meeting turns still don't get the "how to ask" lines and an `oc-ask` block in a meeting is still not read. The chair can ask instead with `verdict: "ask"` and one question with 2 to 4 choices inside its `oc-verdict` block; the code checks it with the cleaning of `parseAsk` and shows it in this box (numbered choices, typed answer, skip) on the chair's verdict message, at most 2 times per meeting, under the conditions above (the setting, no scheduled run, no handoff note, no session override). The answer is stored as a decision the user made, not sent back to the chair's conversation. A goal cut while such a question waits asks it again when continued.
+
 ## Context
 
 A run could wait for a person in three cases only: a pause, an error, and a stage that needs approval. An agent that could not decide something by itself had two choices: guess, or write a question as plain text and end. The user then had to notice the question in a long answer and type a reply as a new request. Every CLI the app runs has its own way to ask (a question tool, a permission prompt), and those differ between CLIs and between versions.

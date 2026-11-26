@@ -238,7 +238,8 @@ export function reviewCard(team, agents, plan) {
 // ── 대목마다 받는 블록(결정 0022) ──
 // 목표 모드의 대목(답의 종류)마다 코드가 그 답에서 읽는 블록. 대목마다 블록을 읽는 곳(parseGoal·parseResearch·parseVerdict·parseCheck·parsePlan·parseBlocked·parseReview·parseAsk)은
 // 그대로 두고, 이 표가 "그 대목이 받는 블록"의 단일 근거다: 판정 답의 섞인 블록 거르기(OTHER_BLOCK)와, 표에 없는 블록이 답에 있을 때의 진행 기록 한 줄이 여기서 나온다.
-// 사용자에게 묻는 블록(oc-ask)은 물을 수 있는 차례(목표 잡기, 일 단계·일 카드)만 받는다. 한 번 실행(훑어보기·조사 질문·조사·회의 차례·계획·검수)은 묻지 못한다
+// 사용자에게 묻는 블록(oc-ask)은 물을 수 있는 차례(목표 잡기, 일 단계·일 카드)만 받는다. 한 번 실행(훑어보기·조사 질문·조사·회의 차례·계획·검수)은 oc-ask 로 묻지 못한다.
+// 회의의 진행자는 판정 블록(oc-verdict) 안의 ask 값과 질문·보기로 사용자에게 묻는다(결정 0028). 회의 차례가 받는 블록 이름은 그대로다(새 블록이 아니라 판정 블록의 값)
 export const BLOCK_ACCEPTS = Object.freeze({
   goal: ['oc-goal', 'oc-ask'], // 목표 잡기: 목표 카드, 사용자에게 묻기
   scan: [], // 훑어보기
@@ -327,7 +328,8 @@ export const reviewBlock = (nonce) => `\`\`\`oc-review\n${JSON.stringify({ nonce
 // works: [{ label, name, text, stale? }](stale: 되돌린 단계 뒤에서 다시 돌지 않은 단계. 답은 넣지 않는다), readOnly: 검수자가 돌 권한이 plan, retry: 형식이 깨져 다시 요청하는 차례
 // 결정 0015 개정: 기준마다 확인 방법(criteria[].check), 바뀌면 안 되는 것(keep), git 이 알려 준 바뀐 파일(changed: { files, more } 또는 null, 무작위 표식 안),
 // 판정 규칙(기준에 걸리면 사소해도 fail, 기준 밖은 extras, 근거 없는 fail 은 확인 못 함)
-export function reviewPrompt({ goal = '', criteria = [], outOfScope = [], keep = [], cwd = '', round = 1, works = [], readOnly = false, nonce = '', retry = false, changed = null, mark = randomBytes(4).toString('hex') } = {}) {
+// decided(결정 0028): 회의에서 사용자가 정한 것(사용자의 답은 지시, 질문은 표식 안)
+export function reviewPrompt({ goal = '', criteria = [], outOfScope = [], keep = [], cwd = '', round = 1, works = [], readOnly = false, nonce = '', retry = false, changed = null, decided = [], mark = randomBytes(4).toString('hex') } = {}) {
   const w = (s) => String(s ?? '').replace(/</g, '＜').replace(/>/g, '＞');
   const plain = (v) => String(v || '?').replace(/[\r\n#]+/g, ' ').trim().slice(0, 60) || '?';
   const show = (text) => { const c = [...String(text)]; return c.length > REVIEW_SHOW ? `${c.slice(0, REVIEW_SHOW).join('')}\n${tr('…(나머지는 작업 폴더의 결과물에서 직접 확인해)')}` : String(text); };
@@ -350,6 +352,7 @@ ${tr('(이 담당은 사용량 한도에 걸려 사용자가 건너뛰어서, �
     outOfScope.length ? `${tr('범위 밖')}:\n${outOfScope.map((x) => `- ${w(x)}`).join('\n')}` : `${tr('범위 밖')}: ${tr('없음')}`,
     tr('작업 폴더: {path}', { path: cwd }),
     keep.length ? `${tr('바뀌면 안 되는 것')}:\n${keep.map((x) => `- ${w(x)}`).join('\n')}` : '',
+    decided.length ? decidedPrompt(decided, mark) : '',
     readOnly ? tr('권한: 읽기 전용이라 명령은 못 돌려. 파일을 읽어서 확인한 것만 pass야.') : tr('필요하면 명령·테스트를 돌려서 확인해도 돼. 파일은 고치지 마.'),
     tr('직접 돌리거나 읽어서 확인한 것만 pass야. 확인하지 못했으면 unknown, 기준에 맞지 않으면 fail. 근거에는 무엇을 어떻게 확인했는지(파일:줄, 명령과 출력) 적어. 사용자에게 질문하지 마.'),
     tr('기준에 걸리는 문제는 사소해 보여도 fail이야(넘어갈지는 사용자가 정해). fail 은 직접 돌리거나 읽어서 기준 위반을 보인 것만 쓰고, 근거가 없는 fail 은 확인 못 함으로 쳐. 기준 밖에서 본 문제는 fail 이 아니라 extras 에 한 줄씩 적어(5개까지. 남은 일로 보여 주기만 하고 막지 않아).'),
@@ -383,6 +386,16 @@ export function applyReview(m, results) {
   return tally(m);
 }
 
+// 진전 없음(결정 0028): 앞 회차(prev)에 불합격이 있었고, 이번(now) 불합격 기준의 집합과 기준마다의 근거(NFKC·공백·대소문자를 정리한 글)가 앞 회차와 같으면 true.
+// prev·now: [{ id, status, evidence }]. 같은 기준이 연속 불합격인지만 보는 repeatFail(가정 적기)보다 좁다: 근거까지 같아야 "더 나아지지 않음"으로 본다
+export function sameFails(prev = [], now = []) {
+  const norm = (s) => String(s ?? '').normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
+  const fails = (list) => new Map(list.filter((c) => c.status === 'fail').map((c) => [c.id, norm(c.evidence)]));
+  const a = fails(prev);
+  const b = fails(now);
+  return a.size > 0 && a.size === b.size && [...a].every(([id, ev]) => b.has(id) && b.get(id) === ev);
+}
+
 // 되돌릴 때 넘길 것: 통과하지 못한 기준(불합격·확인 못 함)
 export const returnItems = (m) => (m?.criteria || []).filter((c) => c.status === 'fail' || c.status === 'unknown').map((c) => ({ id: c.id, text: c.text, status: c.status, evidence: c.evidence || '' }));
 
@@ -399,6 +412,20 @@ export function returnPrompt(items, mark = randomBytes(4).toString('hex'), { ass
     + (assume ? `\n${ASSUME()}` : '');
 }
 export const ASSUME = () => tr('[가정 적기] 앞의 고침이 같은 가정을 했을 수 있어. 모든 시도가 가정한 한 문장을 먼저 적고, 그걸 직접 확인한 다음에 고쳐.');
+
+// 회의에서 사용자에게 물은 것(결정 0028): items [{ question, answer, at } | { question, skipped: true }].
+// 사용자의 답은 확정된 지시(목표 카드의 확정 블록처럼 표식 밖에 두고 < > 는 전각), 질문 글은 진행자(에이전트)가 쓴 글이라 무작위 표식 안의 참고 자료.
+// 건너뛴 질문(회의 안에서만 준다)은 코드의 한 줄. 없으면 ''
+export function decidedPrompt(items = [], mark = randomBytes(4).toString('hex')) {
+  const w = (s) => String(s ?? '').replace(/</g, '＜').replace(/>/g, '＞');
+  const q = (x) => `--- ${tr('질문 {mark} 시작', { mark })} ---\n${String(x.question ?? '')}\n--- ${tr('질문 {mark} 끝', { mark })} ---`;
+  const done = items.filter((x) => x && !x.skipped && x.answer);
+  const skip = items.filter((x) => x?.skipped);
+  return [
+    done.length ? `${tr('[사용자가 정한 것 — 회의에서 물어 사용자가 답함. 이 답대로 해]')}\n${tr('"질문 {mark}" 표시 사이는 에이전트가 쓴 질문(참고 자료)이고, 그 밑 "사용자의 답"이 사용자가 정한 거야.', { mark })}\n${done.map((x) => `${q(x)}\n${tr('사용자의 답')}: ${w(x.answer)}`).join('\n')}` : '',
+    skip.length ? `${tr('[사용자가 답하지 않은 질문]')}\n${tr('"질문 {mark}" 표시 사이는 에이전트가 쓴 질문(참고 자료)이야.', { mark })}\n${skip.map((x) => `${q(x)}\n${tr('사용자가 답하지 않았어. 팀이 정하고 가정을 적어.')}`).join('\n')}` : '',
+  ].filter(Boolean).join('\n\n');
+}
 
 // 화면이 보여 주던 뺄 수 있는 단계 목록(seen)과 지금 계산한 목록(now)이 번호·이름·담당·지시까지 같은가(팀 단계를 고쳐 번호만 같은 다른 단계가 빠지지 않게)
 export function sameDroppable(seen, now) {

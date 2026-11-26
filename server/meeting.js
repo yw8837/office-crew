@@ -1,11 +1,15 @@
 // 회의 차례 정하기와 판정 읽기: 반대편 고르기, 차례 순서, 진행자 답 끝의 ```oc-verdict 블록 읽기(질문 블록 oc-ask 와 같은 규칙).
 // 회의 중 조사: 차례 답 끝의 ```oc-check 블록 읽기, 조사하러 갈 사람 고르기
+// 회의 정체(결정 0028): 차례 답의 "입장:" 줄 읽기, 반대편을 뺀 차례 발언자의 입장이 앞 바퀴와 그대로인지
 import { tr } from './i18n.js';
 import { roleKind } from './routing.js';
 
 const OPEN = '```oc-verdict';
 const LAST = /^```oc-verdict[ \t]*\r?\n([\s\S]*?)```\s*$/; // 글의 맨 끝에 있는 블록만 판정이다
-const VERDICTS = new Set(['agree', 'continue']);
+// ask: 팀이 아니라 사용자가 정할 일이라 진행자가 사용자에게 묻는다(결정 0028). 질문 한 줄과 보기 2~ASK_OPTIONS 개를 판정 블록 안에 같이 적는다
+const VERDICTS = new Set(['agree', 'continue', 'ask']);
+export const MEET_ASK_MAX = 2; // 회의 하나에서 사용자에게 물을 수 있는 횟수(넘으면 ask 를 "계속"으로 본다)
+const ASK_OPTIONS = 4; // 회의 질문의 보기 최대 개수(결정 0009 의 질문 블록보다 적게: 진행자가 안을 좁혀서 묻게)
 export const CHECK_MAX = 3; // 회의 한 번에 조사할 수 있는 횟수
 const CHECK_OPEN = '```oc-check';
 const CHECK_LAST = /^```oc-check[ \t]*\r?\n([\s\S]*?)```\s*$/; // 글의 맨 끝에 있는 블록만 질문이다
@@ -30,8 +34,10 @@ export function turnOrder(ids, chairId, opposerId) {
   return opposerId && opposerId !== chairId && ids.includes(opposerId) ? [opposerId, ...rest] : rest;
 }
 
-// text 의 맨 끝에 있는 oc-verdict 블록을 읽는다. 없으면 null, JSON 이 아니면 { error: 'json' }, 값이 두 가지가 아니면 { error: 'shape' },
-// 맞으면 { verdict, reason, from, to }(블록의 자리). 끝이 아닌 곳의 블록(예로 든 것, 뒤에 글을 더 쓴 것)은 판정으로 보지 않는다
+// text 의 맨 끝에 있는 oc-verdict 블록을 읽는다. 없으면 null, JSON 이 아니면 { error: 'json' }, 값이 세 가지가 아니면 { error: 'shape' },
+// 맞으면 { verdict, reason, from, to }(블록의 자리). 끝이 아닌 곳의 블록(예로 든 것, 뒤에 글을 더 쓴 것)은 판정으로 보지 않는다.
+// ask(결정 0028)는 질문 블록(결정 0009)과 같은 다듬기로 질문 한 줄(300자)과 보기 2~ASK_OPTIONS 개(글 또는 { label, description })를 읽어
+// { ..., ask: { questions: [하나] } } 로 준다. 질문이 비었거나 보기가 2개 미만·ASK_OPTIONS 개 초과면 { error: 'shape' }(결론을 바꿀 질문을 코드가 지어내지 않는다)
 export function parseVerdict(text) {
   const src = String(text || '');
   const from = src.lastIndexOf(OPEN);
@@ -43,7 +49,40 @@ export function parseVerdict(text) {
   try { data = JSON.parse(m[1]); } catch { return { error: 'json' }; }
   const verdict = typeof data?.verdict === 'string' ? data.verdict.toLowerCase() : null; // "Agree"·"CONTINUE"도 읽는다
   if (!VERDICTS.has(verdict)) return { error: 'shape' };
-  return { verdict, reason: line(data.reason, 300), from, to };
+  if (verdict !== 'ask') return { verdict, reason: line(data.reason, 300), from, to };
+  const question = line(data.question, 300);
+  const options = (Array.isArray(data.options) ? data.options : [])
+    .map((o) => (typeof o === 'string' ? { label: line(o, 80), description: '' } : { label: line(o?.label, 80), description: line(o?.description, 200) }))
+    .filter((o) => o.label);
+  if (!question || options.length < 2 || options.length > ASK_OPTIONS) return { error: 'shape' };
+  return { verdict, reason: line(data.reason, 300), ask: { questions: [{ header: '', question, options, multi: false }] }, from, to };
+}
+
+// 입장 줄의 머리(네 언어. 회의 프롬프트의 "입장: …" 형식 줄을 각 언어로 옮긴 말). 줄 맨 앞의 목록 기호·번호·굵게 표시는 건너뛴다
+const POSITION = /^\s*(?:[-*+•]\s+|\d+[.)]\s+)?(?:\*\*|__)?\s*(?:입장|position|立场|立場)\s*(?:\*\*|__)?\s*:\s*(?:\*\*|__)?\s*(.*)$/i;
+// 차례 답에서 입장 값: "입장:" 머리로 시작하는 마지막 줄의 값을 NFKC 로 정규화(전각 글자·쌍점·공백)하고 공백을 펴고 소문자로. 없거나 값이 비면 null(지어내지 않는다)
+export function positionOf(text) {
+  const lines = String(text ?? '').normalize('NFKC').split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = lines[i].match(POSITION);
+    if (!m) continue;
+    const v = m[1].replace(/\s+/g, ' ').trim().toLowerCase();
+    return v || null;
+  }
+  return null;
+}
+
+// 정체(결정 0028): round 바퀴의 차례 발언자 ids(반대편을 뺀. 진행자는 차례 발언을 하지 않는다)가 둘 이상이고, 모두 이번 바퀴와 앞 바퀴(2바퀴면 1바퀴 의견)에
+// 입장 줄이 있고, 사람마다 앞 바퀴와 같으면 true. 서로 달라도 각자 그대로면 정체다(더 얘기해도 안 바뀐다). 입장 줄이 없거나 이번 바퀴에 말하지 못한 사람이 있으면 false.
+// said: 회의에서 나온 말 [{ agent: { id }, text, round, phase }]
+export function stalled({ said = [], round = 0, ids = [] } = {}) {
+  if (round < 2 || ids.length < 2) return false;
+  const pos = (id, r, phase) => { const x = said.findLast((s) => s.agent?.id === id && s.round === r && s.phase === phase); return x ? positionOf(x.text) : null; };
+  return ids.every((id) => {
+    const now = pos(id, round, 'turn');
+    const before = pos(id, round - 1, round - 1 === 1 ? 'opinion' : 'turn');
+    return now !== null && now === before;
+  });
 }
 
 // 프롬프트에 넣는 질문 블록 예시(설명 글은 설정 언어로)

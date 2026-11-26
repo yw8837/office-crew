@@ -53,6 +53,8 @@ export function cleanAnswers(ask, raw) {
 export const answered = (answers) => answers.every((a) => a.picked.length || a.other);
 
 const said = (q, a) => [...a.picked.map((n) => q.options[n].label), a.other ? tr('직접 입력: {text}', { text: a.other }) : ''].filter(Boolean).join(', ');
+// 첫 질문의 답 한 줄(회의에서 물은 질문은 하나뿐이다. 결정 0028의 "사용자가 정한 것"에 적는다)
+export const answerText = (ask, answers) => said(ask.questions[0], answers[0]);
 
 // 에이전트에게 돌려주는 글
 export function answerPrompt(ask, answers) {

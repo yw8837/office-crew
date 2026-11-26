@@ -66,14 +66,16 @@ export function stationInfo(state) {
 // 실행 단계의 status → 역 상태
 const ST_STATE = { pending: 'todo', running: 'run', done: 'done', review: 'wait', error: 'error', skipped: 'skipped', stopped: 'stopped' };
 
-// 메시지에서 아직 답하지 않은 에이전트 질문(결정 0009): [{ id, agentId, runId, stageIndex, text }]
+// 메시지에서 아직 답하지 않은 에이전트 질문(결정 0009): [{ id, agentId, runId, stageIndex, text }].
+// 끊긴 목표를 이어서 다시 묻는 회의 질문(결정 0028)은 앞 실행의 판정 메시지에 달리고, 질문 항목에 지금 실행·단계가 적혀 있다(그 값이 먼저)
 export function openQuestions(messages) {
   const out = [];
   for (const m of Array.isArray(messages) ? messages : []) {
     for (const a of m?.asks || []) {
       if (a.status !== 'open') continue;
       const q = a.questions?.[0];
-      out.push({ id: a.id, agentId: String(m.agentId || ''), runId: m.runId || null, stageIndex: Number.isInteger(m.stageIndex) ? m.stageIndex : null, text: String(q?.question || q?.header || '') });
+      const at = Number.isInteger(a.stageIndex) ? a.stageIndex : Number.isInteger(m.stageIndex) ? m.stageIndex : null;
+      out.push({ id: a.id, agentId: String(m.agentId || ''), runId: a.runId || m.runId || null, stageIndex: at, text: String(q?.question || q?.header || '') });
     }
   }
   return out;
@@ -237,6 +239,7 @@ export function stageModel(input = {}) {
       review: st.mission === 'review' && mis ? (mis.criteria || []).map((c) => ({ id: String(c.id), text: String(c.text || ''), verdict: state === 'run' ? 'check' : c.status || 'open' })) : null,
       note: ret ? 'ret' : asking.size ? 'question' : state === 'done' && parallel > 1 && !st.note ? 'merged' : null, // 누가 건너뛰었으면(메모) 합침 대신 메모를 보인다
       ret, memo: String(st.note || ''), cards, ask: false,
+      stall: useRun && !!st.stall, // 입장이 앞 바퀴와 그대로라 판정 없이 결론으로 간 회의(결정 0028)
     };
   });
 

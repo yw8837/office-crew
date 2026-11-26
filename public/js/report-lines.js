@@ -13,7 +13,7 @@ export function durationWords(t, ms) {
   return min < 60 ? t('{n}분', { n: min }) : t('{h}시간 {n}분', { h: Math.floor(min / 60), n: min % 60 });
 }
 
-// "확인 못 한 것" 줄들: 확인 못 한·판정 안 된 기준, 확인 못 한 조사 질문, 구멍·막힘·건너뛴 카드(까닭), 바꿨다고 적었지만 안 바뀐 파일, 건너뛴 단계, 사용량 한도로 멈춘 횟수
+// "확인 못 한 것" 줄들: 확인 못 한·판정 안 된 기준, 확인 못 한 조사 질문, 구멍·막힘·건너뛴 카드(까닭), 바꿨다고 적었지만 안 바뀐 파일, 건너뛴 단계, 사용량 한도로 멈춘 횟수, 진전 없는 회차
 export function unverifiedLines(t, r) {
   const u = r?.unverified || {};
   const card = { hole: t('구멍'), blocked: t('막힘'), skipped: t('건너뜀') };
@@ -27,6 +27,7 @@ export function unverifiedLines(t, r) {
   for (const p of u.proof || []) out.push(t('카드 {id}: 바꿨다고 적은 파일이 실제로는 안 바뀌었어(에이전트가 적은 경로: {files})', { id: p.id, files: (p.files || []).join(', ') }));
   if (u.skipped?.length) out.push(t('건너뛴 단계: {labels}', { labels: u.skipped.join(', ') }));
   if (u.quota) out.push(t('사용량 한도에 걸려 멈춘 횟수: {n}', { n: u.quota }));
+  if (u.noProgress) out.push(t('한 번 더 해도 같은 기준이 같은 이유로 걸린 회차: {n}', { n: u.noProgress })); // 진전 없음(결정 0028)
   return out;
 }
 

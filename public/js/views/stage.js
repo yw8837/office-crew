@@ -228,10 +228,12 @@ function Say({ m }) {
 function Station({ st, small }) {
   const info = stationInfo(st.state);
   const tip = [st.names.join(', '), st.memo, ...(st.cards || []).map((c) => `${c.id} · ${c.title}`)].filter(Boolean).join('\n');
-  const tag = st.meeting ? html`<span class="tag">${st.meeting.label}</span>`
+  // 정체(결정 0028): 입장이 앞 바퀴와 그대로라 판정 없이 결론으로 간 회의. 결론 차례 동안은 회의 표식 뒤에, 끝난 뒤에는 표식 하나로
+  const tag = st.meeting ? html`<span class="tag">${st.meeting.label}${st.stall ? ` · ${t('정체')}` : ''}</span>`
     : st.ret ? html`<span class="tag ret"><${Ico} n="ret" />${t('되돌림 {n}/{of}', st.ret)}</span>`
       : st.note === 'question' ? html`<span class="tag me"><${Ico} n="ask" />${t('질문')}</span>`
         : st.note === 'merged' ? html`<span class="tag ok">${t('합침')}</span>`
+          : st.stall ? html`<span class="tag plain" title=${t('반대편을 뺀 참석자의 입장이 앞 바퀴와 그대로라서 판정 없이 결론을 냈어.')}>${t('정체')}</span>`
           : st.memo ? html`<span class="tag plain">${st.memo}</span>`
             : st.isMeeting ? html`<span class="tag plain">${t('회의')}</span>` : '';
   const seats = st.people.map((p) => (st.meeting?.away === p.id

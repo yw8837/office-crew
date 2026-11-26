@@ -67,6 +67,7 @@ export function buildReport({ m, messages = [], runs = [], now = Date.now(), nam
       proof: (m.cards || []).filter((c) => c.proof).map((c) => ({ id: c.id, files: [...(c.proof.files || [])] })),
       skipped: (lastWork?.stages || []).filter((st) => st.status === 'skipped').map((st) => String(st.label || '')),
       quota: log.filter((x) => x.kind === 'quota').length,
+      noProgress: log.filter((x) => x.kind === 'no-progress').length, // 한 번 더 해도 같은 기준이 같은 근거로 걸린 회차(결정 0028)
     },
     fails, routes: log.filter((x) => x.kind === 'route').length,
     // 윗등급에게 넘긴 카드(결정 0027): 카드 기록(raised)에서 카드마다 처음 담당 → 넘겨받은 담당들(이름)

@@ -8,6 +8,10 @@
 
 `route.why` gains `raised`: the first turn of a task card's new owner after the user handed the card to a higher tier. That reason alone doesn't add a `route` log line, because the `raise` line written when the card was handed over already says it; with other reasons the line names it too.
 
+## Revision 2026-11-26: a meeting asks inside its verdict block
+
+([0028](0028-stalled-meetings-and-asking-the-user.md)) The table is unchanged: meeting turns still take `oc-verdict` and `oc-check`, and `oc-ask` stays limited to the goal turn and work steps. A chair that needs the user writes `verdict: "ask"` with a question and choices inside `oc-verdict`; it is a value of a block the step already takes, not a new block, so no table row and no `block` log line are added. The comment above `BLOCK_ACCEPTS` says so.
+
 ## Context
 
 A check of goal mode against what it set out to do found small gaps that each made the record less trustworthy. The criteria check refused a verdict mixed with another block by a pattern that named a block no step uses and missed two that do (`oc-cards`, `oc-research`), and nothing said in one place which step reads which block. When a run went to another AI (automatic routing, a limit close, a takeover) only a notice line said so; the message kept what ran but not what was asked or why. Side work (the automatic handoff note, research during a goal meeting) didn't stop when a subscription limit was close, only when the goal's call count was low. Failures were named `review`, `outside`, `blocked`, `hole` or `keep`: an ordinary error left no log line at all, and nothing told "the earlier card gave me nothing" from any other failure. Agents' answers in a goal's work run looked the same as confirmed text. Nothing told the agents what to ask about before doing it.

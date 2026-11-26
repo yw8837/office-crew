@@ -1008,7 +1008,9 @@ test('23. 목표 실행의 회의: 1바퀴 의견에는 입장 줄(서로 안 �
   const count = (list) => list.reduce((n, x) => ({ ...n, [x]: (n[x] || 0) + 1 }), {});
   assert.deepEqual(count(agentMsgs(S(plain), (x) => x.meeting).map((x) => x.meeting.phase)), { opinion: 3, turn: 2, conclude: 1 });
   const pp = meetCalls(from).map((x) => x.texts[0]);
-  assert.ok(pp.every((p) => !p.includes('입장: 지금 미는 안 한 줄(맨 끝 줄로)') && !p.includes('[네가 앞에서 한 말]') && !p.includes('동의하지 못하는 점이 있으면 숨기지 말고') && !p.includes('(다른 참석자의 말과 네가 앞에서 한 말)')));
+  assert.ok(pp.every((p) => !p.includes('[네가 앞에서 한 말]') && !p.includes('동의하지 못하는 점이 있으면 숨기지 말고') && !p.includes('(다른 참석자의 말과 네가 앞에서 한 말)')));
+  // 보통 회의의 1바퀴 의견에도 입장 줄 형식이 들어간다(결정 0028: 2바퀴 차례의 입장과 견줘 정체를 본다)
+  assert.ok(pp.filter((p) => p.includes('[회의 — 의견 내기')).every((p) => p.includes('- 입장: 지금 미는 안 한 줄(맨 끝 줄로)')));
   assert.ok(pp.some((p) => p.includes('지금 가장 힘을 받는 안의 약점')), '반대편 말은 지금 그대로');
 });
 

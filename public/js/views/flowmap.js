@@ -25,6 +25,8 @@ export function FlowMap({ s }) {
   const box = useRef(null);
   const [width, setWidth] = useState(0);
   const [cur, setCur] = useState(null);
+  const has = !!s.mission;
+  // 목표가 나중에 생겨도(빈 안내 → 그림) 그때의 상자에 크기 관찰을 다시 붙인다
   useEffect(() => {
     const el = box.current;
     if (!el) return undefined;
@@ -34,7 +36,7 @@ export function FlowMap({ s }) {
     ro?.observe(el);
     window.addEventListener('resize', fit);
     return () => { ro?.disconnect(); window.removeEventListener('resize', fit); };
-  }, []);
+  }, [has]);
   const m = s.mission;
   if (!m) return html`<div class="muted small" ref=${box}>${t('아직 목표가 없어. 입력창 옆의 "목표까지"를 켜고 요청을 보내면 여기에 과정이 그림으로 보여.')}</div>`;
   const model = flowModel({ mission: m, runs: s.runs || [], messages: s.messages || [], nameOf: (id) => agentById(id)?.name || t('삭제된 에이전트') });
@@ -70,7 +72,7 @@ export function FlowMap({ s }) {
           <title>${name(n)}${raiseOf.has(n.id) ? `\n${raiseOf.get(n.id)}` : ''}</title>
           <${Shape} n=${n} />
           <text class="fm-ico" x="10" y="19" aria-hidden="true">${i.icon}</text>
-          <text class="fm-t" x="26" y="19">${n.text}${raiseOf.has(n.id) ? ' ↑' : ''}</text>
+          <text class="fm-t" x="26" y="19">${n.text}</text>
           <text class="fm-s" x="10" y="36">${n.line2}</text>
         </g>`;
       })}

@@ -109,23 +109,31 @@ export function flowModel({ mission: m = null, runs = [], messages = [], nameOf 
     const waves = stOf((st) => st.mission === 'cards' && st.cardIds?.length).map(({ st, i }) => ({ ids: st.cardIds.filter((id) => byId.has(id)), i, st })).filter((w) => w.ids.length);
     const placed = new Set(waves.flatMap((w) => w.ids));
     waves.push(...depthWaves(cards.filter((c) => !placed.has(c.id))));
-    const needed = new Set(cards.flatMap((c) => c.needs || []));
+    // 줄 번호(물결). needs 가 없는 카드·순환·앞이 아닌 줄을 가리키는 needs 가 있어도 떨어진 마디가 없게: 앞 줄의 카드를 기다리지 않는 카드는 계획에서,
+    // 뒤 줄의 카드가 기다리지 않는 카드는 검수(없으면 보고)로 잇는다
+    const row = new Map();
+    waves.forEach((w, k) => { for (const id of w.ids) if (!row.has(id)) row.set(id, k); });
+    const earlier = (c) => (c.needs || []).some((n) => row.has(n) && row.get(n) < row.get(c.id));
+    const laterNeeds = (c) => cards.some((d) => row.get(d.id) > row.get(c.id) && (d.needs || []).includes(c.id));
+    const seen = new Set();
     for (const w of waves) {
       for (const id of w.ids) {
+        if (seen.has(id)) continue;
+        seen.add(id);
         const c = byId.get(id);
         let state = CARD_STATE[c.status] || 'wait';
         if (w.st?.status === 'error' && !['done', 'hole', 'skipped', 'blocked'].includes(c.status)) state = 'error';
         if (w.st?.status === 'stopped' && ['wait', 'run'].includes(state)) state = 'stopped';
         add({ id: `card:${c.id}`, kind: 'card', label: `${c.id} · ${c.title || ''}`, who: nameOf(c.ownerId), state, msgId: c.msgId || null });
-        if (!(c.needs || []).length) edges.push({ from: 'plan', to: `card:${c.id}`, kind: 'flow' });
-        for (const n of c.needs || []) if (byId.has(n)) edges.push({ from: `card:${n}`, to: `card:${c.id}`, kind: 'needs' });
+        if (!earlier(c)) edges.push({ from: 'plan', to: `card:${c.id}`, kind: 'flow' });
+        for (const n of new Set(c.needs || [])) if (byId.has(n) && n !== c.id) edges.push({ from: `card:${n}`, to: `card:${c.id}`, kind: 'needs' });
         if (c.raised?.length) edges.push({ from: `card:${c.id}`, to: `card:${c.id}`, kind: 'raise', label: `↑ ${[c.raised[0].from, ...c.raised.map((r) => r.to)].map((x) => nameOf(x)).join(' → ')}` });
       }
       if (w.i >= 0) at.set(w.i, `card:${w.ids[0]}`);
       lastWork = w.ids.map((id) => `card:${id}`);
       rank++;
     }
-    prev = cards.filter((c) => !needed.has(c.id)).map((c) => `card:${c.id}`);
+    prev = cards.filter((c) => row.has(c.id) && !laterNeeds(c)).map((c) => `card:${c.id}`);
     if (!cards.length) prev = ['plan'];
   } else {
     for (const { st, i } of stOf((x) => !x.mission)) {
@@ -151,7 +159,8 @@ export function flowModel({ mission: m = null, runs = [], messages = [], nameOf 
     prev = ['review'];
     rank++;
   }
-  const repState = m.reportMsgId ? 'done' : ['stopped', 'cancelled', 'cut'].includes(m.status) ? 'stopped' : ['done', 'accepted', 'unreviewed'].includes(m.status) ? 'skipped' : 'wait';
+  // 끊긴 목표(cut)는 이어서 할 수 있어서 보고는 아직 기다림
+  const repState = m.reportMsgId ? 'done' : ['stopped', 'cancelled'].includes(m.status) ? 'stopped' : ['done', 'accepted', 'unreviewed'].includes(m.status) ? 'skipped' : 'wait';
   add({ id: 'report', kind: 'report', label: t('완주 보고'), state: repState, msgId: m.reportMsgId || null });
   flow('report');
   // 한도 대기(결정 0019)·구독 한도 상한(결정 0026): 지금 기다리는 단계(끊긴 목표면 끊긴 자리)의 마디 옆에
@@ -190,6 +199,7 @@ export function flowLayout(model, { width = 320 } = {}) {
   const x0 = Z.pad + Z.left;
   const avail = Math.max(20, W - Z.pad * 2 - Z.left - Z.right);
   const wOf = (n) => Math.min(n.side ? Z.side : n.kind === 'card' ? Z.card : Z.main, avail);
+  const raised = new Set(model.edges.filter((e) => e.kind === 'raise').map((e) => e.from)); // 윗등급에게 넘긴 카드: 이름 끝에 ↑(상자 안에 들어가게 미리 자리를 뺀다)
   const ranks = [];
   for (const n of model.nodes) (ranks[n.rank] ||= []).push(n);
   const nodes = [];
@@ -211,7 +221,7 @@ export function flowLayout(model, { width = 320 } = {}) {
       for (const { n, w } of line) {
         const info = stateInfo(n.state);
         const words = [info.word, n.who || '', n.sub || ''].filter(Boolean).join(' · ');
-        nodes.push({ ...n, x: Math.round(x), y, w, h: Z.h, text: fitText(n.label, w - 30, Z.font), line2: fitText(`${info.icon} ${words}`, w - 16, Z.small) });
+        nodes.push({ ...n, x: Math.round(x), y, w, h: Z.h, text: raised.has(n.id) ? `${fitText(n.label, w - 30 - Z.font * 1.2, Z.font)} ↑` : fitText(n.label, w - 30, Z.font), line2: fitText(`${info.icon} ${words}`, w - 16, Z.small) });
         x += w + Z.gapX;
       }
       y += Z.h + (li < lines.length - 1 ? Z.lineGap : 0);

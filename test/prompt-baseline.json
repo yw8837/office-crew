@@ -27,7 +27,8 @@
       "meetJudge": 818,
       "meetTurn": 767,
       "meetConclude": 982,
-      "failuresPrompt": 263
+      "failuresPrompt": 269,
+      "transientHead": 111
     },
     "en": {
       "blockedRule": 572,
@@ -55,7 +56,8 @@
       "meetTurn": 1543,
       "meetConclude": 1917,
       "goalPrompt": 1178,
-      "failuresPrompt": 572
+      "failuresPrompt": 584,
+      "transientHead": 230
     }
   },
   "_how": "Korean and English characters of goal mode's fixed instruction text per item, measured from the functions that assemble it (exported pieces and prompts called with empty input; the goal draft, the confirmed-goal head and the meeting turns taken from prompts a fake CLI received, with the values and the marked text left out). Checked by test/prompt-size.test.js, which fails when an item grows above its value x (1 + slack). If the growth is meant, raise that item; when an item shrinks, lower it."

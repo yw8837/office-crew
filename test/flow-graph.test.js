@@ -113,11 +113,11 @@ test('3. 단계표 목표: 팀의 일 단계가 차례로, 회의 단계에서 �
   assert.equal(node(stopped, 'stage:2').state, 'stopped');
 });
 
-test('4. 자리 잡기: 420px 창의 패널 너비(306px)와 넓은 너비 모두 가로로 넘치지 않고, 물결은 같은 줄(넘치면 줄바꿈), 선은 마디 사이', () => {
+test('4. 자리 잡기: 420px 창에서 패널 안의 그림 너비(296px, 패널 330px)와 넓은 너비 모두 가로로 넘치지 않고, 물결은 같은 줄(넘치면 줄바꿈), 선은 마디 사이', () => {
   const g = cardGoal({ cards: [1, 2, 3, 4, 5, 6].map((k) => card(`k${k}`, 'b', { status: 'done' })) });
   const run = cardRun({}, [['k1', 'k2', 'k3', 'k4', 'k5', 'k6']]);
   const model = flowModel({ mission: g, runs: [run], messages: [], nameOf });
-  for (const width of [306, 330, 520]) {
+  for (const width of [296, 330, 520]) {
     const L = flowLayout(model, { width });
     assert.equal(L.width, width);
     for (const n of L.nodes) {
@@ -136,7 +136,7 @@ test('4. 자리 잡기: 420px 창의 패널 너비(306px)와 넓은 너비 모�
     // 글이 마디 너비에 맞게 잘린다(넘치는 글이 그림 밖으로 나가지 않게)
     assert.ok(L.nodes.every((n) => fitText(n.text, n.w - 30, 12) === n.text));
   }
-  const narrow = flowLayout(model, { width: 306 });
+  const narrow = flowLayout(model, { width: 296 });
   const wide = flowLayout(model, { width: 900 });
   const rows = (L) => new Set(L.nodes.filter((n) => n.kind === 'card').map((n) => n.y)).size;
   assert.ok(rows(narrow) > 1, '좁으면 카드 여섯 장이 여러 줄');
@@ -162,4 +162,28 @@ test('5. 글 맞추기와 키보드 이동: 옆 마디(좌우), 위아래 줄의
   assert.equal(flowNext(L, 'card:k2', 'Home'), 'goal');
   assert.equal(flowNext(L, 'goal', 'End'), 'report');
   assert.equal(flowNext(L, 'goal', 'x'), null, '다른 키는 이동 없음');
+});
+
+test('6. 윗등급에게 넘긴 카드의 ↑ 는 상자 안에, 끊긴 목표의 보고는 기다림, needs 가 순환하거나 없는 카드를 가리켜도 떨어진 마디가 없다', () => {
+  // ↑: 긴 제목이어도 화살표까지 상자 너비 안(글 너비 어림으로)
+  const g = cardGoal({ cards: [card('k1', 'b', { title: '아주 긴 카드 제목이 상자 너비를 훌쩍 넘어가는 경우를 본다', status: 'running', raised: [{ from: 'b', to: 'v', at: 1, why: 'limit' }] })] });
+  for (const width of [296, 520]) {
+    const L = flowLayout(flowModel({ mission: g, runs: [cardRun({}, [['k1']])], messages: [], nameOf }), { width });
+    const k1 = L.nodes.find((n) => n.id === 'card:k1');
+    assert.ok(k1.text.endsWith(' ↑'), k1.text);
+    assert.equal(fitText(k1.text, k1.w - 30, 12), k1.text, `${width}px: ↑ 까지 상자 안`);
+  }
+  // 끊긴 목표(이어서 할 수 있음): 보고는 아직 기다림
+  const cut = flowModel({ mission: cardGoal({ status: 'cut' }), runs: [cardRun({ status: 'stopped' })], messages: [], nameOf });
+  assert.equal(node(cut, 'report').state, 'wait');
+  // needs 순환(k1 ↔ k2)·없는 카드(k9)·자기 자신: 모든 카드가 들어오는 선과 나가는 선을 하나 이상 가진다
+  const odd = cardGoal({ cards: [card('k1', 'b', { needs: ['k2'] }), card('k2', 'w', { needs: ['k1'] }), card('k3', 'b', { needs: ['k9', 'k3'] })] });
+  for (const runs of [[cardRun({}, [['k1', 'k2'], ['k3']])], []]) {
+    const m = flowModel({ mission: odd, runs, messages: [], nameOf });
+    for (const id of ['card:k1', 'card:k2', 'card:k3']) {
+      assert.ok(m.edges.some((e) => e.to === id && e.from !== id), `${id} 로 들어오는 선 (실행 ${runs.length ? '있음' : '없음'})`);
+      assert.ok(m.edges.some((e) => e.from === id && e.to !== id), `${id} 에서 나가는 선 (실행 ${runs.length ? '있음' : '없음'})`);
+    }
+    assert.ok(!m.edges.some((e) => e.kind === 'needs' && e.from === e.to), '자기 자신을 기다리는 선은 그리지 않는다');
+  }
 });

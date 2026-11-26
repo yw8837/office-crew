@@ -54,7 +54,8 @@ function FailList({ k }) {
       ${items.length > 0 && html`<button type="button" class="btn sm" disabled=${busy} onClick=${() => drop(null)}>${t('전부 지우기')}</button>`}</div>
     <div class="hint">${t('목표의 일 단계에서 난 도구·단계 오류의 첫 줄을 코드가 숫자·경로·시각을 지우고 센 거야. 서로 다른 목표 두 개 이상에서 난 줄은 다음 목표의 일 단계에 참고 자료로 들어가(5줄까지). 사용량 한도·일시 장애는 세지 않아.')}</div>
     ${d.bad && html`<div class="warnbox" role="alert">${t('반복 실패 줄 파일이 깨져서 failures.json.bad 로 옮기고 새로 시작했어.')}</div>`}
-    ${!items.length && html`<div class="muted small" style="padding:6px 2px">${t('아직 센 실패가 없어.')}</div>`}
+    ${d.unread && html`<div class="warnbox" role="alert">${t('반복 실패 줄 파일을 지금 읽지 못했어(다른 프로그램이 쥐고 있을 수 있어). 파일은 그대로 두었고, 이 화면을 다시 열면 다시 읽어.')}</div>`}
+    ${!items.length && !d.unread && html`<div class="muted small" style="padding:6px 2px">${t('아직 센 실패가 없어.')}</div>`}
     ${items.length > 0 && html`<ul class="mem-fails" style="list-style:none;margin:6px 0 0;padding:0">
       ${items.map((x) => html`<li class="row" style="gap:8px;align-items:flex-start;padding:6px 0;border-top:1px solid var(--border)">
         <div style="flex:1;min-width:0;overflow-wrap:anywhere">

@@ -212,11 +212,15 @@ export class ProjectMemory {
   // ── 반복 실패 줄(결정 0030): failures.json ──
   // { version: 1, items: [{ key(첫 줄을 정리한 열쇠), line(보여 줄 줄), tool?(도구 이름), n(센 횟수), goals:[목표 id](FAIL_GOALS 개까지), first, last, local?(내 PC 모델 답에서만 나온 줄) }] }
   // 깨졌으면(JSON 이 아니거나 모양이 틀림) 덮어쓰지 않게 failures.json.bad 로 옮기고(있으면 시각 붙은 이름) 빈 목록으로 새로 시작하며 failsBad 를 세운다(hidden.json 과 같은 방식)
+  // 읽지 못했으면(파일 없음이 아닌 오류: 다른 프로그램이 쥐고 있는 등) null: 빈 목록을 붙잡지 않고 다음에 다시 읽으며, 그동안은 덮어쓰지 않는다
   async #readFails() {
     if (this.fails) return this.fails;
     const file = path.join(this.dir, 'failures.json');
     let raw;
-    try { raw = await fsp.readFile(file, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') this.failsBad = true; return (this.fails = []); }
+    try { raw = await fsp.readFile(file, 'utf8'); } catch (e) {
+      if (e.code === 'ENOENT') return (this.fails = []);
+      return null;
+    }
     let data = null;
     try { data = JSON.parse(raw); } catch { /* 깨짐 */ }
     if (data && typeof data === 'object' && Array.isArray(data.items)) {
@@ -240,9 +244,12 @@ export class ProjectMemory {
     await fsp.rename(tmp, path.join(this.dir, 'failures.json'));
   }
 
-  #failsView() { return { items: this.fails.map((x) => ({ ...x, goals: [...x.goals] })), ...(this.failsBad ? { bad: true } : {}) }; }
+  #failsView() {
+    if (!this.fails) return { items: [], unread: true };
+    return { items: this.fails.map((x) => ({ ...x, goals: [...x.goals] })), ...(this.failsBad ? { bad: true } : {}) };
+  }
 
-  // 반복 실패 줄 목록 → { items, bad? }
+  // 반복 실패 줄 목록 → { items, bad?(깨져서 .bad 로 옮김), unread?(읽지 못함. 빈 목록이지만 파일은 그대로) }
   failures() { return this.#serial(async () => { await this.#readFails(); return this.#failsView(); }); }
 
   // 한 목표(missionId)의 답에서 나온 실패 줄들을 센다. list: [{ key, line, tool? }](같은 열쇠가 여러 번이면 그만큼 센다).
@@ -250,6 +257,7 @@ export class ProjectMemory {
   addFailures(list = [], missionId = '', { local = false } = {}) {
     return this.#serial(async () => {
       const items = await this.#readFails();
+      if (!items) return 0; // 읽지 못한 파일은 덮어쓰지 않는다(이번 줄은 세지 못한다)
       const now = Date.now();
       for (const f of list) {
         if (!f?.key || !f.line) continue;
@@ -260,7 +268,8 @@ export class ProjectMemory {
         x.last = now;
         if (missionId && !x.goals.includes(missionId)) { x.goals.push(missionId); if (x.goals.length > FAIL_GOALS) x.goals.splice(0, x.goals.length - FAIL_GOALS); }
       }
-      if (items.length > FAIL_KEEP) { items.sort((a, b) => a.last - b.last); items.splice(0, items.length - FAIL_KEEP); }
+      // 넘으면 목표 수가 적은 줄부터, 같으면 마지막으로 본 때가 오래된 줄부터 버린다(여러 목표에서 되풀이된 줄을 지킨다)
+      if (items.length > FAIL_KEEP) { items.sort((a, b) => a.goals.length - b.goals.length || a.last - b.last); items.splice(0, items.length - FAIL_KEEP); }
       await this.#writeFails();
       return items.length;
     });
@@ -270,6 +279,7 @@ export class ProjectMemory {
   dropFailures(key = null) {
     return this.#serial(async () => {
       const items = await this.#readFails();
+      if (!items) return this.#failsView(); // 읽지 못하면 지우지도 않는다(화면이 다시 해 보라고 알린다)
       if (key == null) items.length = 0;
       else { const k = items.findIndex((x) => x.key === key); if (k >= 0) items.splice(k, 1); }
       await this.#writeFails();

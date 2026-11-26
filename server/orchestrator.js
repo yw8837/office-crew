@@ -26,7 +26,7 @@ import { parseGoal, goalBlock, goalWarn, newMission, toCriteria, cardOf, sameCar
   CARD_TRIES, CARD_RATE, HOUR, porcelainPaths, testLike, estimateParts, estimateCalls, QUOTA_AUTO, quotaDelay,
   BLOCK_ACCEPTS, foreignBlocks, blockPart, partName, outsideRule, resumeSent, recordMeeting, planEstimate, tailClaims, userLine, decidedPrompt, sameFails } from './mission.js';
 import { ladderOf, cardCap, raiseTargets, raisedPrompt } from './mission.js'; // 윗등급에게 넘길지 묻기(결정 0027)
-import { failKey, pickFails, failuresPrompt } from './mission.js'; // 반복 실패 줄(결정 0030)
+import { failKey, pickFails, failuresPrompt, envError, unsafeTools, transientSent } from './mission.js'; // 반복 실패 줄·일시 장애 자동 다시(결정 0030)
 import { execFile } from 'node:child_process';
 import { gitState, gitDiffNames, changedSet, proofCheck, PROOF_KINDS, PROOF_TIMEOUT } from './proof.js';
 import { buildReport, reportText, reportLocal } from './report.js';
@@ -1055,9 +1055,10 @@ export class Orchestrator {
     const order = (list) => list.map((r, k) => [st.agentIds.indexOf(String(r.agent?.id)), k, r]).sort((x, y) => (x[0] < 0 ? 1e9 : x[0]) - (y[0] < 0 ? 1e9 : y[0]) || x[1] - y[1]).map((x) => x[2]);
     let first = resume;
     let quotaSaved; // 이어서: 끊기기 전 한도 대기의 초기화 시각(결정 0019. 그 대기를 다시 물을 때만)
-    // 일시 장애 1번 자동 다시(결정 0030): 이 단계에서 이미 한 번 봤는가(했든 못 했든 한 번만), 그 바퀴를 돌기 전의 git 상태(그 실행이 파일을 바꿨는지 볼 앞 상태)
-    let retried = false;
-    let snap = null;
+    // 일시 장애 1번 자동 다시(결정 0030): 이 단계에서 이미 한 번 봤는가(했든 못 했든 한 번만. 다시 했으면 끊긴 자리에 retried 로 남아 끊겼다 이어서 해도 한 번),
+    // 그 바퀴를 돌기 전의 git 상태(그 실행이 파일을 바꿨는지 볼 앞 상태. 그때 이 기능을 볼 단계가 아니라 찍지 않았으면 undefined, 찍었는데 git 이 아니면 null)
+    let retried = !!(work && ctx.mission?.at?.retried && ctx.mission.at.stageIndex === i);
+    let snap;
     for (;;) {
       let results;
       if (first?.wait) {
@@ -1067,8 +1068,9 @@ export class Orchestrator {
         st.status = 'running';
         this.#emitRun(ctx);
         const ids = first?.ids || agentIds;
-        snap = !retried && this.#canRetry(ctx, st) ? await gitState(this.cwdOf(ctx.s)) : null;
+        snap = !retried && this.#canRetry(ctx, st) ? await gitState(this.cwdOf(ctx.s)) : undefined;
         results = st.meeting && !ids ? await this.#meeting(ctx, i, feedback) : await this.#together(ctx, i, ids || st.agentIds, feedback);
+        ctx.transientAgain = null; // "[다시]" 한 줄은 자동으로 다시 도는 그 바퀴에만
         if (first?.keep?.length) results = order([...first.keep, ...results]);
       }
       const fromCut = !!first?.wait; // 끊겼다 이어서 같은 대기를 다시 묻는다(이미 진행 기록에 적었다)
@@ -1092,12 +1094,15 @@ export class Orchestrator {
         }
         // 일시 장애 1번 자동 다시(결정 0030): 목표 일 실행의 일 단계·카드 단계에서 실패한 사람이 모두 일시 장애(네트워크·시간 초과·5xx·과부하, 한도 아님)로 끝났으면
         // 묻기 전에 그 사람만 한 번 다시 돈다(끝낸 사람의 답은 그대로). 조건은 #transientRetry. 못 하면 까닭 한 줄을 남기고 지금처럼 묻는다
-        if (!fromCut && !retried && this.#canRetry(ctx, st) && !ctx.stalled && failed.every((f) => isTransientError(f.error))) {
+        // 앱이 멈춤·헛돌기로 끈 답(halted)은 일시 장애가 아니다(답마다 본다. 실행 전체의 ctx.stalled 로 뒤 단계까지 끄지 않는다)
+        if (!fromCut && !retried && this.#canRetry(ctx, st) && failed.every((f) => !f.halted && isTransientError(f.error))) {
           retried = true;
           if (await this.#transientRetry(ctx, i, failed, snap)) {
-            first = { ids: failed.map((f) => String(f.agent?.id || '')), keep: results.filter((r) => !failed.includes(r)) };
+            const again = failed.map((f) => String(f.agent?.id || ''));
+            first = { ids: again, keep: results.filter((r) => !failed.includes(r)) };
+            ctx.transientAgain = new Set(again); // 다시 도는 사람의 프롬프트 맨 앞에 "[다시] … 이미 밖으로 보낸 것은 되풀이하지 마" 한 줄(#prompt)
             this.#missionStage(ctx, i, 'again'); // 그사이 온 추가 지시도 다시 도는 사람에게
-            this.#missionAt(ctx, { ...ctx.mission.at, stageIndex: i, working: [], wait: null });
+            this.#missionAt(ctx, { ...ctx.mission.at, stageIndex: i, working: [], wait: null, retried: true });
             continue;
           }
         }
@@ -2014,7 +2019,7 @@ export class Orchestrator {
 
   // 일시 장애로 끝난 사람(failed)을 묻기 전에 한 번 저절로 다시 돌려도 되는가. 되면 진행 기록에 "일시 장애로 한 번 다시" 줄(fail transient, 완주 보고의 실패 집계)을 남기고 true,
   // 안 되면 까닭 한 줄(fail 없음. 뒤의 오류 줄이 실패로 센다)을 남기고 false. 다 맞아야 한다:
-  // (1) 그 실행이 파일을 바꾸지 않았다: 실패한 답의 도구 기록에 파일을 고친 도구·명령이 없고(handoffFacts), 단계를 돌기 전과 지금의 git 상태가 같다(바꾼 파일 대조와 같은 gitState·changedSet,
+  // (1) 그 실행이 파일을 바꾸지 않았다: 실패한 답이 쓴 도구가 전부 읽기만 하는 도구로 아는 것이고(unsafeTools: 밖으로 나갔을 수 있는 행동이면 하지 않는다), 단계를 돌기 전과 지금의 git 상태가 같다(바꾼 파일 대조와 같은 gitState·changedSet,
   //     그 사이 커밋이 생겼으면 그 커밋의 파일도). git 저장소가 아니거나 git 이 답하지 않으면 확인 못 한 것이라 하지 않는다(같은 단계의 다른 사람이 바꾼 것도 가를 수 없어서 하지 않는다)
   // (2) 남은 호출(결정 0015)이 다시 돌 사람 수 이상 (3) 다시 돌 AI(#capTarget)가 구독 한도 상한(결정 0026) 아래이고 다 차지 않음("계속"을 고른 AI 도 자동으로는 다시 하지 않는다)
   // (4) 일 카드면 그 카드가 시작 상한(결정 0018, 사다리 팀은 escalateAfter, 결정 0027)에 닿지 않았고 시간당 시작 수 안: 자동 다시도 한 번의 시작으로 센다(오류 다시 하기와 같다)
@@ -2030,7 +2035,10 @@ export class Orchestrator {
     };
     const msgs = ids.map((id) => ctx.s.messages.findLast((x) => x.role === 'agent' && x.runId === ctx.run.id && x.stageIndex === i && x.agentId === id));
     if (msgs.some((x) => !x)) return no(tr('그 답을 찾지 못해서'));
-    if (msgs.some((x) => { const f = handoffFacts(x.blocks, ''); return !!f && (f.files.length > 0 || f.cmds.length > 0); })) return no(tr('파일을 고치는 도구나 명령을 써서'));
+    // 실패한 답이 쓴 도구가 전부 읽기만 하는 도구로 아는 것이어야 한다(unsafeTools: 명령·편집·mcp 커넥터·브라우저 조작·웹 가져오기·모르는 도구는 밖으로 나간 행동일 수 있다)
+    const risky = [...new Set(msgs.flatMap((x) => unsafeTools(x.blocks)))];
+    if (risky.length) return no(tr('읽기만 하는 도구로 모르는 도구({tools})를 써서', { tools: `${risky.slice(0, 3).join(', ')}${risky.length > 3 ? ' …' : ''}` }));
+    if (before === undefined) return no(tr('단계를 시작할 때 자동 다시가 꺼져 있어서 그때의 상태를 찍어 두지 않았기 때문에'));
     if (!before || before.off) return no(tr('작업 폴더가 git 저장소가 아니거나 git 이 답하지 않아 파일이 바뀌었는지 확인하지 못해서'));
     const cwd = this.cwdOf(ctx.s);
     const after = await gitState(cwd);
@@ -2266,7 +2274,9 @@ export class Orchestrator {
       if (pass === 0 && st.mission === 'cards') proofBefore = await this.#proofSnap(ctx, i);
       if (!first?.wait) this.#missionStage(ctx, i, back || pass ? 'again' : 'start');
       // 일하는 사람은 CLI 를 띄울 때 넣고 끝나면 뺀다(#atWorking). 이어서 그대로 쓰는 답은 처음부터 끝낸 답으로
-      this.#missionAt(ctx, { stageIndex: i, phase: 'work', back, finished: (first?.keep || []).flatMap((o) => [o.msgId, o.tailMsgId]).filter(Boolean) });
+      // 끊긴 단계를 이어서 하는 첫 바퀴면 "이미 한 번 자동으로 다시 했음"(결정 0030)을 그대로 둔다
+      const keepRetry = pass === 0 && !!m.at?.retried && m.at.stageIndex === i && !!m.at.back === !!back;
+      this.#missionAt(ctx, { stageIndex: i, phase: 'work', back, finished: (first?.keep || []).flatMap((o) => [o.msgId, o.tailMsgId]).filter(Boolean), ...(keepRetry ? { retried: true } : {}) });
       await this.#runStage(ctx, i, null, { agentIds: ids, resume: first, back });
       if (ctx.resumeAt?.stageIndex === i) ctx.resumeAt = null; // [이어서] 한 줄은 끊긴 단계에만(뒤 단계에는 안 붙인다)
       if (ctx.stopped) { st.status = st.status === 'done' ? 'done' : 'stopped'; return; }
@@ -2301,8 +2311,9 @@ export class Orchestrator {
   // 끊긴 자리(결정 0016): 목표 일 실행이 지금 어디에 있는지 적고 바로 저장한다(그 틈에 앱이 꺼져도 이 자리부터 이어 간다).
   // 단계를 시작할 때, 끝낼 때(다음 자리), 되돌림을 정할 때, 대기를 시작할 때(wait: 승인·오류·판정 뒤 묻기·호출 상한), 다시 하기·거절로 단계를 다시 돌 때.
   // working(CLI 를 띄운 채 일하는 사람)과 finished(이 단계에서 끝낸 답)는 #atWorking 이 사람마다 고친다
-  #missionAt(ctx, { stageIndex, phase = 'work', back = false, working = [], finished = [], wait = null }) {
-    ctx.mission.at = { stageIndex, phase, back: !!back, working: working.map(String), finished: [...finished], wait };
+  // retried: 이 단계 바퀴에서 일시 장애로 이미 한 번 자동으로 다시 했다(결정 0030. 끊겼다 이어서 해도 그 단계에서는 다시 안 한다)
+  #missionAt(ctx, { stageIndex, phase = 'work', back = false, working = [], finished = [], wait = null, retried = false }) {
+    ctx.mission.at = { stageIndex, phase, back: !!back, working: working.map(String), finished: [...finished], wait, ...(retried ? { retried: true } : {}) };
     this.store.saveSessionNow(ctx.s);
   }
 
@@ -3811,10 +3822,12 @@ export class Orchestrator {
       return { agent: worker, text: msg.text, stopped: true, skipped };
     }
     if (res.error) {
+      // 앱이 멈춤·헛돌기로 끈 답(halted): 일시 장애 자동 다시와 반복 실패 줄이 이 답만 빼고 본다(결정 0030. 실행 전체의 ctx.stalled 가 아니라 답마다)
+      if (res.halted) (ctx.halted ||= new Set()).add(msg.id);
       finish('error', res.error);
       this.#atWorking(ctx, stageIdx, agentId, false);
       this.#state(s.id, agentId, 'error', res.error.slice(0, 80));
-      return { agent: worker, text: msg.text, error: res.error };
+      return { agent: worker, text: msg.text, error: res.error, ...(res.halted ? { halted: true } : {}) };
     }
     // 대화 전체 파일을 건넸으면 실제로 열었는지 도구 기록으로 확인해 알려 준다(중간 출력이 없는 CLI는 알 수 없어 생략)
     const told = ctx.talkOut?.get(agentId);
@@ -3874,17 +3887,22 @@ export class Orchestrator {
   // 반복 실패 줄(결정 0030): 목표 일 실행의 일 단계·일 카드 답에서 실패한 도구 호출(도구 블록 error 의 출력 첫 줄)과 단계 오류(답이 오류로 끝남)를
   // 프로젝트 기억 폴더(#remember 와 같은 폴더)의 failures.json 에 이 목표 id 와 함께 센다. 프로젝트 기억이 켜져 있을 때만(꺼져 있으면 아무것도 안 한다).
   // 사용량 한도·일시 장애(계정·바깥 사정이라 프로젝트의 실패가 아니다)와 앱이 끈 멈춤·헛돌기는 단계 오류로 세지 않는다. 준비 대목·회의·계획·기준 판정의 답은 보지 않는다.
+  // 앱·CLI 가 돌 환경의 오류(프로그램을 못 띄움·로그인·인증, 앱이 낸 실행 실패·내부 오류·지운 에이전트·모르는 프로바이더)도 세지 않는다.
+  // 작업 폴더도 기본 작업 폴더도 없는 세션(기억 폴더 '' = 그런 세션들이 같이 쓰는 기억)은 서로 다른 일의 실패가 섞이니 세지 않는다.
   // 내 PC 모델 답에서만 나온 줄은 표시해 클라우드 AI 프롬프트에 넣지 않는다(결정 0007). 실패해도 실행에는 영향이 없다
   #recordFails(ctx, msg) {
     const st = ctx.run?.stages?.[msg.stageIndex];
     if (!this.memory || !this.store.settings.memory || ctx.missionTurn !== 'work' || !ctx.mission || !st || st.meeting || (st.mission && st.mission !== 'cards') || msg.once) return;
+    const folder = this.memoryFolder(ctx.s);
+    if (!folder) return;
     const list = [];
     for (const b of msg.blocks || []) if (b.kind === 'tool' && b.status === 'error') { const k = failKey(b.output || '', b.name || ''); if (k) list.push(k); }
-    if (msg.status === 'error' && msg.error && !ctx.stalled && !isQuotaError(msg.error) && !isTransientError(msg.error)) { const k = failKey(msg.error); if (k) list.push(k); }
+    const e = msg.status === 'error' ? String(msg.error || '') : '';
+    if (e && !ctx.halted?.has(msg.id) && !isQuotaError(e) && !isTransientError(e) && !envError(e) && !this.#appError(e)) { const k = failKey(e); if (k) list.push(k); }
     if (!list.length) return;
     const local = msg.provider === 'local' || (msg.aiChain || []).includes('local');
     const id = ctx.mission.id;
-    const job = this.memory.of(this.memoryFolder(ctx.s))
+    const job = this.memory.of(folder)
       .then((mem) => mem.addFailures(list, id, { local }))
       .catch(() => { /* 기억 쓰기 실패는 조용히 넘긴다 */ })
       .finally(() => this.remembering.delete(job));
@@ -3892,9 +3910,18 @@ export class Orchestrator {
   }
 
   // 이 목표 일 실행이 일 단계 프롬프트에 넣을 반복 실패 줄의 원본(결정 0030): 실행을 시작할 때 한 번 읽어 둔다(프롬프트를 만드는 #prompt 는 기다리지 않는다). 기억이 꺼져 있으면 없음
+  // 작업 폴더도 기본 작업 폴더도 없는 세션(기억 폴더 '')에는 주지 않는다(#recordFails 와 같다)
   async #pastFails(ctx) {
-    if (!this.memory || !this.store.settings.memory) return [];
-    try { return (await (await this.memory.of(this.memoryFolder(ctx.s))).failures()).items; } catch { return []; }
+    const folder = this.memoryFolder(ctx.s);
+    if (!this.memory || !this.store.settings.memory || !folder) return [];
+    try { return (await (await this.memory.of(folder)).failures()).items; } catch { return []; }
+  }
+
+  // 앱이 낸 단계 오류인가(지금 화면 언어의 문구와 한국어 원문 둘 다 본다): 실행 실패(프로그램 시작 실패)·내부 오류·지운 에이전트·모르는 프로바이더
+  #appError(text) {
+    const heads = [tr('실행 실패: {msg}', { msg: '' }), '실행 실패: ', tr('내부 오류: {msg}', { msg: '' }), '내부 오류: ', tr('알 수 없는 프로바이더: {id}', { id: '' }), '알 수 없는 프로바이더: '];
+    const s = String(text || '');
+    return heads.some((h) => h && s.startsWith(h)) || s === tr('에이전트가 삭제됐어.') || s === '에이전트가 삭제됐어.';
   }
 
   // 에이전트 편집 화면의 "새 대화마다 보내는 고정 글"(결정 0026): 이 에이전트(저장 전에 고친 값)의 시스템 지시 글자 수와 그중 스킬 본문 몫, 스킬마다 글자 수.
@@ -4471,8 +4498,8 @@ export class Orchestrator {
           setTimeout(() => force({ text: '' }), FORCE_END_MS).unref?.();
         }, Math.min(30000, Math.max(20, minutes * 15000)));
         timer?.unref?.();
-        const done = Promise.race([h.done, forced]).then((r) => (stalled ? { ...r, stopped: false, error: tr('{n}분 동안 아무 출력이 없어서 멈춘 걸로 보고 껐어. 다시 시도하거나 건너뛰어줘.', { n: idle }) }
-          : looped ? { ...r, stopped: false, looped: true, error: tr('같은 알림이나 같은 작업을 {n}번 되풀이해서 헛도는 걸로 보고 껐어. 다시 시도하면 새 대화로 시작해. 건너뛰어도 돼.', { n: looped }) } : r)).finally(() => { clearInterval(timer); trip = null; });
+        const done = Promise.race([h.done, forced]).then((r) => (stalled ? { ...r, stopped: false, halted: true, error: tr('{n}분 동안 아무 출력이 없어서 멈춘 걸로 보고 껐어. 다시 시도하거나 건너뛰어줘.', { n: idle }) }
+          : looped ? { ...r, stopped: false, looped: true, halted: true, error: tr('같은 알림이나 같은 작업을 {n}번 되풀이해서 헛도는 걸로 보고 껐어. 다시 시도하면 새 대화로 시작해. 건너뛰어도 돼.', { n: looped }) } : r)).finally(() => { clearInterval(timer); trip = null; });
         // 추가 지시를 보내면 다시 일하기 시작하니 시계를 돌려놓는다
         const steer = h.steer && ((t) => { last = Date.now(); return h.steer(t); });
         return { ...h, done, ...(steer ? { steer } : {}) };
@@ -4505,6 +4532,8 @@ export class Orchestrator {
     // 끊긴 목표를 이어서 할 때(결정 0016): 끊긴 단계에서 일하던 에이전트에게만 맨 앞에 한 줄(코드가 쓴 지시). 그 에이전트는 새 대화로 시작한다
     // 끊기기 전에 밖으로 보낸 것(올리기·배포·메시지 등)은 다시 하지 말라는 한 문장을 뒤에 붙인다(결정 0022. 글 지시라 코드로 막지는 못한다)
     if (ctx.resumeAt?.stageIndex === i && ctx.resumeAt.agents.has(String(agent.id))) parts.push(`${tr('[이어서] 이 단계는 앱이 꺼져서 중간에 끊겼어. 작업 폴더에 이미 해 둔 것이 있는지 먼저 확인하고, 있으면 거기서 이어서 해.')} ${resumeSent()}`);
+    // 일시 장애로 자동으로 다시 도는 사람(결정 0030): 앞 시도가 이미 한 일을 되풀이하지 말라는 한 줄(코드가 쓴 지시. 글 지시라 코드로 막지는 못한다)
+    if (ctx.transientAgain?.has(String(agent.id))) parts.push(transientSent());
     // 일 카드(결정 0018): 답 끝의 두 칸을 빠뜨려 한 번 다시 요청하는 차례(코드가 쓴 지시)
     if (ctx.tailAsk?.has(String(agent.id))) parts.push(tr('[끝의 두 칸 다시 쓰기] 앞 답 끝에 "{a}"와 "{b}"가 없었어. 일을 다시 하지 말고, 아래 형식대로 그 두 칸만 써.', { a: tr('바꾼 파일'), b: tr('다음 카드가 알아야 할 것') }));
     const cardStage = st.mission === 'cards';

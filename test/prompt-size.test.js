@@ -12,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tr } from '../server/i18n.js';
 import en from '../public/js/i18n/en.js';
-import { blockedRule, outsideRule, resumeSent, tailRule, ASSUME, goalBlock, researchBlock, planBlock, reviewBlock, planPrompt, reviewPrompt, researchPrompt, questionsPrompt, scanPrompt, cardPrompt, failuresPrompt } from '../server/mission.js';
+import { blockedRule, outsideRule, resumeSent, tailRule, ASSUME, goalBlock, researchBlock, planBlock, reviewBlock, planPrompt, reviewPrompt, researchPrompt, questionsPrompt, scanPrompt, cardPrompt, failuresPrompt, transientSent } from '../server/mission.js';
 import { verdictBlock, checkBlock } from '../server/meeting.js';
 import { startTestApp } from './helpers.js';
 
@@ -31,6 +31,8 @@ const pure = () => ({
   resumeHead: tr(RESUME),
   // 반복 실패 줄(결정 0030): 되풀이된 실패가 있을 때만 일 단계에 붙는 블록. 줄 하나(글 없이 "- (목표 n개에서 m번)" 틀만)로 잰다
   failuresPrompt: failuresPrompt([{ key: 'x', line: '', n: 0, goals: [] }], M8),
+  // 일시 장애로 자동으로 다시 도는 사람의 맨 앞 한 줄(결정 0030): 다시 도는 그 차례에만
+  transientHead: transientSent(),
 });
 
 // 실행 기록에서 뗀 프롬프트 부분: 무작위 표식(8자리) 사이의 글(참석자의 말·질문)은 빼고 표식은 고정 값으로

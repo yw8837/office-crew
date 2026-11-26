@@ -1,12 +1,15 @@
 // 웹 브라우저 쓰기 화면(결정 0029): 에이전트 편집의 스위치, 설정의 전역 켜기·허용 도메인, 세션 오른쪽 패널의 "브라우저" 탭, 도구 블록의 작은 그림.
 // 실시간 영상이 아니라 에이전트가 찍은 화면(스크린샷)을 보여 준다
 import { useEffect, useState } from 'preact/hooks';
-import { html, Modal, Toggle } from '../ui.js';
+import { html, Modal, Toggle, PERM_LABEL } from '../ui.js';
 import { state, toast, agentById, providerById } from '../state.js';
 import { browserUrl } from '../api.js';
 import { t, locale } from '../i18n/index.js';
 
 const RECENT = 20; // 넘겨 볼 수 있는 최근 화면 수
+// 붙는 권한 단계(서버 server/browser.js 의 BROWSER_PERMS 와 같게): 파일 편집 허용·자동 판단·전부 허용
+const BROWSER_PERMS = ['edit', 'auto', 'full'];
+const permName = (k) => String(PERM_LABEL[k]?.[0] || k).replace(/\s*⚠/, '');
 
 // 세션에서 찍힌 화면(오래된 것부터): 에이전트 답의 도구 블록에 붙은 shot 을 모은다
 export function browserShots(s) {
@@ -89,7 +92,7 @@ export function BrowserTab({ s }) {
 // 도구 블록 아래의 작은 그림(그 호출 뒤에 찍힌 화면). 누르면 크게
 export function ShotThumb({ b }) {
   const [big, setBig] = useState(false);
-  const sid = state.currentId;
+  const sid = b.shot?.sid; // 그 메시지가 속한 세션(서버가 기록할 때 적는다). 보고 있는 세션이 아니라
   if (!sid || !b.shot?.file) return '';
   return html`<button type="button" class="bshot-thumb" title=${b.shot.url || t('크게 보기')} onClick=${() => setBig(true)}><${ShotImg} sid=${sid} shot=${b.shot} /></button>
     ${big && html`<${BigShot} sid=${sid} shot=${b.shot} onClose=${() => setBig(false)} />`}`;
@@ -107,9 +110,9 @@ export function BrowserSwitch({ a, set }) {
     <div><b>${t('웹 브라우저 쓰기')}</b>
       <div class="hint">${can ? t('에이전트가 페이지를 열고, 누르고, 입력하고, 화면을 찍어. 찍은 화면은 세션 오른쪽 패널의 "브라우저" 탭에 보여. 따로 쓰는 빈 프로필이라 내 브라우저의 로그인은 쓰지 않아.') : why}</div>
       ${can && auto && html`<div class="hint">${t('자동 라우팅이면 실행 때 고른 AI가 Claude나 Codex일 때만 붙어.')}</div>`}
-      ${can && a.browser && a.permission === 'plan' && html`<div class="hint">${t('권한이 읽기 전용이면 붙지 않아(페이지를 누르는 건 쓰기라서).')}</div>`}
+      ${can && !BROWSER_PERMS.includes(a.permission) && html`<div class="hint bswitch-perm">${t('권한이 "{perm}"이면 붙지 않아. 페이지를 누르고 파일도 쓸 수 있는 도구라서 {allowed} 권한에서만 붙어.', { perm: permName(a.permission), allowed: BROWSER_PERMS.map(permName).join(' · ') })}</div>`}
       ${can && a.browser && state.settings.browserTool === false && html`<div class="hint">${t('설정 → 기본값에서 웹 브라우저 쓰기가 꺼져 있어서 지금은 붙지 않아.')}</div>`}
-      ${told && html`<div class="infobox" style="margin-top:6px">${t('처음 쓸 때 Node.js 의 npx 가 Playwright MCP 패키지와 브라우저를 내려받아. 띄우는 건 이 AI의 CLI야. 내려받는 크기와 위치는 아직 확인하지 못했어.')}</div>`}
+      ${told && html`<div class="infobox" style="margin-top:6px">${t('처음 쓸 때 Node.js 의 npx 가 Playwright MCP 패키지를 내려받아. 띄우는 건 이 AI의 CLI야. 브라우저를 따로 내려받는지, 내려받는 크기와 위치는 확인하지 못했어.')}</div>`}
     </div>
   </div></div>`;
 }

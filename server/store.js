@@ -57,6 +57,7 @@ export class Store {
     this.pinned = new Set(); // 실행 중이라 캐시에서 내리면 안 되는 세션
     this.timers = new Map();
     this.indexTimer = null;
+    this.onDelete = []; // 세션을 지운 뒤 부를 함수(세션 id). 브라우저 화면 폴더·기록 지우기(결정 0029)
   }
 
   init() {
@@ -307,8 +308,8 @@ export class Store {
     fs.rmSync(path.join(this.dirs.sessions, `${id}.json`), { force: true });
     // 건네려고 만든 대화 파일도 같이. 에이전트가 읽는 중이라 못 지워도 세션 삭제는 끝낸다
     try { if (this.dirs.handoff && /^[\w-]+$/.test(String(id))) fs.rmSync(path.join(this.dirs.handoff, id), { recursive: true, force: true }); } catch { /* 못 지운 폴더는 남는다(저장 공간 보고의 handoff 크기에 잡힌다) */ }
-    // 브라우저 화면 폴더도 같이(결정 0029). 브라우저가 파일을 잡고 있어 못 지워도 세션 삭제는 끝낸다
-    try { if (this.dirs.browser && /^[\w-]+$/.test(String(id))) fs.rmSync(path.join(this.dirs.browser, id), { recursive: true, force: true }); } catch { /* 남는다 */ }
+    // 지운 뒤 할 일(브라우저 화면 폴더와 기록 등). 하나가 실패해도 세션 삭제는 끝낸다
+    for (const fn of this.onDelete) { try { fn(id); } catch { /* 남는다 */ } }
     this.#saveIndexSoon();
   }
 

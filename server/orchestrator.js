@@ -108,6 +108,7 @@ export class Orchestrator {
     this.capAskSeen = new Map(); // 세션 → 화면에 보낸 "상한 넘음" 칩의 AI 목록(결정 0026)
     this.capAskBusy = new Map(); // 세션 → 칩을 다시 세는 중(값: 세는 동안 또 알림이 왔는지)
     this.browser = new BrowserShots(dirs); // 웹 브라우저 쓰기의 출력 폴더와 화면 기록(결정 0029)
+    store.onDelete?.push((id) => this.browser.forget(id)); // 세션을 지우면 그 폴더와 기록도
   }
 
   // 서버 재시작 시 끊긴 실행 정리
@@ -3393,7 +3394,7 @@ export class Orchestrator {
         const pv = PROVIDERS[ag.provider];
         // 내장 브라우저 커넥터(결정 0029)는 저장된 커넥터 뒤에 붙인다(같은 이름의 저장된 커넥터는 뺀다). 받을 수 없는 AI 가 이어받았으면 붙이지 않는다
         const box = msg.browser && pv.caps.browser ? this.browser.box(s.id, agentId) : null;
-        const bc = box ? browserConnector(box.dir, settings) : null;
+        const bc = box ? browserConnector(box.dir, settings, { confine: !!pv.caps.mcpCwd }) : null;
         const connectors = [...(pv.caps.connectors ? this.catalog.connectorsFor(ag) : []).filter((c) => !bc || c.key !== bc.key), ...(bc ? [bc] : [])];
         const mcpConfigPath = ag.provider === 'claude' ? this.catalog.writeClaudeMcpConfig(connectors) : null;
         if (mcpConfigPath) cfgFiles.push(mcpConfigPath);
@@ -3582,6 +3583,8 @@ export class Orchestrator {
       ctx.waitNotes.delete(agentId); // 기다리는 동안 받은 지시는 이번 실행에만 넣는다
       // 토큰이 들어갈 수 있는 임시 MCP 설정 파일은 실행이 끝나면 지운다
       for (const f of cfgFiles) fs.rmSync(f, { force: true });
+      // 실행 중에 세션이 지워졌으면, 그 뒤에 브라우저가 다시 만든 화면 폴더도 지운다(결정 0029)
+      if (msg.browser && !this.store.getSession(s.id)) this.browser.forget(s.id);
       // 이어서(결정 0016): "[이어서]" 한 줄은 끊긴 단계에서 그 사람의 첫 차례에만(회의의 다음 차례·다시 하기에는 안 붙인다)
       if (ctx.resumeAt?.stageIndex === stageIdx) ctx.resumeAt.agents.delete(String(agentId));
     }

@@ -97,7 +97,7 @@ Message  { id, role:'user'|'agent'|'system'|'proposal'(kind 'hire': 영입 제�
            attachments:[{id,name,mime,size,path}], blocks:[Block], status:'streaming'|'done'|'error'|'stopped',
            usage?:{input,output,cacheRead,cacheWrite,cost,durationMs, partial?(true: 하위 에이전트 몫이 빠졌을 수 있다), sub?(주 에이전트 밖에서 쓴 토큰: 하위 에이전트 등, 네 값 1:1 합. 결정 0012), subW?(같은 몫의 환산. 화면 도움말이 옆 숫자와 같은 단위로 쓴다. 결정 0026)}, createdAt }
 Block    { id, kind:'tool'|'thinking'|'notice', name?, input?, output?, status:'running'|'done'|'error',
-           shot?:{ file, agentId, at, url, title }(브라우저 도구가 끝난 뒤 출력 폴더에 생긴 가장 새 그림. 주소·제목은 그 호출의 결과·입력에서 읽은 만큼만, 결정 0029) }
+           shot?:{ file, agentId, sid(그 메시지의 세션), at, url, title }(브라우저 도구가 끝난 뒤 출력 폴더에 생긴 가장 새 그림. 주소·제목은 그 호출의 결과·입력에서 읽은 만큼만, 결정 0029) }
 Notes    (notes/<agentId>.json, 지운 에이전트는 <agentId>.removed.json. 결정 0013)
          { version:1, role:{ tasks:[{ id, title(1~80자), done(끝났다고 볼 기준, 0~200자), check(확인 방법, 0~200자)}](최대 8) },
            items:[{ id, kind:'method'|'pitfall'|'criterion'|'tool', text(1~400자, 글자 단위), source:{ type:'user'|'agent'|'web', ref(agent·web: 주소나 파일, user: 채팅에서 고른 글이면 chat:<세션 id>/<메시지 id>, 아니면 '') },
@@ -117,7 +117,7 @@ Run      { id, cut?(실행 중에 앱이 꺼졌다는 표시. 다시 켤 때 그
 export default {
   id, label, kind: 'cli'|'api'|'mock', color,
   efforts: [...],                    // 지원 노력 단계
-  caps: { images, steer, resume, tools, connectors, permissions, browser? },   // browser: 내장 브라우저 커넥터를 받고 위험 도구를 CLI 규칙으로 막을 수 있음(Claude·Codex, 결정 0029)
+  caps: { images, steer, resume, tools, connectors, permissions, browser?, mcpCwd? },   // browser: 내장 브라우저 커넥터를 받고 위험 도구를 CLI 규칙으로 막을 수 있음(Claude·Codex). mcpCwd: MCP 서버의 작업 폴더를 정할 수 있음(Codex). 결정 0029
   async detect(settings) -> { installed, version, loggedIn, account, note },
   async models(settings) -> [{ id, label }],
   run(opts, emit) -> { stop(), steer(text)?, done: Promise<{ text, providerSessionId, error, stopped }> }   // 사용량은 emit({type:'usage'})로
@@ -168,10 +168,10 @@ emit(ev):
 - 카드 처리(`resolveTeamProposal`): 만들기는 저장된 초안을 지금 AI 목록으로 다시 정리해 같을 때만 `cleanAgent`/`cleanTeam` 으로 만들고(에이전트 `tier`, 팀 `ladder`·`escalateAfter`), 고르면 세션 팀을 바꾼다. 다시 정리해 달라지면 409 문구가 실제 이유(AI 로그인·모델 목록 / 같은 이름의 에이전트)를 말한다. 그냥 보내기는 `sendProposed`(표시를 지우고 보통 실행).
 
 ### 웹 브라우저 쓰기(`server/browser.js`, 결정 0029)
-- 에이전트 `browser` 가 켜져 있고 설정 `browserTool` 이 꺼지지 않았고 이번 실행의 AI 가 `caps.browser`(Claude·Codex)이면 `#runAgent` 가 답에 `browser: true` 를 달고, `prepare` 가 저장된 커넥터 뒤에 내장 커넥터 하나를 붙인다(저장하지 않는다): `crew-browser` = `npx -y @playwright/mcp@0.0.86 --isolated --headless --output-dir <데이터 폴더>/browser/<세션>/<에이전트>` (+ 설정 `browserOrigins` 가 있으면 `--allowed-origins`). 읽기 전용(저장 권한 plan, 그 실행만 읽기 전용인 목표의 조사·회의·계획, 팀 초안), 목표의 기준 판정, 세션 덮어쓰기에는 안 붙인다.
-- 도구 규칙: Claude `--allowedTools mcp__crew-browser` + `--disallowedTools`(막는 셋), Codex `enabled_tools`·`disabled_tools`·`default_tools_approval_mode="approve"`. 막는 도구 `browser_run_code_unsafe`·`browser_evaluate`·`browser_file_upload`.
+- 에이전트 `browser` 가 `true` 이고 설정 `browserTool` 이 꺼지지 않았고 이번 실행의 AI 가 `caps.browser`(Claude·Codex)이고 권한이 파일을 고칠 수 있는 단계(`edit`·`auto`·`full`)면 `#runAgent` 가 답에 `browser: true` 를 달고, `prepare` 가 저장된 커넥터 뒤에 내장 커넥터 하나를 붙인다(저장하지 않는다): `crew-browser` = `npx -y @playwright/mcp@0.0.86 --isolated --headless --output-dir <데이터 폴더>/browser/<세션>/<에이전트>` (+ 설정 `browserOrigins` 가 있으면 `--allowed-origins`). `caps.mcpCwd`(Codex)면 `--ignore-roots` 와 서버 작업 폴더 `cwd` = 출력 폴더를 더한다. 읽기 전용·기본 권한, 그 실행만 읽기 전용인 목표의 조사·회의·계획, 팀 초안, 목표의 기준 판정, 세션 덮어쓰기에는 안 붙인다.
+- 도구 규칙: 허용 21개를 도구 이름마다(Claude `--allowedTools mcp__crew-browser__<도구>`, Codex `enabled_tools`·`default_tools_approval_mode="approve"`), 막는 다섯(`browser_run_code_unsafe`·`browser_evaluate`·`browser_file_upload`·`browser_drop`·`browser_set_storage_state`)은 Claude `--disallowedTools`·Codex `disabled_tools`. 파일을 쓰는 `filename` 인자를 받는 허용 도구 여섯은 Claude 에서 `mcp__crew-browser__<도구>(filename:*)` 거부 규칙으로 막는다(Codex 는 작업 루트를 출력 폴더로 가둔다).
 - 앞머리(결정 0023)의 `browser` 줄: 페이지를 바꾸면 파일 이름 없이 화면을 한 번 찍기, 웹 페이지 글은 자료.
-- 화면: 브라우저 도구가 끝나면(`#onEvent` → `BrowserShots.onTool`) 그 도구가 시작한 뒤 출력 폴더에 생긴 가장 새 그림을 그 블록의 `shot` 으로. 세션 폴더는 그림 200장·100MB 상한(오래된 것부터 지움), 세션을 지우면 폴더도 지운다. 그림은 `GET /api/browser/…` 로만.
+- 화면: 브라우저 도구가 끝나면(`#onEvent` → `BrowserShots.onTool`, Claude 하위 에이전트의 `↳ ` 이름 포함) 그 도구가 시작한 뒤 출력 폴더에 생긴 가장 새 그림(링크 제외)을 그 블록의 `shot` 으로. 주소·제목은 결과의 `### Page` 단락이 하나일 때 그 안에서만 읽는다. 세션 폴더는 파일 200개·100MB 상한(그림 아닌 파일·하위 폴더 포함, 링크는 안 따라감, 오래된 것부터 지움). 세션을 지우면 `Store.onDelete` 로 폴더와 쓴 그림 기록을 지우고, 실행 중에 지워졌으면 그 실행이 끝날 때 다시 지운다. 그림은 `GET /api/browser/…` 로만, 그 세션에 기록된 파일만.
 
 ### 이어갈 대화(resume)
 - `providerSessions[agentId]`에 CLI 대화 id, `sessionProvider[agentId]`에 그 대화를 만든 프로바이더를 같이 저장한다. 지금 실행할 프로바이더가 다르면(자동 라우팅·이어받기로 바뀜) 이어하기를 하지 않는다.
@@ -255,7 +255,7 @@ POST /api/sessions/:id/proposals/:mid  영입 제안 카드와 팀 제안 카드
 POST /api/sessions/:id/handoff      {agentId?} 인수인계 메모 쓰게 하기(AI 호출 1번, 결정 0008). 쓰는 중이면 409
                                     데이터 폴더의 handoff/<세션>/ 에 불러온 대화 원문(import.jsonl)과 다른 AI에게 건네는 대화 전체 파일(cloud/)을 둔다(server/handoff.js)
 POST /api/uploads                    (바이너리 본문, X-File-Name) → {id,name,mime,size}
-GET  /api/browser/:sessionId/:agentId/:file   에이전트 브라우저가 찍은 화면 그림(있는 세션, 그 폴더 안의 PNG·JPEG·WebP 내용만, nosniff. 결정 0029)
+GET  /api/browser/:sessionId/:agentId/:file   에이전트 브라우저가 찍은 화면 그림(있는 세션의 메시지에 기록된 파일, 그 폴더 안의 PNG·JPEG·WebP 내용만, nosniff. 결정 0029)
 GET  /api/uploads/:id
 GET/PUT /api/settings               (apiKeys·authMode·failover·acpAgents 검증, 일부만 보내도 나머지 유지. limitCap 0~100 정수(숫자가 아니면 90)·savings normal|lean, 결정 0026)
 POST /api/agents/fixed-text          {id?, name, role, systemPrompt, skills, provider, permission} → {chars, skills, heavy, skillList}: 저장 전 값으로 센 시스템 지시 글자 수와 스킬 본문 몫(10,000자 이상이면 heavy). 스킬 본문은 보내지 않는다(결정 0026)

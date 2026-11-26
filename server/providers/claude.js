@@ -146,11 +146,13 @@ export default {
     }
     if (resumeId) args.push('--resume', resumeId, ...(opts.forkSession ? ['--fork-session'] : []));
     if (mcpConfigPath) args.push('--mcp-config', mcpConfigPath);
-    // 앱이 붙인 내장 커넥터(결정 0029): 그 서버의 도구는 묻지 않고 쓰게 하고(앱은 권한 질문을 받지 못한다), 위험 도구는 Claude 의 도구 목록에서 뺀다
+    // 앱이 붙인 내장 커넥터(결정 0029): 고른 도구만 도구 이름마다 묻지 않고 쓰게 하고(앱은 권한 질문을 받지 못한다), 위험 도구는 Claude 의 도구 목록에서 빼고,
+    // 파일을 쓰는 인자(filename)를 준 호출은 거부한다(인자 규칙은 설정 파일에선 건너뛰어서 --disallowedTools 로만 준다). 전부 허용(건너뛰기)에서는 허용 목록이 아무것도 줄이지 않아 차단 목록만 남는다
     for (const c of opts.connectors || []) {
       if (!c.tools) continue;
-      args.push('--allowedTools', `mcp__${c.key}`);
-      if (c.tools.deny?.length) args.push('--disallowedTools', ...c.tools.deny.map((n) => `mcp__${c.key}__${n}`));
+      if (c.tools.allow?.length) args.push('--allowedTools', ...c.tools.allow.map((n) => `mcp__${c.key}__${n}`));
+      const deny = [...(c.tools.deny || []).map((n) => `mcp__${c.key}__${n}`), ...(c.tools.denyArgs || []).map(({ tool, arg }) => `mcp__${c.key}__${tool}(${arg}:*)`)];
+      if (deny.length) args.push('--disallowedTools', ...deny);
     }
     for (const d of addDirs) args.push('--add-dir', d);
     if (agent.light) args.push('--safe-mode');

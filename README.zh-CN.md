@@ -210,7 +210,7 @@ Office Crew 的设计目标是在各服务商的规则范围内使用。简而�
 - **登录信息留在 CLI 里。** Office Crew 从不读取、复制、保存或转发 CLI 的登录令牌（例如 `~/.claude/.credentials.json`、`~/.codex/auth.json`）。从 `~/.claude.json` 中只使用 MCP 服务器列表。登录始终在终端窗口里通过各厂商的 CLI 完成（Office Crew 可以帮你打开终端）。
 - **一人一机。** 订阅登录仅供你本人在自己的电脑上使用。不要通过 Office Crew 共享账号，也不要把它作为服务提供给他人。
 - **产品、团队和无人值守运行请用 API 密钥。** 如果你要为他人构建产品、在公司中使用或无人值守运行，请把 Claude Code 和 Codex 的计费方式切换为 **API 密钥**（设置 → AI 账号 → 计费方式）。Anthropic 要求第三方产品在未获批准时不得提供 claude.ai 登录或订阅额度，OpenAI 也建议以编程方式使用 Codex 时采用 API 密钥。
-- **Google：** Gemini CLI 的个人 Google 登录（Gemini Code Assist for individuals）已无法使用，因此 Office Crew 使用 Gemini API 密钥。Antigravity 的个人账号条款不允许通过第三方工具使用，因此不予支持。
+- **Google：** Gemini CLI 的个人 Google 登录（Gemini Code Assist for individuals）已于 2026-06-18 结束（付费 API 密钥仍可使用），因此 Office Crew 使用 Gemini API 密钥。Antigravity 的个人账号条款不允许通过第三方工具使用，因此不予支持。
 - **Hermes：** 如果把 Hermes 的服务商设为 Anthropic，Hermes 可能会复用 Claude Code 的登录令牌。请改为给 Hermes 配置 Anthropic API 密钥或其他服务商。
 - Office Crew 与 Anthropic、OpenAI、Google、Nous Research 没有任何关联。
 

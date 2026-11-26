@@ -210,7 +210,7 @@ flowchart LR
 - **로그인은 CLI에 그대로.** 오피스 크루는 CLI 로그인 토큰(예: `~/.claude/.credentials.json`, `~/.codex/auth.json`)을 읽거나, 복사하거나, 저장하거나, 중계하지 않습니다. `~/.claude.json`에서는 MCP 서버 목록만 가져다 씁니다. 로그인은 언제나 터미널 창에서 각 회사의 CLI로 합니다(오피스 크루가 창을 열어 줄 수 있습니다).
 - **한 사람, 한 PC.** 구독 로그인은 내 PC에서 나 혼자 쓰는 용도입니다. 오피스 크루로 계정을 나눠 쓰거나 다른 사람에게 서비스로 제공하지 마세요.
 - **제품·팀·무인 실행은 API 키로.** 다른 사람을 위한 제품을 만들거나, 회사에서 쓰거나, 사람 없이 돌린다면 Claude Code와 Codex의 결제 방식을 **API 키**로 바꾸세요(설정 → AI 계정 → 결제 방식). Anthropic은 승인 없이 제3자 제품이 claude.ai 로그인이나 구독 한도를 제공하지 않도록 요청하고, OpenAI는 프로그램에서 Codex를 쓸 때 API 키를 권장합니다.
-- **Google:** Gemini CLI의 개인 Google 로그인(Gemini Code Assist for individuals)은 더 이상 동작하지 않아서, 오피스 크루는 Gemini API 키를 씁니다. 안티그래비티는 개인 계정 약관상 제3자 도구로 쓰는 것이 허용되지 않아 지원하지 않습니다.
+- **Google:** Gemini CLI의 개인 Google 로그인(Gemini Code Assist for individuals)은 2026-06-18에 끝나서(유료 API 키는 계속 쓸 수 있습니다), 오피스 크루는 Gemini API 키를 씁니다. 안티그래비티는 개인 계정 약관상 제3자 도구로 쓰는 것이 허용되지 않아 지원하지 않습니다.
 - **Hermes:** Hermes의 제공자로 Anthropic을 고르면 Hermes가 Claude Code 로그인 토큰을 가져다 쓸 수 있습니다. 대신 Anthropic API 키나 다른 제공자를 지정하세요.
 - 오피스 크루는 Anthropic, OpenAI, Google, Nous Research와 관련이 없습니다.
 

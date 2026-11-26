@@ -2480,4 +2480,6 @@ export default {
   "환산 {n} 토큰": "weighted {n} tokens",
   "환산 {n}": "weighted {n}",
   "환산": "Weighted",
+  '{n}일 전': '{n}d ago',
+  '초기화됨 · 마지막으로 본 값 {pct}% ({age})': 'Reset · last seen {pct}% ({age})',
 };

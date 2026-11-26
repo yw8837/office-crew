@@ -26,7 +26,7 @@ export function MemoryBadge({ s }) {
   }, [s.id, on, runs, ended]);
   if (!on || !m) return null;
   return html`<button class="mem-badge" title=${t('이 세션의 작업 폴더에 쌓인 대화. 전부 원문 그대로 보관돼 있고, 실행마다 관련된 조각만 꺼내 넣어. 눌러서 찾아봐.')} onClick=${() => { state.ui.memoryKey = m.key; go('memory'); }}>
-    🧠 ${t('쌓인 맥락 약 {n} 토큰', { n: fmtTok(roughTokens(m.chars)) })}
+    🧠 ${t('쌓인 맥락 약 {n} 토큰', { n: fmtTok(roughTokens(m.chars)) })}${m.hidden > 0 ? ` · ${t('검색에서 뺀 보고 {n}개 포함', { n: m.hidden })}` : ''}
   </button>`;
 }
 
@@ -59,9 +59,10 @@ export function MemoryPage() {
       <div class="mem-projects">
         ${projects.map((p) => html`<button class=${`mem-proj${p.key === key ? ' on' : ''}`} onClick=${() => { setKey(p.key); setRes(null); }} title=${p.cwd || ''}>
           <b>${folderName(p)}</b>
-          <span class="small muted">${t('약 {n} 토큰 · 조각 {k}개', { n: fmtTok(roughTokens(p.chars)), k: p.chunks.toLocaleString(locale()) })}</span>
+          <span class="small muted">${t('약 {n} 토큰 · 조각 {k}개', { n: fmtTok(roughTokens(p.chars)), k: p.chunks.toLocaleString(locale()) })}${p.hidden > 0 ? ` · ${t('검색에서 뺀 보고 {n}개 포함', { n: p.hidden })}` : ''}</span>
         </button>`)}
       </div>
+      ${cur?.hiddenBad && html`<div class="warnbox" style="margin-top:10px" role="alert">${t('검색에서 뺀 보고 목록 파일이 깨져서 hidden.json.bad 로 옮기고 새로 시작했어. 전에 뺀 보고가 검색에 다시 나올 수 있어.')}</div>`}
       <form class="row" style="margin:14px 0 8px" onSubmit=${search}>
         <input class="input" style="flex:1" placeholder=${t('이 기억에서 찾을 말 (예: 결제 서버 포트)')} value=${q} onInput=${(e) => setQ(e.target.value)} aria-label=${t('기억 검색')} />
         <button class="btn primary" disabled=${busy || !q.trim() || !cur}><${Icon} name="search" /> ${t('찾기')}</button>
@@ -74,7 +75,7 @@ export function MemoryPage() {
             <span class="chip">${t('기억 {n}', { n: i + 1 })}</span>
             <span>${when(h.at)}</span>
             <span>·</span>
-            <span>${h.role === 'user' ? t('사용자') : (h.who || 'AI')}</span>
+            <span>${h.role === 'user' ? t('사용자') : h.role === 'report' ? t('완주 보고') : (h.who || 'AI')}</span>
             <span>·</span>
             ${h.sessionExists
               ? html`<a href="#" onClick=${(e) => { e.preventDefault(); go('session', h.sessionId); }}>${h.sessionTitle || t('세션')}</a>`

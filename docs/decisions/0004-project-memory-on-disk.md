@@ -4,6 +4,10 @@
 - Date: 2026-11-11
 - Related: 0001 (no runtime dependencies), `server/memory.js`, `test/memory.test.js`
 
+## Revision (2026-11-26, with [0025](0025-goal-report-and-evidence.md))
+
+A goal report can be added to memory by the user (role `report`), and removed again: removing writes the message id to `hidden.json` in that memory's folder and search skips its pieces; the text and the index are not changed, and adding it again takes the id off the list. Nothing else in memory can be removed. Older versions ignore `hidden.json` and find those pieces.
+
 ## Context
 
 When a CLI can't resume a conversation, Office Crew passes on only the last 16 messages, cut to 2,000 characters each. Nothing carries over between sessions. The goal is memory that keeps growing (10 million tokens and more) without slowing a run down, without spending more tokens, and with as little made-up or lost information as possible.

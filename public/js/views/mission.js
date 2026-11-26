@@ -7,6 +7,8 @@ import { post, put } from '../api.js';
 import { t, locale } from '../i18n/index.js';
 import { sumEstimate, limitRows, recordAge } from '../mission-numbers.js';
 import { WIN_LABEL } from './session.js'; // 한도 창 이름(세션 화면의 계정 한도와 같은 이름)
+import { answerNames, durationWords, unverifiedLines, failWords } from '../report-lines.js'; // 완주 보고의 글줄(서버가 기억에 넣는 글 판과 같은 함수, 결정 0025)
+import { goalEndWord } from '../stage-model.js'; // 끝 상태 이름(흐름 무대의 끝 깃발과 같은 말)
 
 const CRIT_COUNT = 7; // 서버와 같은 상한(server/mission.js)
 const lines = (text) => String(text || '').split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
@@ -231,6 +233,11 @@ const waitWords = (c, cards) => {
   return left.length ? t('{ids}을(를) 기다림', { ids: left.join(', ') }) : t('차례를 기다림');
 };
 
+// 계획 뒤 남은 호출 어림 한 줄(결정 0025): 카드 단계·기준 판정·남은 자동 되돌림. 대략치
+const planEstimateWords = (e, n) => (e.returns
+  ? t('남은 호출 어림 {min}~{max}번(카드 {n}장 · 기준 판정 · 자동 되돌림 최대 {r}번) · 지금까지 {used}번 · 상한 {cap}번', { min: e.min, max: e.max, n, r: e.returns, used: e.used, cap: e.cap })
+  : t('남은 호출 어림 {min}~{max}번(카드 {n}장) · 지금까지 {used}번 · 상한 {cap}번', { min: e.min, max: e.max, n, used: e.used, cap: e.cap }));
+
 // 계획 카드: 진행자가 쓴 일 카드 목록(코드가 다듬고 번호·단계를 붙임). 사용자 확인 없이 이어 간다. 지금 목표의 카드면 상태 칩도
 export function PlanCard({ m }) {
   const s = state.sessionData[state.route.id];
@@ -241,6 +248,8 @@ export function PlanCard({ m }) {
     ${m.fallback && html`<div class="warnbox" role="note">${t('진행자 답에서 계획 블록을 읽지 못해서 카드 하나로 일해.')}</div>`}
     ${(m.reassigned || []).map((x) => html`<div class="notice" role="note">${t('{id}의 담당 "{from}"이(가) 팀 명단에 없어서 {to}에게 맡겼어.', { id: x.id, from: x.from || '?', to: x.to })}</div>`)}
     <div class="small">${m.wavesText}</div>
+    ${m.estimate && html`<div class="small">${planEstimateWords(m.estimate, m.cards.length)}</div>
+      ${m.estimate.max > m.estimate.cap - m.estimate.used && html`<div class="small muted">${t('어림의 큰 쪽이 상한까지 남은 호출보다 많아서 첫 카드 단계 앞에서 물어봐.')}</div>`}`}
     <ol class="plan-cards">${m.cards.map((c) => {
       const now = live.find((x) => x.id === c.id);
       const [label, cls] = now ? cardChip(now.status) : ['', ''];
@@ -252,6 +261,75 @@ export function PlanCard({ m }) {
         ${c.not && html`<div class="small muted">${t('건드리면 안 되는 것')}: ${c.not}</div>`}
       </li>`;
     })}</ol>
+  </div></div>`;
+}
+
+// ── 완주 보고(결정 0025) ──
+// 목표가 끝나면 코드가 모은 사실로 만든 카드(AI 호출 없음). 처음엔 한 줄 요약으로 접혀 있고, 펼치면 호출·기준·사용자가 누른 것·확인 못 한 것·실패 종류·바뀐 파일·회의 결론.
+// 에이전트가 쓴 글(기준 근거·회의 결론)은 "에이전트가 씀" 표시와 함께. 기억에는 사용자가 "기억에 넣기"를 눌러야 들어가고, 빼면 검색에서 빠진다
+export function ReportCard({ m }) {
+  const sid = state.route.id;
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const bodyId = `report-${m.id}`;
+  const crit = m.criteria || [];
+  const pass = crit.filter((c) => c.status === 'pass').length;
+  const used = m.calls?.used ?? 0;
+  const calls = m.estimate ? t('실제 호출 {k}번(어림 {min}~{max}번)', { k: used, min: m.estimate.min, max: m.estimate.max }) : t('실제 호출 {k}번', { k: used });
+  const names = answerNames(t);
+  const left = unverifiedLines(t, m);
+  const fails = failWords(t, m.fails);
+  const memOn = state.settings.memory === true;
+  const inMem = !!m.memory?.added && m.memory.on !== false;
+  const remember = async (on) => {
+    if (busy) return;
+    setBusy(true);
+    try { const r = await post(`/api/sessions/${sid}/report/${m.id}/memory`, { on }); if (r?.notice) toast(r.notice, 'error'); } catch (e) { toast(e.message, 'error'); }
+    setBusy(false);
+  };
+  const files = m.filesState === 'pending' ? html`<div class="small muted">${t('git 에 물어보는 중…')}</div>`
+    : m.filesState !== 'done' || !m.files?.list?.length ? html`<div class="small muted">${t('git 저장소가 아니거나 커밋 안 된 변경이 없어.')}</div>`
+      : html`<ul class="small report-files">${m.files.list.map((f) => html`<li>${f}</li>`)}</ul>${m.files.more ? html`<div class="small muted">${t('…(그 밖에 {n}개)', { n: m.files.more })}</div>` : ''}
+        <div class="small muted">${t('끝났을 때 커밋 안 된 변경이야(이 목표 전부터 있던 변경도 섞일 수 있어).')}</div>`;
+  return html`<div class="msg proposal"><div class="hire goal-card report-card" role="group" aria-label=${t('완주 보고')}>
+    <div class="hire-head"><b>📊 ${t('완주 보고')}</b><span class=${`chip${m.end === 'stopped' ? ' warn' : ' ok'}`}>${goalEndWord(m.end) || m.end}</span>
+      <span class="small muted">${t('코드가 모은 기록 · AI 호출 없음')}</span></div>
+    <div class="small">${t('확인부터 끝까지 {t}', { t: durationWords(t, (m.to || 0) - (m.from || 0)) })} · ${calls} · ${t('기준 {pass}/{total} 통과', { pass, total: crit.length })}</div>
+    <div class="hire-acts">
+      <button type="button" class="btn ghost sm" aria-expanded=${open ? 'true' : 'false'} aria-controls=${bodyId} onClick=${() => setOpen(!open)}>${open ? t('보고 접기') : t('보고 펼치기')}</button>
+      <span class="grow"></span>
+      ${!memOn ? html`<span class="small muted">${t('프로젝트 기억이 꺼져 있어서 기억에 넣을 수 없어.')}</span>`
+        : inMem ? html`<span class="chip ok">${t('기억에 넣었어')}</span><button type="button" class="btn sm" disabled=${busy} onClick=${() => remember(false)}>${t('기억에서 빼기')}</button>`
+          : html`<button type="button" class="btn sm" disabled=${busy} onClick=${() => remember(true)}>${m.memory?.added ? t('기억에 다시 넣기') : t('기억에 넣기')}</button>`}
+    </div>
+    ${memOn && html`<div class="small muted">${inMem ? t('빼면 기억 검색에서 빠져(원문은 디스크에 남아).') : t('넣으면 이 작업 폴더의 다음 실행들이 참고 자료로 찾을 수 있어. 코드가 모은 사실과 기준별 결과만 넣고, 회의 결론·조사 노트는 넣지 않아.')}${m.local ? ` ${t('내 PC 모델만 받은 목표라 내 PC 모델 전용으로 넣어(클라우드 AI 에게는 안 줘).')}` : ''}</div>`}
+    <div id=${bodyId} class="report-body" role="region" aria-label=${t('완주 보고 자세히')} hidden=${!open}>
+      <div class="goal-sec"><div class="small muted"><b>${t('호출')}</b></div>
+        <div class="small">${calls} · ${t('상한 {cap}번', { cap: m.calls?.cap ?? 0 })}</div>
+        <div class="small">${t('종류별 답 수')}: ${Object.keys(names).map((k) => `${names[k]} ${m.answers?.[k] || 0}`).join(' · ')}${m.answerFails > 0 ? ` ${t('(오류·중지로 끝난 답 {n}개 포함)', { n: m.answerFails })}` : ''}</div>
+        <div class="small muted">${t('메시지 표시로 센 답 수야(오류·중지로 끝난 답도 들어가). 다시 요청·이어받기는 한 답 안에서 호출이 더 들 수 있어.')}</div></div>
+      <div class="goal-sec"><div class="small muted"><b>${t('기준별 최종 판정')}</b></div>
+        ${crit.length ? html`<div class="crit-table" role="list" aria-label=${t('기준별 최종 판정')}>${crit.map((c, i) => html`<${CritRow} c=${c} n=${i + 1} />`)}</div>` : html`<div class="small muted">${t('없음')}</div>`}</div>
+      <div class="goal-sec"><div class="small muted"><b>${t('사용자가 확정한 것')}</b></div>
+        ${m.user?.length ? html`<ul class="small">${m.user.map((x) => html`<li>${x.text}</li>`)}</ul>` : html`<div class="small muted">${t('없음')}</div>`}
+        ${m.userMore > 0 && html`<div class="small muted">${t('그 앞의 {n}줄은 줄였어.', { n: m.userMore })}</div>`}
+        <div class="small muted">${t('진행 기록에서 뽑았어. 승인·오류 대기에서 고른 것과 에이전트에게 바로 보낸 지시는 진행 기록에 없어서 빠져.')}</div></div>
+      <div class="goal-sec"><div class="small muted"><b>${t('확인 못 한 것')}</b></div>
+        ${left.length ? html`<ul class="small">${left.map((x) => html`<li>${x}</li>`)}</ul>` : html`<div class="small muted">${t('없음')}</div>`}</div>
+      <div class="goal-sec"><div class="small muted"><b>${t('실패 종류')}</b></div>
+        <div class="small">${fails || t('없음')}</div>
+        ${m.routes > 0 && html`<div class="small">${t('배정이 평소와 달랐던 답: {n}개', { n: m.routes })}</div>`}
+        ${m.logCut > 0 && html`<div class="small muted">${t('진행 기록의 앞 {n}줄이 잘려서 그 앞의 선택·실패는 빠졌어.', { n: m.logCut })}</div>`}
+        <div class="small muted">${t('코드가 진행 기록에서 센 수야.')}</div></div>
+      <div class="goal-sec"><div class="small muted"><b>${t('바뀐 파일(git)')}</b></div>${files}</div>
+      ${m.meetings?.length > 0 && html`<div class="goal-sec"><div class="small muted"><b>${t('회의 결론(결정·남은 이견)')}</b> · ${t('에이전트가 씀 · 사용자 확인 안 함')}</div>
+        ${m.meetings.map((x) => html`<div class="research-q">
+          <div class="small"><b>${x.prep ? t('준비 회의') : x.label || t('회의')}</b></div>
+          ${x.decision ? html`<div class="small">${t('결정')}: ${x.decision}</div>` : html`<div class="small muted">${t('결론 형식을 읽지 못했어(전문은 그 메시지에).')}</div>`}
+          ${x.dissent?.length > 0 && html`<div class="small">${t('남은 이견')}: ${x.dissent.join(' · ')}</div>`}
+          ${x.msgId && html`<button type="button" class="btn ghost sm" onClick=${() => jump(x.msgId)}>${t('그 메시지로 가기')}</button>`}
+        </div>`)}</div>`}
+    </div>
   </div></div>`;
 }
 
@@ -479,6 +557,17 @@ export function MissionGate({ s, run }) {
       <div class="ask-head"><span class="ask-who">🔢 ${t('한 시간 안에 시작한 카드')}</span></div>
       <div class="ask-question">${t('한 시간 안에 카드 {used}장을 시작했어(상한 {cap}장). 더 시작할까?', { used: hold.used, cap: hold.cap })}</div>
       <div class="ask-rows">${row(1, t('{n}장 더', { n: hold.step }), t('상한을 늘리고 이어서 해.'), 'more')}</div>
+      <div class="ask-foot"><span class="grow"></span><button type="button" class="btn sm danger" disabled=${busy} onClick=${() => ctl('stop')}>${t('그만')}</button></div>
+    </div>`;
+  }
+  // 계획 뒤 어림(결정 0025): 계획을 보니 남은 호출 어림의 큰 쪽이 상한까지 남은 호출보다 많다. 첫 카드 단계를 시작하기 전에 묻는다(상한을 다 쓴 게 아니다)
+  if (hold.reason === 'cap' && hold.kind === 'plan') {
+    const left = Math.max(0, (Number(hold.cap) || 0) - (Number(hold.used) || 0));
+    return html`<div class="ask-panel mission-gate" role="group" aria-label=${t('계획 뒤 어림')}>
+      <div class="ask-head"><span class="ask-who">🔢 ${t('계획 뒤 어림')}</span></div>
+      <div class="ask-question">${t('계획을 보니 남은 호출이 {min}~{max}번으로 어림돼. 상한까지 {left}번 남았어. 더 할까?', { min: hold.min, max: hold.max, left })}</div>
+      <div class="small muted">${t('어림의 큰 쪽이 남은 호출보다 많아서 첫 카드 단계를 시작하기 전에 멈췄어. 대략치라 실제로는 덜 들 수도 있어. 지금까지 {used}번 · 상한 {cap}번.', { used: hold.used, cap: hold.cap })}</div>
+      <div class="ask-rows">${row(1, t('{n}번 더', { n: hold.step }), t('상한을 늘리고 이어서 해.'), 'more')}</div>
       <div class="ask-foot"><span class="grow"></span><button type="button" class="btn sm danger" disabled=${busy} onClick=${() => ctl('stop')}>${t('그만')}</button></div>
     </div>`;
   }

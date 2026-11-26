@@ -16,6 +16,9 @@ export const holdKind = (run, i) => (run && run.status === 'waiting' && run.hold
 // 단계 띠("사무실 크게" 보기의 진행 바)에 보일 표시. 끝난 판정 단계가 ✓ 로 보여 다 끝난 것처럼 읽히지 않게
 export const goalWait = (run, i) => ({ mission: '🎯', cap: '🔢', quota: '⏳' }[holdKind(run, i)] || '');
 
+// 끝난 목표의 끝 깃발 이름. 완주 보고 카드(결정 0025)도 같은 말을 써서 둘이 어긋나지 않게 한다
+export const goalEndWord = (status) => ({ done: t('통과로 끝'), accepted: t('받아들여 끝'), stopped: t('중지됨') }[status] || '');
+
 // 서버의 에이전트 상태(agentState.state) → 무대의 사람 상태
 const LIVE = { thinking: 'think', typing: 'write', tool: 'tool', searching: 'tool', reading: 'tool', running: 'tool', waiting: 'wait', error: 'error', done: 'done', paused: 'limit', offline: 'off', idle: 'idle' };
 const TOOL_OF = { searching: 'search', reading: 'read', running: 'run' };
@@ -239,7 +242,10 @@ export function stageModel(input = {}) {
       // 판정·추가 지시는 판정 역 뒤, 막힘은 막힌 일 단계 뒤, 카드 되풀이 상한은 그 카드 단계를 시작하기 전(앞). 이미 돈 단계에서 묻는 되풀이 상한은 역 안(limitInside)
       ask = { kind: k === 'limit' ? 'limit' : k === 'blocked' ? 'blocked' : k === 'notes' ? 'notes' : 'verdict', icon: k === 'limit' ? 'gauge' : 'target', cls: 'me', title, short, target: 'gate', ...(limitInside ? { station: i } : { gateAfter: k === 'limit' ? i - 1 : i }) };
     } else if (hold.reason === 'cap') {
-      const short = hold.kind === 'rate' ? t('한 시간에 카드 {used}장 시작함', { used: hold.used }) : t('{used}/{cap} 다 씀', { used: hold.used, cap: hold.cap });
+      // plan: 계획 뒤 어림이 남은 호출보다 많다(결정 0025. 상한을 다 쓴 게 아니다)
+      const short = hold.kind === 'rate' ? t('한 시간에 카드 {used}장 시작함', { used: hold.used })
+        : hold.kind === 'plan' ? t('어림 {min}~{max}번 · 남은 {left}번', { min: hold.min, max: hold.max, left: Math.max(0, (Number(hold.cap) || 0) - (Number(hold.used) || 0)) })
+          : t('{used}/{cap} 다 씀', { used: hold.used, cap: hold.cap });
       ask = { kind: 'cap', icon: 'gauge', cls: 'me', title: hold.kind === 'rate' ? t('카드 시작 수 상한') : t('호출 상한'), short, target: 'gate', ...(capInside ? { station: i } : { gateAfter: i - 1 }) };
     } else if (hold.reason === 'quota' && !quotaAuto) {
       ask = { kind: 'quota', icon: 'hour', cls: 'me', title: t('사용량 한도'), short: (hold.who || []).map((w) => w.name || nameOf(w.agentId)).join(', '), target: 'gate', station: i };
@@ -279,11 +285,11 @@ export function stageModel(input = {}) {
   const noCard = mis?.status === 'cancelled' && !mis.cardMsgId;
   const end = cutGoal ? { kind: 'cut', text: t('끊김') }
     : drafted ? { kind: 'open', text: t('도착') }
-      : mis?.status === 'done' ? { kind: 'pass', text: t('통과로 끝') }
-        : mis?.status === 'accepted' ? { kind: 'pass', text: t('받아들여 끝') }
+      : mis?.status === 'done' ? { kind: 'pass', text: goalEndWord('done') }
+        : mis?.status === 'accepted' ? { kind: 'pass', text: goalEndWord('accepted') }
           : noCard ? ({ stopped: { kind: 'stopped', text: t('중지됨') }, error: { kind: 'error', text: t('오류로 끝') } }[run?.status] || { kind: 'stopped', text: t('닫힘') })
             : mis?.status === 'cancelled' ? { kind: 'stopped', text: t('닫힘') }
-              : mis?.status === 'stopped' && !active ? { kind: 'stopped', text: t('중지됨') }
+              : mis?.status === 'stopped' && !active ? { kind: 'stopped', text: goalEndWord('stopped') }
                 : run && !active ? ({ done: { kind: 'pass', text: t('끝') }, stopped: { kind: 'stopped', text: t('중지됨') }, error: { kind: 'error', text: t('오류로 끝') } }[run.status] || { kind: 'open', text: t('도착') })
                   : { kind: 'open', text: t('도착') };
 

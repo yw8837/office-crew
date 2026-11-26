@@ -213,6 +213,9 @@ test('11. 무대 모델을 en·zh·ja 로 돌리면 내는 글(알약·지금 �
     approve: wait({ reason: 'approve', stageIndex: 2 }, ['done', 'done', 'review', 'pending']), error: wait({ reason: 'error', stageIndex: 2, message: 'x' }, ['done', 'done', 'error', 'pending']),
     verdict: wait({ reason: 'mission', kind: 'verdict', stageIndex: 3, left: [{ id: 'c2' }] }, ['done', 'done', 'done', 'done']), notes: wait({ reason: 'mission', kind: 'notes', stageIndex: 3, notes: 1 }, ['done', 'done', 'done', 'done']),
     blocked: wait({ reason: 'mission', kind: 'blocked', stageIndex: 2, blocked: [{ name: 'Ben' }] }), limit: wait({ reason: 'mission', kind: 'limit', stageIndex: 2, cards: [{ id: 'k1' }] }),
+    // 윗등급에게 넘기기 보기가 붙은 질문(결정 0027): 문 문구에 후보
+    raiseLimit: wait({ reason: 'mission', kind: 'limit', stageIndex: 2, cards: [{ id: 'k1' }], raise: [{ card: 'k1', to: 'c', name: 'Cy' }] }),
+    raiseBlocked: wait({ reason: 'mission', kind: 'blocked', stageIndex: 2, blocked: [{ name: 'Ben', card: 'k1' }], raise: [{ card: 'k1', to: 'c' }] }),
     cap: wait({ reason: 'cap', stageIndex: 2, used: 40, cap: 40 }, ['done', 'done', 'pending', 'pending']), rate: wait({ reason: 'cap', kind: 'rate', stageIndex: 2, used: 20, cap: 20 }, ['done', 'done', 'pending', 'pending']),
     quota: wait({ reason: 'quota', stageIndex: 2, until, who: [{ agentId: 'b', name: 'Ben' }] }, ['done', 'done', 'error', 'pending']),
     quotaAuto: wait({ reason: 'quota', stageIndex: 2, until, autoAt: until, who: [{ agentId: 'b', name: 'Ben' }] }, ['done', 'done', 'error', 'pending']),
@@ -661,4 +664,15 @@ test('36. (서버 모양) 막힘 "한 번 더"를 거듭해 이미 돈 카드 �
     await ctl(sid, 'stop');
     await t.waitFor(() => idle(sid), 30000, '그만');
   }
+});
+
+test('윗등급에게 넘기기 보기(결정 0027): 대기 종류는 limit·blocked 그대로이고 문 문구에만 후보 이름(이름이 없으면 에이전트 이름으로). 보기가 없으면 지금 문구 그대로', () => {
+  const hold = (h) => ({ run: runOf(['done', 'done', 'done', 'pending'], { status: 'waiting', stageIndex: 2, missionId: 'G', hold: { at: 1, stageIndex: 2, ...h } }), mission: M() });
+  const limit = model(hold({ reason: 'mission', kind: 'limit', cards: [{ id: 'k1' }], raise: [{ card: 'k1', to: 'w', name: '기록' }] }));
+  assert.deepEqual([limit.ask.kind, limit.ask.title, limit.ask.short], ['limit', '카드 되풀이 상한', 'k1 · 윗등급 기록에게 넘길 수 있어']);
+  const blocked = model(hold({ reason: 'mission', kind: 'blocked', blocked: [{ name: '만들기', card: 'k1' }], raise: [{ card: 'k1', to: 'w' }] }));
+  assert.deepEqual([blocked.ask.kind, blocked.ask.short], ['blocked', '만들기 · 윗등급 기록에게 넘길 수 있어']);
+  assert.equal(model(hold({ reason: 'mission', kind: 'limit', cards: [{ id: 'k1' }] })).ask.short, 'k1');
+  // 판정 질문에는 붙지 않는다(넘기기는 카드 질문만)
+  assert.equal(model(hold({ reason: 'mission', kind: 'verdict', left: [{ id: 'c2' }], raise: [{ card: 'k1', to: 'w' }] })).ask.short, '남은 기준 1개');
 });

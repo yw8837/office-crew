@@ -55,7 +55,7 @@ const when = (ms) => {
   return d.toLocaleString(locale(), same ? { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' } : { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 };
 // 목표 카드의 호출 어림 줄: 서버가 실은 조각(m.estimate)을 지금 고른 값으로 더한다(서버도 같은 함수로 확인 시점의 값을 적는다). 예측이 아니라 대략치라고 밝힌다
-function EstimateLine({ est, pick }) {
+function EstimateLine({ est, pick, ladder = false }) {
   if (!est) return null;
   const e = sumEstimate(est, pick);
   const words = { min: e.min, max: e.max, spent: e.spent, n: e.returns, cap: e.cap };
@@ -64,6 +64,7 @@ function EstimateLine({ est, pick }) {
     <div class="small">${e.returns ? t('대략 {min}~{max}번 호출(목표 잡기에 이미 쓴 {spent}번·자동 되돌림 최대 {n}번 포함) · 상한 {cap}번', words) : t('대략 {min}~{max}번 호출(목표 잡기에 이미 쓴 {spent}번 포함) · 상한 {cap}번', words)}</div>
     ${e.max > e.cap && html`<div class="small">${t('상한에 닿으면 물어볼게.')}</div>`}
     <div class="small muted">${t('예측이 아니라 대략치야. 블록이나 빈 답을 다시 요청하거나, 오류로 다시 하거나, 다른 AI가 이어받거나, 한도에 걸려 다시 하면 더 들어.')}</div>
+    ${ladder && pick?.work === 'cards' && html`<div class="small muted">${t('사다리 팀이라 막힌 카드를 윗등급에게 넘기면 그만큼 더 들어(어림에 넣지 않았어).')}</div>`}
   </div>`;
 }
 // 구독 한도 줄: 그 목표에서 일할 AI들의 한도 기록 중 아직 유효한 창만(앱이 이미 받은 기록. 새로 읽지 않고, 이 목표가 몇 %를 쓸지 어림하지 않는다). 보일 창이 없으면 줄 자체를 안 그린다
@@ -233,6 +234,9 @@ const workWhy = (why) => ({
 // 카드 상태 칩: [글, 칩 모양]. 기다리는 카드는 하는 중으로 세지 않는다
 export const cardChip = (status) => ({ waiting: [t('기다림'), ''], running: [t('하는 중'), ' accent'], done: [t('끝'), ' ok'], blocked: [t('막힘'), ' err'], skipped: [t('건너뜀'), ' warn'], hole: [t('구멍'), ' warn'] }[status] || [status, '']);
 const KIND = () => ({ research: t('조사'), write: t('글'), build: t('만들기'), check: t('확인') });
+// 윗등급에게 넘긴 카드(결정 0027): "↑ 앞 담당 → 새 담당"(여러 번 넘겼으면 차례대로)
+const raisedChain = (c) => (c?.raised?.length ? `↑ ${[c.raised[0].from, ...c.raised.map((r) => r.to)].map((id) => agentById(id)?.name || id).join(' → ')}` : '');
+const RaisedChip = ({ c }) => (c?.raised?.length ? html` <span class="chip accent" title=${`${t('윗등급에게 넘긴 카드')}: ${raisedChain(c)}`}>${raisedChain(c)}</span>` : '');
 // 기다리는 카드가 무엇을 기다리는지(앞 카드가 다 끝났으면 차례를 기다림)
 const waitWords = (c, cards) => {
   const left = (c.needs || []).filter((n) => !['done', 'hole', 'skipped', 'blocked'].includes(cards.find((x) => x.id === n)?.status));
@@ -260,7 +264,7 @@ export function PlanCard({ m }) {
       const now = live.find((x) => x.id === c.id);
       const [label, cls] = now ? cardChip(now.status) : ['', ''];
       return html`<li>
-        <div><b>${c.id}</b> · ${c.title} <span class="muted">— ${agentById(c.ownerId)?.name || c.owner} · ${KIND()[c.kind] || c.kind}</span>${now && html` <span class=${`chip${cls}`}>${label}</span>`}</div>
+        <div><b>${c.id}</b> · ${c.title} <span class="muted">— ${agentById(c.ownerId)?.name || c.owner} · ${KIND()[c.kind] || c.kind}</span>${now && html` <span class=${`chip${cls}`}>${label}</span>`}<${RaisedChip} c=${now} /></div>
         ${c.needs?.length > 0 && html`<div class="small muted">${t('{ids}의 결과를 기다려', { ids: c.needs.join(', ') })}</div>`}
         ${c.done && html`<div class="small muted">${t('끝 기준')}: ${c.done}</div>`}
         <div class="small muted">${t('맡을 파일')}: ${c.files?.length ? c.files.join(', ') : t('(적지 않음)')}${c.solo ? ` · ${t('파일을 안 적어서 혼자 돌아')}` : ''}</div>
@@ -468,7 +472,7 @@ export function GoalCard({ m }) {
       <span><b>${t('팀 단계표대로')}</b> — ${t('팀에 짜 둔 단계를 순서대로 돌아.')}</span></label>
   </div>`;
   // 호출 어림(결정 0019): 조사·회의 체크, 일하는 방식, 남기기를 바꾸면 바로 다시 더한다(옛 카드는 이 칸이 없어 안 보인다). 구독 한도는 받은 기록이 있을 때만
-  const estLine = est && html`<${EstimateLine} est=${est} pick=${estPick} />`;
+  const estLine = est && html`<${EstimateLine} est=${est} pick=${estPick} ladder=${!!(state.teams || []).find((x) => x.id === s?.teamId)?.ladder} />`;
   const limLine = html`<${LimitLine} providers=${m.providers} ask=${s?.capAsk} />`;
   const openEdit = () => setEdit({ goal: v.goal, criteria: v.criteria.join('\n'), checks: checksOf(v).join('\n'), outOfScope: v.outOfScope.join('\n'), userDecides: v.userDecides.join('\n'), keep: (v.keep || []).join('\n') });
   const closeEdit = () => { setEdit(null); setTimeout(() => editBtn.current?.focus(), 0); };
@@ -533,6 +537,24 @@ export function MissionGate({ s, run }) {
   const row = (k, label, desc, action) => html`<button type="button" class="ask-row" disabled=${busy} onClick=${() => ctl(action)}>
     <span class="ask-num" aria-hidden="true">${k}</span><span class="ask-row-text"><b>${label}</b>${desc && html`<span>${desc}</span>`}</span><span class="ask-go" aria-hidden="true">→</span>
   </button>`;
+  // 막힘·카드 되풀이 상한 질문은 번호 키로도 고른다(윗등급에게 넘기기 보기와 같이, 결정 0027). 보기 순서 그대로: 1 받아들이기 · 2 한 번 더 · 3 윗등급에게 넘기기.
+  // 글을 쓰는 중(입력칸)이거나 다른 창·에이전트의 질문 창이 떠 있으면 건드리지 않는다(에이전트 질문 창의 번호 키와 같은 규칙)
+  const keys = hold.reason === 'mission' && (hold.kind === 'blocked' || hold.kind === 'limit') ? ['accept', 'more', ...(hold.raise?.length ? ['raise'] : [])] : null;
+  useEffect(() => {
+    if (!keys) return undefined;
+    const onKey = (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.repeat || e.defaultPrevented) return;
+      const el = e.target;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      if (document.querySelector('.backdrop, .ctx-menu, [role="dialog"], [role="menu"], .ask-panel:not(.mission-gate)')) return;
+      const action = /^[1-9]$/.test(e.key) ? keys[Number(e.key) - 1] : null;
+      if (!action) return;
+      e.preventDefault();
+      ctl(action);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  });
   // 한도 대기(결정 0019): 이어받을 AI 없이 사용량 한도에 걸려 멈춤. 보기 순서: 그 시각 뒤 이어서(자동, 시각을 알 때만) · 지금 다시 · 건너뛰기(일 단계)/받아들이기(판정) · 그만
   if (hold.reason === 'quota') {
     const names = (hold.who || []).map((w) => w.name).join(', ');
@@ -609,8 +631,12 @@ export function MissionGate({ s, run }) {
   // 막힘(oc-blocked)과 일 카드의 되풀이 상한(결정 0018)
   if (hold.kind === 'blocked' || hold.kind === 'limit') {
     const blocked = hold.kind === 'blocked';
-    const q = blocked ? t('기준을 지킬 수 없다는 답이 왔어. 기준 판정으로 넘기지 않고 멈췄어. 어떻게 할까?')
-      : t('카드 {ids}를 시작한 횟수가 상한에 닿았어. 어떻게 할까?', { ids: (hold.cards || []).map((c) => c.id).join(', ') });
+    // 사다리 팀의 윗등급 후보(결정 0027): 카드마다 이름(AI·모델·세기). 카드가 여럿이면 카드 번호와 같이
+    const up = hold.raise || [];
+    const who = up.length === 1 ? t('{name} ({ai})', { name: up[0].name, ai: up[0].ai }) : up.map((r) => `${r.card}: ${t('{name} ({ai})', { name: r.name, ai: r.ai })}`).join(' · ');
+    const q = up.length ? (blocked ? t('기준을 지킬 수 없다는 답이 또 왔어(시작 상한에 닿음). 기준 판정으로 넘기지 않고 멈췄어. 윗등급에게 넘길까?') : t('카드 {ids}를 시작한 횟수가 상한에 닿았어. 윗등급에게 넘길까?', { ids: (hold.cards || []).map((c) => c.id).join(', ') }))
+      : blocked ? t('기준을 지킬 수 없다는 답이 왔어. 기준 판정으로 넘기지 않고 멈췄어. 어떻게 할까?')
+        : t('카드 {ids}를 시작한 횟수가 상한에 닿았어. 어떻게 할까?', { ids: (hold.cards || []).map((c) => c.id).join(', ') });
     return html`<div class="ask-panel mission-gate" role="group" aria-label=${blocked ? t('막힘') : t('카드 되풀이 상한')}>
       <div class="ask-head"><span class="ask-who">${blocked ? `⛔ ${t('막힘')}` : `🔁 ${t('카드 되풀이 상한')}`}</span></div>
       <div class="ask-question">${q}</div>
@@ -619,7 +645,9 @@ export function MissionGate({ s, run }) {
       <div class="ask-rows">
         ${row(1, t('받아들이기'), blocked ? t('막힌 일만 빼고 나머지 결과로 기준 판정까지 가(막힌 카드는 구멍으로 적어).') : t('그 카드는 다시 돌리지 않고 지금 결과로 이어 가.'), 'accept')}
         ${row(2, t('한 번 더'), blocked ? t('막힌 일만 한 번 더 해.') : t('그 카드를 한 번 더 시작해.'), 'more')}
+        ${up.length > 0 && row(3, t('윗등급에게 넘기기 — {who}', { who }), t('그 카드를 윗등급 담당이 새 대화로 맡아(시작 상한 +1). 앞 담당의 마지막 답은 참고 자료로 넘겨. 새 담당이 같은 단계에 다른 카드를 쥐고 있으면 그 카드가 끝난 뒤에 돌아.'), 'raise')}
       </div>
+      ${up.length > 0 && html`<div class="small muted">${t('사다리 팀이라 묻는 거야. 저절로 올리지 않아.')}</div>`}
       <div class="ask-foot"><span class="grow"></span><button type="button" class="btn sm danger" disabled=${busy} onClick=${() => ctl('stop')}>${t('그만')}</button></div>
     </div>`;
   }
@@ -664,7 +692,7 @@ function CardList({ m }) {
     ${cards.map((c) => {
       const [label, cls] = cardChip(c.status);
       return html`<div class="crit" role="listitem">
-        <div class="crit-head"><span class=${`chip${cls}`}>${label}</span><span><b>${c.id}</b> · ${c.title} <span class="muted">— ${agentById(c.ownerId)?.name || c.ownerId}</span></span></div>
+        <div class="crit-head"><span class=${`chip${cls}`}>${label}</span><span><b>${c.id}</b> · ${c.title} <span class="muted">— ${agentById(c.ownerId)?.name || c.ownerId}</span><${RaisedChip} c=${c} /></span></div>
         ${c.status === 'waiting' && html`<div class="small muted crit-ev">${waitWords(c, cards)}</div>`}
         ${c.status === 'blocked' && c.reason && html`<div class="small muted crit-ev">${c.reason}</div>`}
         ${c.status === 'hole' && c.by === 'blocked' && html`<div class="small muted crit-ev">${t('막혀서 뺐어: {reason}', { reason: c.reason || '' })}</div>`}

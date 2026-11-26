@@ -30,6 +30,7 @@ import { NoteStore } from './notes.js';
 import { tr, bindLang, serverLang } from './i18n.js';
 import { Scheduler, cleanSchedule } from './scheduler.js';
 import { alive } from './mission.js';
+import { cleanTier, cleanLadder } from './mission.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -165,6 +166,8 @@ function cleanAgent(a, prev = {}) {
     routing, routingProfile: ['economy', 'balanced', 'best'].includes(x.routingProfile) ? x.routingProfile : 'balanced',
     light: !!x.light, apiProfile: String(x.apiProfile || ''), avatar: cleanAvatar(x.avatar),
     ...(x.pluginId ? { pluginId: x.pluginId } : {}),
+    // 사다리 등급 1~4(결정 0024·0027). 범위 밖은 가까운 끝으로, 비우거나 숫자가 아니면 없음(저장할 때 합쳐도 지워지게 undefined). 보내지 않으면 저장된 값(prev) 그대로
+    tier: cleanTier(x.tier) ?? undefined,
   };
 }
 
@@ -175,7 +178,8 @@ function cleanTeam(t) {
     instruction: String(s.instruction || '').slice(0, 4000), approve: !!s.approve, meeting: s.meeting,
   })).filter((s) => s.agentIds.length).map((s) => ({ ...s, meeting: normMeeting(s.meeting, s.agentIds) }));
   if (!stages.length) throw new HttpError(400, tr('단계가 최소 1개, 단계마다 에이전트가 최소 1명 필요해.'));
-  return { id: t.id, name: String(t.name).trim().slice(0, 40), description: String(t.description || '').slice(0, 300), stages };
+  // 사다리 팀(결정 0024·0027): ladder 가 true 일 때만 escalateAfter(1~5, 기본 2)와 같이 남긴다(아니면 저장할 때 합쳐도 지워지게 undefined)
+  return { id: t.id, name: String(t.name).trim().slice(0, 40), description: String(t.description || '').slice(0, 300), stages, ladder: undefined, escalateAfter: undefined, ...cleanLadder(t) };
 }
 
 function openTerminal(command, env = null) {

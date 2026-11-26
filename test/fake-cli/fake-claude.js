@@ -182,7 +182,10 @@ async function pump() {
   // BLOCKKIND:<값>: 막힘 블록(CARDBLOCK·WORKBLOCK)에 그 종류(kind)를 적는다(결정 0022). 없으면 kind 칸 없이(지금 형식)
   const blockKind = goalLine.match(/BLOCKKIND:(\S+)/)?.[1] || '';
   const blockedJson = (reason) => '```oc-blocked\n' + JSON.stringify({ reason, ...(blockKind ? { kind: blockKind } : {}) }) + '\n```';
+  // 윗등급에게 넘기기(결정 0027): BLOCKBY:<이름>(그 에이전트가 맡은 카드는 늘 막힘 블록으로 끝남). FAILBY:<이름>·SLOWBY:<이름> 은 아래(오류·3초 늦게)
+  const by = (w) => !!cardId && !!myName && goalLine.includes(`${w}:${myName}`) && !tailRetry;
   const cardChunks = !cardId ? null
+    : by('BLOCKBY') ? [`CARDANSWER-${cardId} ${myName} 해 보니 안 돼.\n\n`, blockedJson(`가짜 막힘: ${myName}은 이 카드를 못 해`)]
     : goalLine.includes('TAILBLOCK') && cardId === 'k1' ? (tailRetry ? ['다시 보니 안 돼.\n\n', '```oc-blocked\n{"reason":"가짜 막힘: 꼬리 쓰다 막힘"}\n```'] : [`CARDANSWER-${cardId} 카드 일 했어.`])
     : goalLine.includes('K2NOTAIL') && cardId === 'k2' ? (tailRetry ? ['여전히 안 적어.'] : [`CARDANSWER-${cardId} p${process.pid} 카드 일 했어.`])
     : goalLine.includes('K2BLOCK') && cardId === 'k2' ? [`CARDANSWER-${cardId} 해 보니 안 돼.\n\n`, blockedJson('가짜 막힘: k2 도 막힘')]
@@ -266,7 +269,7 @@ async function pump() {
   if (req.includes('SLOW')) await sleep(1500);
   // SLOWPLAN·SLOWK2: 계획 대목·k2 카드 차례만 3초 늦게 끝남(끊김 흉내용)
   if ((planTurn && goalLine.includes('SLOWPLAN')) || (cardId === 'k2' && goalLine.includes('SLOWK2')) || (cardId === 'k1' && goalLine.includes('SLOWK1') && !tailRetry)
-    || (cardId === 'k1' && tailRetry && goalLine.includes('SLOWTAIL'))) await sleep(3000);
+    || (cardId === 'k1' && tailRetry && goalLine.includes('SLOWTAIL')) || by('SLOWBY')) await sleep(3000);
   if ((scanTurn && goalLine.includes('SLOWSCAN')) || (qTurn && goalLine.includes('SLOWQ')) || (rn === 2 && goalLine.includes('SLOWR2')) || (prepMeet && goalLine.includes('SLOWMEET'))) await sleep(3000);
   // 목표의 일 단계 한도(결정 0019): 일 단계("[팀 작업]")·카드 차례가 사용량 한도 오류로 끝난다. 신호어는 확정 목표 줄에서:
   // WORKQUOTA(거절 이벤트에 1시간 뒤 초기화 시각) · WORKQUOTAIN(이벤트 없이 오류 문구에 "2시간 뒤") · WORKQUOTANT(시각 없음) · WORKQUOTAK2(k2 카드만, 시각 있음) ·
@@ -311,7 +314,7 @@ async function pump() {
     // 초기화 시각 없는 거절 이벤트가 연달아 온 뒤 정상 종료(쉬는 목록 알림이 매번 나가면 안 됨)
     for (let k = 0; k < 5; k++) { out({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour' } }); await sleep(5); }
     out({ type: 'result', subtype: 'success', is_error: false, session_id: sid, usage: { input_tokens: 1, output_tokens: 1 } });
-  } else if (req.includes('FAILME') || (workTurn && myName && goalLine.includes(`MIXFAIL:${myName}`)) || (research && req.includes('RESEARCHFAIL')) || (rn === 1 && goalLine.includes('RFAIL')) || (cardId === 'k1' && goalLine.includes('CARDFAIL')) || (cardId === 'k1' && goalLine.includes('BACKFAIL') && text.includes('[지난 검수에서 걸린 것'))) {
+  } else if (req.includes('FAILME') || (workTurn && myName && goalLine.includes(`MIXFAIL:${myName}`)) || (research && req.includes('RESEARCHFAIL')) || (rn === 1 && goalLine.includes('RFAIL')) || (cardId === 'k1' && goalLine.includes('CARDFAIL')) || (cardId === 'k1' && goalLine.includes('BACKFAIL') && text.includes('[지난 검수에서 걸린 것')) || by('FAILBY')) {
     out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: '가짜 실패', session_id: sid, usage: {} });
   } else if (req.includes('ZEROCRASH')) {
     // 충돌 흉내: 값이 모두 0인 오류 결과를 내고 누적을 저장하지 않은 채 끝난다

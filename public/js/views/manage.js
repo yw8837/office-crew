@@ -165,6 +165,11 @@ export function AgentEditor({ agent, onClose, focusNotes = false }) {
           <div class="field"><label>${t('이모지')}</label><select class="select" value=${a.emoji} onChange=${(e) => set('emoji', e.target.value)}>${[...new Set([a.emoji, ...EMOJIS].filter(Boolean))].map((x) => html`<option value=${x}>${x}</option>`)}</select></div>
         </div>
         <${RoutingFields} a=${a} set=${set} setMany=${setMany} />
+        <div class="field"><label for="agent-tier">${t('등급 (사다리)')}</label>
+          <select id="agent-tier" class="select" value=${a.tier ?? ''} onChange=${(e) => set('tier', e.target.value ? Number(e.target.value) : '')}>
+            <option value="">${t('없음')}</option>${[1, 2, 3, 4].map((n) => html`<option value=${n}>${t('{n}등급', { n })}</option>`)}
+          </select>
+          <div class="hint">${t('같은 팀 안의 등급이야(1 가장 싸고 단순한 일 ~ 4 가장 비싸고 어려운 일). 사다리 팀에서 막힌 일 카드를 이보다 높은 등급에게 넘길지 물을 때 써.')}</div></div>
         ${a.routing !== 'auto' && a.provider === 'openai' && html`<div class="field"><label>${t('API 프로필')}</label>
           <select class="select" value=${a.apiProfile} onChange=${(e) => { const p = profiles.find((x) => x.id === e.target.value); setA((x) => ({ ...x, apiProfile: e.target.value, model: p?.model || x.model })); }}>
             <option value="">${t('(키가 있는 첫 프로필)')}</option>
@@ -284,6 +289,12 @@ function TeamEditor({ team, onClose }) {
     <div class="grid2">
       <div class="field"><label>${t('팀 이름')}</label><input class="input" value=${tm.name} onInput=${(e) => setT({ ...tm, name: e.target.value })} placeholder=${t('예: 신제품 TF')} /></div>
       <div class="field"><label>${t('설명')}</label><input class="input" value=${tm.description} onInput=${(e) => setT({ ...tm, description: e.target.value })} /></div>
+    </div>
+    <div class="field">
+      <div class="row"><${Toggle} checked=${!!tm.ladder} title=${t('사다리 팀')} onChange=${(v) => setT({ ...tm, ladder: v, escalateAfter: tm.escalateAfter || 2 })} />
+        <div><b>${t('사다리 팀')}</b><div class="hint">${t('목표의 일 카드가 막히면 등급이 더 높은 팀원에게 넘길지 물어(에이전트 편집의 "등급"). 저절로 올리지 않아.')}</div></div></div>
+      ${tm.ladder && html`<label class="small" style="display:flex;align-items:center;gap:6px;margin-top:6px">${t('몇 번 실패하면 묻나')}
+        <select class="select" style="width:auto" value=${tm.escalateAfter || 2} onChange=${(e) => setT({ ...tm, escalateAfter: Number(e.target.value) })}>${[1, 2, 3, 4, 5].map((n) => html`<option value=${n}>${t('{n}번', { n })}</option>`)}</select></label>`}
     </div>
     <div class="pipeline-editor">
       ${tm.stages.map((st, i) => html`<div class="stage-row">

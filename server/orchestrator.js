@@ -3402,7 +3402,10 @@ export class Orchestrator {
       (m.decided ||= []).push({ ...forkDecided({ label: card.label, key: o.key.toUpperCase(), position: o.position, summary: o.summary }), ...where, at: Date.now() });
       (m.forks ||= []).push({ ...where, label: card.label, msgId: card.id, picked: o.key, chosen: o.position, dropped: other, at: Date.now() });
       card.picked = o.key;
-      end('picked', tr('두 갈래에서 안 {key}({position})를 골랐어. 버린 안: {dropped}', { key: o.key.toUpperCase(), position: o.position, dropped: other.join(', ') }), true);
+      // 사용자 선택 줄(완주 보고·기억의 "사용자가 확정한 것")에는 코드가 아는 것만: 안 열쇠와 그 안을 민 사람 이름. 입장 글은 에이전트가 쓴 것이라 넣지 않는다(카드·보고의 두 갈래 칸에 있다)
+      const who = (x) => (x.agentIds || []).map((id) => this.store.get('agents', id)?.name || id).join(', ');
+      const rest = card.options.filter((x) => x !== o);
+      end('picked', tr('두 갈래에서 안 {key}를 골랐어({names}이(가) 민 안). 버린 안: {dropped}', { key: o.key.toUpperCase(), names: who(o), dropped: rest.map((x) => tr('안 {key}({names})', { key: x.key.toUpperCase(), names: who(x) })).join(', ') }), true);
     }
   }
 
@@ -3452,23 +3455,54 @@ export class Orchestrator {
   }
 
   // ── 진행자에게 질문(결정 0031) ──
-  // 진행자에게 물을 수 있는 카드 차례인가: 목표 일 실행의 진행자가 있고(지워지지 않음), 카드 담당이 진행자가 아니고, 끝 두 칸 다시 쓰기가 아니다. → 진행자 id 또는 null
-  #leadFor(ctx, agentId) {
+  // 진행자에게 물을 수 있는 카드 차례인가: 목표 일 실행의 진행자가 있고(지워지지 않았고 지금 팀에 있음), 카드 담당이 진행자가 아니고, 끝 두 칸 다시 쓰기가 아니다.
+  // → { id: 진행자 id } 또는 { why: 'tail'(끝 두 칸 다시 쓰기) | 'self'(진행자가 맡은 카드) | 'none'(진행자 없음) | 'gone'(진행자가 팀에서 빠짐) }
+  #leadWhy(ctx, agentId) {
     const m = ctx.mission;
-    if (ctx.missionTurn !== 'work' || !m || ctx.s.mission !== m || ctx.tailAsk?.has(String(agentId))) return null;
+    if (ctx.missionTurn !== 'work' || !m || ctx.s.mission !== m) return { why: 'none' };
+    if (ctx.tailAsk?.has(String(agentId))) return { why: 'tail' };
     const lead = m.leadId == null ? '' : String(m.leadId);
-    return lead && lead !== String(agentId) && this.store.get('agents', lead) ? lead : null;
+    if (!lead || !this.store.get('agents', lead)) return { why: 'none' };
+    if (lead === String(agentId)) return { why: 'self' };
+    const team = this.store.get('teams', ctx.s.teamId);
+    if (!(team?.stages || []).some((st) => (st.agentIds || []).map(String).includes(lead))) return { why: 'gone' };
+    return { id: lead };
   }
+  #leadFor(ctx, agentId) { return this.#leadWhy(ctx, agentId).id || null; }
 
-  // 그 에이전트가 이 실행에서 다른 차례(자기 카드 등)를 도는 중이면 끝날 때까지 기다린다(한 에이전트의 CLI 를 한 번에 하나만. 핸들 자리를 덮지 않게)
-  async #waitFree(ctx, id, i = null) {
-    const busy = () => ctx.handles.has(String(id)) || (i !== null && ctx.s.messages.some((x) => x.role === 'agent' && x.runId === ctx.run.id && x.stageIndex === i && String(x.agentId) === String(id) && x.status === 'streaming'));
-    while (!ctx.stopped && busy()) await new Promise((r) => setTimeout(r, 200));
+  // 한 에이전트의 CLI 는 이 실행에서 한 번에 하나만 돈다(핸들 자리를 덮지 않게). 그 사람이 다른 차례를 도는 중이면(라우팅·한도 대기 포함, ctx.busy) 끝날 때까지 기다린다.
+  // borrow: 그 사람이 자기 카드에서 진행자 답을 기다리는 중이면(빈 핸들 idle 'lead') 그 핸들을 잠시 빌린다(작은 회의 의견. 안 빌리면 진행자 줄과 서로 기다린다).
+  // 질문 창 답을 기다리는 사람은 빌리지 않는다(답을 받으면 바로 이어 쓰니 끝날 때까지 기다린다). 빌린 핸들은 #giveBack 으로 돌려준다.
+  // 기다리는 동안 다시 보는 건 #wake 가 깨울 때만(실행이 끝남·진행자 답을 기다리는 빈 핸들이 생김·빌린 핸들을 돌려줌·그만) → 빌린 핸들 또는 null
+  async #claim(ctx, id, borrow = false) {
+    const key = String(id);
+    for (;;) {
+      if (ctx.stopped) return null;
+      const h = ctx.handles.get(key);
+      if (borrow && h?.idle === 'lead') { ctx.handles.delete(key); return h; }
+      if (!h && !ctx.busy?.get(key)) return null;
+      await new Promise((r) => (ctx.freeWaiters ||= new Set()).add(r));
+    }
+  }
+  #giveBack(ctx, i, id, h) {
+    const key = String(id);
+    if (!h || ctx.stopped || ctx.handles.has(key) || h.msg?.status !== 'streaming') return; // 그만·자리에 다른 핸들·그 카드 답이 이미 끝났으면 두지 않는다
+    ctx.handles.set(key, h);
+    this.#atWorking(ctx, i, key, true);
+    this.#state(ctx.s.id, key, 'waiting', tr('진행자 답을 기다리는 중'));
+    this.#wake(ctx);
+  }
+  #wake(ctx) {
+    const ws = ctx.freeWaiters;
+    if (!ws?.size) return;
+    ctx.freeWaiters = new Set();
+    for (const r of ws) r();
   }
 
   // 카드 답 끝의 oc-lead 하나를 처리한다. 묻지 않으면(형식·상한·진행자가 맡은 카드·호출/구독 한도 상한) 진행 기록·알림 한 줄과 null.
-  // 물으면 카드에 "질문 중"(c.lead)을 달고, 진행자 답(다른 카드의 질문은 차례로, 진행자가 자기 카드를 하는 중이면 끝난 뒤)을 받아 { reply }(카드 담당에게 이어 줄 글)
-  async #leadTurn(ctx, i, ownerId, msg, lq, base, leadId) {
+  // 물으면 카드에 "질문 중"(c.lead)을 달고, 진행자 답(다른 카드의 질문은 차례로, 진행자가 자기 카드를 하는 중이면 끝난 뒤)을 받아 { reply }(카드 담당에게 이어 줄 글).
+  // chk: #leadWhy 의 결과. cutWait: 이 카드를 건너뛰면 풀리는 약속(그때는 진행자 답을 기다리지 않고 null)
+  async #leadTurn(ctx, i, ownerId, msg, lq, base, chk, cutWait = null) {
     const { s } = ctx;
     const m = ctx.mission;
     const c = (m.cards || []).find((x) => x.id === msg.card?.id);
@@ -3476,7 +3510,14 @@ export class Orchestrator {
     const name = (id) => this.store.get('agents', id)?.name || id;
     const skip = (text) => { logLine(m, 'lead', text, msg.id); this.#notice(s, msg, text); this.emitMission(s); this.store.saveSession(s, 100); return null; };
     if (lq.error) return skip(tr('카드 {id}: 진행자에게 묻는 블록(oc-lead) 형식이 맞지 않아서 묻지 않았어.', { id: c.id }));
-    if (!leadId) return skip(tr('카드 {id}: 진행자가 맡은 카드이거나 진행자가 없어서 진행자에게 묻는 블록은 읽지 않았어.', { id: c.id }));
+    const leadId = chk?.id || null;
+    if (!leadId) {
+      const why = chk?.why;
+      return skip(why === 'tail' ? tr('카드 {id}: 끝의 두 칸을 다시 쓰는 차례라 진행자에게 묻는 블록은 읽지 않았어.', { id: c.id })
+        : why === 'self' ? tr('카드 {id}: 진행자가 맡은 카드라 진행자에게 묻는 블록은 읽지 않았어(자기에게 묻지 않아).', { id: c.id })
+          : why === 'gone' ? tr('카드 {id}: 진행자가 지금 팀에 없어서 진행자에게 묻는 블록은 읽지 않았어.', { id: c.id })
+            : tr('카드 {id}: 이 목표에 진행자가 없어서 진행자에게 묻는 블록은 읽지 않았어.', { id: c.id }));
+    }
     if ((c.leadAsks || 0) >= LEAD_MAX) return skip(tr('카드 {id}: 진행자 질문 상한({n}번)을 넘어서 블록을 무시했어.', { id: c.id, n: LEAD_MAX }));
     // 진행자 답 1번 + 카드 이어 쓰기 1번
     const lim = await this.#extraLimits(ctx, i, [leadId], 2);
@@ -3494,11 +3535,25 @@ export class Orchestrator {
     // 진행자는 한 번에 한 질문만(여러 카드가 같이 물으면 차례로)
     const job = (ctx.leadQueue || Promise.resolve()).then(() => this.#leadAnswer(ctx, i, c, ownerId, lq, entry, leadId));
     ctx.leadQueue = job.catch(() => {});
+    // 건너뛰면(그만 포함) 진행자 답을 기다리지 않는다: 아직 차례가 안 왔으면 진행자도 답하지 않고(entry.dropped), 이 질문 때문에 띄운 진행자의 질문 창은 닫고,
+    // 진행자가 답을 쓰는 중이면 멈춘다(그 답은 이 카드에 쓰지 않는다)
+    const cutNow = cutWait ? cutWait.then(() => {
+      entry.dropped = true;
+      for (const w of [...ctx.asks.values()]) if (w.ask?.leadEntry === entry) w.done({ stop: true });
+      if (entry.leadRun) ctx.handles.get(String(entry.leadRun))?.handle.stop();
+      return null;
+    }) : null;
     let out = null;
-    try { out = await job; } finally {
+    try {
+      out = await (cutNow ? Promise.race([job, cutNow]) : job);
+      // 이미 시작한 답이면 정리될 때까지(지금 도는 한 번만 끝나면 돌아온다) 기다린다: 카드가 끝난 뒤에 이 질문의 실행이 남아 다음 단계와 겹치지 않게
+      if (entry.dropped && entry.started) await job.catch(() => {});
+    } finally {
       if (!this.closing) { delete c.lead; this.emitMission(s); }
     }
-    return out;
+    if (!entry.dropped) return out;
+    if (!ctx.stopped) { logLine(m, 'lead', tr('카드 {id}: 진행자 답을 기다리다 건너뛰었어. 진행자 답은 이 카드에 쓰지 않아.', { id: c.id }), msg.id); this.emitMission(s); }
+    return null;
   }
 
   // 진행자 답(한 번 실행·읽기 전용). 답 끝이 질문 블록이면 질문 창으로 사용자에게(답은 mission.decided, 카드 표시), 작은 회의 블록이면 허락을 묻고 열면 1바퀴.
@@ -3507,16 +3562,21 @@ export class Orchestrator {
     const { s } = ctx;
     const m = ctx.mission;
     const name = (id) => this.store.get('agents', id)?.name || id;
-    await this.#waitFree(ctx, leadId, i);
-    if (ctx.stopped) return null;
+    await this.#claim(ctx, leadId);
+    if (ctx.stopped || entry.dropped) return null;
+    entry.started = true;
     const agents = this.store.all('agents');
-    const roster = cardRoster(this.store.get('teams', s.teamId), agents, m.reviewerId);
+    // 작은 회의 참석자 명단: 진행자 자신(결론을 쓴다)과 물은 담당(답을 기다린다)은 뺀다
+    const roster = cardRoster(this.store.get('teams', s.teamId), agents, m.reviewerId).filter((a) => a.id !== String(leadId) && a.id !== String(ownerId));
     const canAsk = this.store.settings.agentAsks !== false && !s.scheduleId && !s.agentOverride && !ctx.userMsg?.handoffAsk;
-    const canMeet = canAsk && (m.smallMeets || 0) < SMALL_MEET_MAX;
+    const meetFull = (m.smallMeets || 0) >= SMALL_MEET_MAX;
+    const canMeet = canAsk && !meetFull && roster.length >= 2;
     const prompt = leadPrompt({ head: this.#goalCardPrompt(ctx.goalCard), id: c.id, owner: name(ownerId), card: c, question: lq.question, context: lq.context, roster: roster.map((a) => ({ name: a.name, role: a.role })), canAsk, canMeet });
+    entry.leadRun = leadId; // 건너뛰면 이 실행을 멈춘다(#leadTurn)
     const { r, msg: lm } = await this.#prepOnce(ctx, i, leadId, prompt, { kind: 'lead', card: c.id });
-    if (ctx.stopped) return null;
+    entry.leadRun = null;
     entry.msgId = lm?.id || null;
+    if (ctx.stopped || entry.dropped) return null;
     if (!r || r.error || r.stopped || !String(lm?.text || '').trim()) {
       logLine(m, 'lead', tr('카드 {id}: 진행자 답을 받지 못했어. 담당이 정하고 가정을 적게 해.', { id: c.id }), lm?.id || null).fail = r?.error ? (isQuotaError(r.error) ? 'outside' : 'unknown') : undefined;
       return { reply: leadReply({ id: c.id, question: lq.question, missing: true }) };
@@ -3527,17 +3587,20 @@ export class Orchestrator {
     const ask = parseAsk(text);
     const meet = ask ? null : parseMeet(text);
     const cutBlock = (b) => `${text.slice(0, b.from)}${text.slice(b.to)}`.trim();
+    // 읽었지만 따르지 않은 블록(물을 수 없는 실행의 질문, 열지 않은 작은 회의)은 답 화면에서 감춘다(질문 창으로 간 블록처럼. 기록 줄이 남는다)
+    const hide = (b) => { if (Number.isInteger(b.from) && Number.isInteger(b.to)) (lm.hidden ||= []).push({ from: b.from, to: b.to }); };
     if (ask && !ask.error && canAsk) {
       // 사람이 정할 일: 첫 질문 하나만 질문 창으로(회의 질문과 같다). 답은 사용자가 정한 것(카드 표시)
       const q0 = ask.ask.questions[0];
       const questions = [{ ...q0, header: q0.header || tr('진행자 질문') }];
       text = cutBlock(ask);
-      const got = await this.#ask(ctx, leadId, lm, { questions, from: ask.from, to: ask.to });
+      const got = await this.#ask(ctx, leadId, lm, { questions, from: ask.from, to: ask.to, leadEntry: entry });
       if (ctx.stopped) return null;
       if (got.stop) ctx.skipped.delete(leadId);
       this.#state(s.id, leadId, 'done', got.answers ? tr('답을 받았어') : tr('질문을 넘겼어'));
       lm.text += `\n\n${answerRecord({ questions }, got.answers || null)}`;
       this.bus.emit('message', { sessionId: s.id, message: lm });
+      if (entry.dropped) return null; // 카드를 건너뛰어 닫은 질문 창: 사용자가 정한 것으로 남기지 않는다
       if (got.answers) {
         const answer = answerText({ questions }, got.answers);
         const about = answerAbout({ questions }, got.answers);
@@ -3550,41 +3613,47 @@ export class Orchestrator {
         userLine(m, 'answer', tr('진행자 질문에 답하지 않고 넘겼어(카드 {id}): {q}', { id: c.id, q: q0.question }), lm.id);
       }
     } else if (ask) {
-      text = ask.error ? text : cutBlock(ask);
+      if (!ask.error) { text = cutBlock(ask); hide(ask); }
       logLine(m, 'lead', ask.error ? tr('카드 {id}: 진행자의 질문 블록 형식이 맞지 않아서 사용자에게 묻지 않았어. 진행자 답만 넘겨.', { id: c.id }) : tr('카드 {id}: 이 실행은 사용자에게 물을 수 없어서 진행자의 질문은 묻지 않았어. 진행자 답만 넘겨.', { id: c.id }), lm.id);
     } else if (meet) {
       if (!meet.error) text = cutBlock(meet);
+      // 이름은 명단(진행자·물은 담당을 뺀 팀)과 맞추고 겹친 사람은 한 번, 그다음 3명까지
       const byName = new Map(roster.map((a) => [String(a.name || '').trim().toLowerCase(), a]));
-      const people = meet.error ? [] : [...new Map(meet.people.map((n0) => byName.get(n0.trim().toLowerCase())).filter(Boolean).map((a) => [String(a.id), a])).values()];
+      const people = meet.error ? [] : [...new Map(meet.people.map((n0) => byName.get(n0.trim().toLowerCase())).filter(Boolean).map((a) => [String(a.id), a])).values()].slice(0, 3);
       const n = smallMeetCalls(people.length);
-      const why = meet.error || people.length < 2 ? tr('카드 {id}: 진행자가 청한 작은 회의 블록을 읽지 못했거나 참석자를 팀에서 2명 찾지 못해서 열지 않았어. 진행자 답만 넘겨.', { id: c.id })
-        : !canMeet ? tr('카드 {id}: 작은 회의 상한({n}번)이거나 사용자에게 물을 수 없는 실행이라 작은 회의를 열지 않았어. 진행자 답만 넘겨.', { id: c.id, n: SMALL_MEET_MAX }) : '';
+      // 까닭은 앞에서부터: 열 수 없는 때(상한·물을 수 없는 실행)면 블록 모양과 상관없이 그 까닭으로
+      const why = !canAsk || meetFull ? tr('카드 {id}: 작은 회의 상한({n}번)이거나 사용자에게 물을 수 없는 실행이라 작은 회의를 열지 않았어. 진행자 답만 넘겨.', { id: c.id, n: SMALL_MEET_MAX })
+        : meet.error || people.length < 2 ? tr('카드 {id}: 진행자가 청한 작은 회의 블록을 읽지 못했거나, 진행자와 물은 담당을 뺀 팀에서 참석자를 2명 찾지 못해서 열지 않았어. 진행자 답만 넘겨.', { id: c.id }) : '';
       const lim = why ? null : await this.#extraLimits(ctx, i, [...people.map((a) => String(a.id)), leadId], n + 1);
-      if (why || lim) logLine(m, 'lead', why || (lim.why === 'cap' ? tr('카드 {id}: 남은 호출이 {n}번보다 적어서(호출 상한) 작은 회의를 열지 않았어.', { id: c.id, n: lim.need }) : tr('카드 {id}: 작은 회의에 들 AI({ais})가 구독 한도 상한을 넘어서 작은 회의를 열지 않았어.', { id: c.id, ais: lim.ais })), lm.id);
-      else {
+      if (why || lim) {
+        if (!meet.error) hide(meet);
+        logLine(m, 'lead', why || (lim.why === 'cap' ? tr('카드 {id}: 남은 호출이 {n}번보다 적어서(호출 상한) 작은 회의를 열지 않았어.', { id: c.id, n: lim.need }) : tr('카드 {id}: 작은 회의에 들 AI({ais})가 구독 한도 상한을 넘어서 작은 회의를 열지 않았어.', { id: c.id, ais: lim.ais })), lm.id);
+      } else {
         const names = people.map((a) => a.name).join(', ');
         const questions = [{ header: tr('작은 회의'), question: tr('진행자가 작은 회의를 청했어: {topic} (참석: {names}). 작은 회의를 열까? (추가 호출 약 {n}번)', { topic: meet.topic, names, n }), multi: false,
           options: [{ label: tr('열어'), description: tr('참석자가 1바퀴 의견을 내고 진행자가 결론을 써(조사·반대편 없음)') }, { label: tr('안 열고 진행자 답으로 계속'), description: '' }] }];
-        const got = await this.#ask(ctx, leadId, lm, { questions, from: meet.from, to: meet.to });
+        const got = await this.#ask(ctx, leadId, lm, { questions, from: meet.from, to: meet.to, leadEntry: entry });
         if (ctx.stopped) return null;
         if (got.stop) ctx.skipped.delete(leadId);
         this.#state(s.id, leadId, 'done', got.answers ? tr('답을 받았어') : tr('질문을 넘겼어'));
+        if (entry.dropped) return null; // 카드를 건너뛰어 닫은 허락 질문: 작은 회의를 열지 않는다
         lm.text += `\n\n${answerRecord({ questions }, got.answers || null)}`;
         this.bus.emit('message', { sessionId: s.id, message: lm });
         const open = !!got.answers && got.answers[0].picked[0] === 0;
         userLine(m, 'lead', open ? tr('카드 {id}: 진행자가 청한 작은 회의를 열기로 했어({names}).', { id: c.id, names }) : tr('카드 {id}: 진행자가 청한 작은 회의는 열지 않았어. 진행자 답만으로 이어 가.', { id: c.id }), lm.id);
-        if (open) meetText = await this.#smallMeet(ctx, i, c, lq, text, people, meet.topic, leadId, ownerId);
-        if (ctx.stopped) return null;
+        if (open) meetText = await this.#smallMeet(ctx, i, c, lq, text, people, meet.topic, leadId, entry);
+        if (ctx.stopped || entry.dropped) return null;
       }
     }
+    if (lm.hidden?.length) this.bus.emit('message', { sessionId: s.id, message: lm });
     this.emitMission(s);
     this.store.saveSession(s, 100);
     return { reply: leadReply({ id: c.id, question: lq.question, answer: text, meet: meetText, decided }) };
   }
 
   // 작은 회의(1바퀴): 참석자 의견(동시에, 서로 안 보고) → 진행자 결론. 모두 한 번 실행·읽기 전용, 조사·반대편 없음. → 결론 글('' 면 결론 없음)
-  // 카드 담당이 참석자면 그 사람의 기다리는 핸들은 의견을 쓰는 동안만 비켜 두었다가 되돌린다
-  async #smallMeet(ctx, i, c, lq, answer, people, topic, leadId, ownerId) {
+  // 참석자가 자기 카드에서 진행자 답을 기다리는 중이면(같은 물결의 다른 카드도 진행자에게 물었을 때) 그 빈 핸들을 의견을 쓰는 동안만 빌렸다가 돌려준다(#claim)
+  async #smallMeet(ctx, i, c, lq, answer, people, topic, leadId, entry) {
     const { s } = ctx;
     const m = ctx.mission;
     m.smallMeets = (m.smallMeets || 0) + 1;
@@ -3593,16 +3662,15 @@ export class Orchestrator {
     const head = this.#goalCardPrompt(ctx.goalCard);
     const ops = await Promise.all(people.map(async (a) => {
       const id = String(a.id);
-      const mine = id === String(ownerId) ? ctx.handles.get(id) : null;
-      if (mine) ctx.handles.delete(id); else await this.#waitFree(ctx, id);
-      try { return await this.#prepOnce(ctx, i, id, smallOpinionPrompt({ head, topic, question: lq.question, answer }), { kind: 'meet', card: c.id, phase: 'opinion' }); } finally {
-        if (mine) { ctx.handles.set(id, mine); this.#atWorking(ctx, i, id, true); this.#state(s.id, id, 'waiting', tr('진행자 답을 기다리는 중')); }
-      }
+      const lent = await this.#claim(ctx, id, true);
+      if (ctx.stopped || entry.dropped) { this.#giveBack(ctx, i, id, lent); return { r: { stopped: true }, msg: null }; } // 그 카드를 건너뛰었으면 의견을 받지 않는다
+      try { return await this.#prepOnce(ctx, i, id, smallOpinionPrompt({ head, topic, question: lq.question, answer }), { kind: 'meet', card: c.id, phase: 'opinion' }); } finally { this.#giveBack(ctx, i, id, lent); }
     }));
-    if (ctx.stopped) return '';
+    if (ctx.stopped || entry.dropped) return '';
     const said = ops.filter((x) => x.msg && !x.r.error && !x.r.stopped && String(x.msg.text || '').trim()).map((x) => ({ name: this.store.get('agents', x.msg.agentId)?.name || x.msg.agentId, text: x.msg.text }));
     if (!said.length) { logLine(m, 'lead', tr('카드 {id}: 작은 회의에서 의견을 받지 못했어. 진행자 답만으로 이어 가.', { id: c.id })); return ''; }
-    await this.#waitFree(ctx, leadId);
+    await this.#claim(ctx, leadId);
+    if (ctx.stopped || entry.dropped) return '';
     const { r, msg } = await this.#prepOnce(ctx, i, leadId, smallConcludePrompt({ head, topic, said }), { kind: 'meet', card: c.id, phase: 'conclude' });
     const ok = r && !r.error && !r.stopped && String(msg?.text || '').trim();
     logLine(m, 'lead', ok ? tr('카드 {id}: 작은 회의 결론이 나왔어. 담당에게 참고 자료로 넘겨.', { id: c.id }) : tr('카드 {id}: 작은 회의 결론을 받지 못했어. 진행자 답만으로 이어 가.', { id: c.id }), msg?.id || null);
@@ -3835,12 +3903,24 @@ export class Orchestrator {
     } finally { ctx.waiting.delete(agentId); }
   }
 
+  // 에이전트 1명 실행. 도는 동안(라우팅·한도 대기 포함) ctx.busy 에 세고 끝나면 기다리는 쪽을 깨운다: 진행자 답·작은 회의(#claim)가 같은 사람의 CLI 를 동시에 띄우지 않게(결정 0031)
+  async #runAgent(ctx, stageIdx, agentId, feedback, opts = {}) {
+    const key = String(agentId);
+    const busy = (ctx.busy ||= new Map());
+    busy.set(key, (busy.get(key) || 0) + 1);
+    try { return await this.#runAgentBody(ctx, stageIdx, agentId, feedback, opts); } finally {
+      const n = (busy.get(key) || 1) - 1;
+      if (n > 0) busy.set(key, n); else busy.delete(key);
+      this.#wake(ctx);
+    }
+  }
+
   // once: { prompt, phase, round, retried, prep, notes } 한 번 실행(목표의 기준 판정 결정 0015, 일하기 전 조사·회의와 목표 실행의 회의 차례 결정 0017).
   // 이 세션의 CLI 대화를 이어 가지도 남기지도 않는다: 대화 번호 읽기·저장, 사용량 직전 누적(usageBase) 읽기·쓰기, 받은 역할 노트·앞머리 기록(noteHashes·convSent)을 하지 않고,
   // 프롬프트는 once.prompt 만 준다(앞 대화·놓친 대화·인수인계 메모·대화 전체 파일·프로젝트 기억·API 대화 배열 없음). 질문 창과 밀린 추가 지시 처리도 끈다.
   // once.prompt 가 없으면(회의 차례) #prompt 가 앞 대화 없이 만든다(안건·조사 노트·지금까지의 발언). notes: 이 차례가 목표의 추가 지시를 받는가(팀의 회의 단계).
   // 기준 판정 답과 조사·회의 준비 답(msg.prep)은 기억에 넣지 않는다
-  async #runAgent(ctx, stageIdx, agentId, feedback, { once: given = null } = {}) {
+  async #runAgentBody(ctx, stageIdx, agentId, feedback, { once: given = null } = {}) {
     const { s, run } = ctx;
     // 목표 일 실행의 회의 차례(일하기 전 회의와 팀의 회의 단계 모두, 회의 중 조사 포함)는 새 대화로(결정 0017). 목표 모드가 아닌 실행의 회의는 지금 그대로(결정 0005·0010)
     // 일하기 전 회의의 차례는 조사처럼 prep 표시를 달아 프로젝트 기억에 넣지 않는다(팀의 회의 단계는 지금처럼 넣는다)
@@ -4140,7 +4220,7 @@ export class Orchestrator {
       // 에이전트가 사용자에게 물으면(답 끝의 oc-ask 블록) 선택 카드를 띄우고, 답을 받아 같은 답 안에서 이어 간다
       // 진행자에게 질문(결정 0031): 일 카드 차례의 답이 oc-lead 로 끝나면(질문 블록을 다 받은 뒤) 진행자 답을 받아 같은 대화로 이어 간다(같은 카드 시작).
       // 이어 쓴 답이 다시 질문 블록이나 oc-lead 로 끝날 수 있어 둘을 번갈아 본다. 질문 창 횟수(ASK_MAX)는 이 답 전체에서 센다
-      const leadId = myCard && !once ? this.#leadFor(ctx, agentId) : null;
+      const leadChk = myCard && !once ? this.#leadWhy(ctx, agentId) : null;
       let n = 0;
       for (;;) {
       for (; askOk && !ctx.stopped && !res.stopped && !res.error; n++) {
@@ -4174,10 +4254,14 @@ export class Orchestrator {
       }
       const lq = myCard && !once && !ctx.stopped && !res.stopped && !res.error ? parseLead(msg.text.slice(askFrom)) : null;
       if (!lq) break;
-      // 기다리는 동안 핸들은 빈 것으로(질문 창을 기다릴 때와 같다)
-      ctx.handles.set(agentId, { handle: { stop() {}, steer: () => false }, msg, agent: cur.agent, prov: cur.prov });
-      const lead = await this.#leadTurn(ctx, stageIdx, agentId, msg, lq, askFrom, leadId);
-      if (ctx.stopped) { res = { ...res, stopped: true }; break; }
+      // 기다리는 동안 핸들은 빈 것으로(질문 창을 기다릴 때와 같다). 진행자 답을 기다리는 빈 핸들(idle 'lead')은 작은 회의 의견에 잠시 빌려줄 수 있다(#claim).
+      // 건너뛰기·그만은 이 핸들의 stop() 으로 기다림을 끊는다(진행자 답을 기다리지 않고 이 카드를 건너뛴 것으로 끝낸다. 이어 쓰기 호출도 하지 않는다)
+      let cut = () => {};
+      const cutWait = new Promise((r) => { cut = r; });
+      ctx.handles.set(agentId, { handle: { stop: () => cut(), steer: () => false }, msg, agent: cur.agent, prov: cur.prov, idle: 'lead' });
+      this.#wake(ctx);
+      const lead = await this.#leadTurn(ctx, stageIdx, agentId, msg, lq, askFrom, leadChk, cutWait);
+      if (ctx.stopped || ctx.skipped.has(agentId)) { res = { ...res, stopped: true }; break; }
       if (!lead) break; // 묻지 않았다(상한·형식·진행자가 맡은 카드): 블록은 읽지 않은 채 답이 끝난다
       const record = `
 
@@ -5305,7 +5389,7 @@ ${lead.reply}`;
   }
 
   // ── 개입 ──
-  control(sessionId, { action, agentId = null, text = '', askId = null, answers = null, skip = false, to = null, pick = null, hash = null }) {
+  control(sessionId, { action, agentId = null, text = '', askId = null, answers = null, skip = false, to = null, pick = null, hash = null, msgId = null }) {
     const ctx = this.ctx.get(sessionId);
     if (!ctx) throw Object.assign(new Error(tr('진행 중인 작업이 없어.')), { status: 409 });
     const { s } = ctx;
@@ -5418,6 +5502,7 @@ ${lead.reply}`;
         ctx.stopped = true;
         for (const w of [...ctx.asks.values()]) w.done({ stop: true });
         for (const { handle } of ctx.handles.values()) handle.stop();
+        this.#wake(ctx); // 같은 사람이 비기를 기다리던 진행자 답·작은 회의도 멈춘다(#claim)
         gate({ action: 'stop' });
         return { ok: true };
       case 'skip': {
@@ -5466,6 +5551,8 @@ ${lead.reply}`;
         // 다르면 반영하지 않고 카드를 다시 보낸다(대기는 그대로. 화면이 새 카드로 다시 그려 다시 고른다)
         const h = ctx.run.hold;
         if (!ctx.gate || h?.reason !== 'fork') return { ok: false };
+        // 화면이 누른 카드(msgId)가 지금 기다리는 카드여야 한다(다른 카드의 단추가 이 대기에 들어가지 않게)
+        if (String(msgId ?? '') !== String(h.msgId)) return { ok: false, reason: tr('이 두 갈래 카드는 지금 기다리는 카드가 아니야.') };
         const p = String(pick ?? '');
         if (!(h.step === 'offer' ? ['write', 'team'] : ['a', 'b', 'team']).includes(p)) return { ok: false };
         if (h.step === 'pick' && p !== 'team') {
@@ -5490,6 +5577,7 @@ ${lead.reply}`;
       ctx.stopped = true;
       for (const { handle } of ctx.handles.values()) { try { handle.stop(); } catch { /* 무시 */ } }
       for (const w of [...ctx.asks.values()]) w.done({ stop: true });
+      this.#wake(ctx);
       if (ctx.gate) ctx.gate({ action: 'stop' });
       // 앱을 끄는 중이면 실행이 정리되기 전에 저장소가 닫힌다. 사용자 말은 지금 기억에 넣고, 넣었다는 표시도 같이 저장되게 한다
       this.#remember(ctx.s, ctx.userMsg);

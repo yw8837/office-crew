@@ -266,12 +266,14 @@ async function pump() {
   const forkChunks = !forkKey ? null : [`- 무엇을: 가짜 안 ${forkKey}의 할 일\n`, `- 왜: 가짜 안 ${forkKey}의 이유\n`, `- 치르는 값: 가짜 안 ${forkKey}의 값\n`, `- 되돌릴 수 있는지: 가짜 안 ${forkKey}는 되돌릴 수 있어`,
     ...(goalLine.includes('FORKBLOCK') ? ['\n\n```oc-ask\n{"questions":[{"question":"FORKBLOCK 섞인 질문","options":["예","아니오"]}]}\n```'] : [])];
   // 진행자 답 차례(머리 줄 "[진행자에게 온 질문 — 카드 k1]"): 기본은 짧은 답. 신호어는 확정 목표 줄에서: LEADASK(사람이 정할 일이라 질문 블록) · LEADMEET(작은 회의 블록:
-  // 프롬프트의 팀 명단 앞 두 사람) · LEADMEETBAD(참석자 이름이 없는 작은 회의 블록) · LEADSLOW(3초 늦게, 아래). 작은 회의: "[작은 회의 — 의견]"·"[작은 회의 — 결론]" 머리 줄
+  // 프롬프트의 팀 명단 앞 두 사람) · LEADMEETALL(진행자 자신, 명단 전원, 목표 줄의 LEADQ:<이름> 사람까지 적은 블록: 빼고 자르는지 보려고) ·
+  // LEADMEETBAD(참석자 이름이 없는 작은 회의 블록) · LEADSLOW(3초 늦게, 아래). 작은 회의: "[작은 회의 — 의견]"·"[작은 회의 — 결론]" 머리 줄
   const leadTurn = /^\[진행자에게 온 질문 — 카드 (k\d+)\]$/m.test(text);
   const meetRoster = leadTurn ? (text.split('[팀 명단 — 작은 회의 참석자는 이 이름 그대로]\n')[1] || '').split('\n\n')[0].split('\n').map((l) => l.match(/^- (.+) \([^()]*\)$/)?.[1]).filter(Boolean) : [];
   const leadChunks = !leadTurn ? null
     : goalLine.includes('LEADASK') ? ['사람이 정할 일이야.\n\n', '```oc-ask\n{"questions":[{"question":"LEADASK 어느 쪽으로 할까?","options":[{"label":"가 (추천)","description":"빠른 쪽"},{"label":"나","description":"싼 쪽"}]}]}\n```']
       : goalLine.includes('LEADMEETBAD') ? ['같이 정하자.\n\n', '```oc-meet\n' + JSON.stringify({ topic: '가짜 주제', people: ['없는사람'] }) + '\n```']
+        : goalLine.includes('LEADMEETALL') ? ['같이 정하자.\n\n', '```oc-meet\n' + JSON.stringify({ topic: '가짜 주제: 모두 모여', people: [myName, ...[...goalLine.matchAll(/LEADQ:(\S+)/g)].map((x) => x[1]), ...meetRoster] }) + '\n```']
         : goalLine.includes('LEADMEET') ? ['같이 정하자.\n\n', '```oc-meet\n' + JSON.stringify({ topic: '가짜 주제: 어느 방법으로?', people: meetRoster.slice(0, 2) }) + '\n```']
           : ['LEADANSWER 진행자 답: 첫 번째 방법으로 해.'];
   const smallChunks = /^\[작은 회의 — 의견\]$/m.test(text) ? [`SMALLOP ${myName} 의견: 첫 번째 방법.`] : /^\[작은 회의 — 결론\]$/m.test(text) ? ['SMALLCON 결론: 첫 번째 방법으로 간다.'] : null;
@@ -296,9 +298,9 @@ async function pump() {
     : text.includes('도구를 더 쓰지 말고') ? ['조사 결과 ', '정리했어'] : text.includes('EMPTYANSWER') ? [] : ['안녕', '하세요 ', `turn${turn}`]);
   // LONGANSWER(이번 요청): 보통 답을 길게(앞에 LONGHEAD, 가운데 2,500자, 끝에 LONGTAIL). 앞 단계 결과의 끝부분만 넘기는지 보려고(결정 0026)
   if (chunks.length && req.includes('LONGANSWER') && !goalTurn && !reviewTurn) chunks.splice(0, chunks.length, `LONGHEAD p${process.pid} `, '긴 답 줄이야. '.repeat(312), ` LONGTAIL p${process.pid}`);
-  // 목표 회의의 1바퀴 의견("입장" 줄을 맨 끝에 쓰라는 형식): 입장 한 줄을 붙인다. 요청에 STANCEB:<이 에이전트 이름> 이 있으면 B안, 아니면 A안.
+  // 목표 회의의 1바퀴 의견("입장" 줄을 맨 끝에 쓰라는 형식): 입장 한 줄을 붙인다. 요청에 STANCEB:<이 에이전트 이름> 이 있으면 B안, STANCEC:<이름> 이면 C안(세 갈래), 아니면 A안.
   // 보통 회의의 의견도 같은 형식 줄을 받지만(결정 0028), 입장 신호어(POSSAME·POSMOVE)가 있을 때만 붙인다(앞 테스트들의 의견 글을 그대로 두려고)
-  const stance = myName && req.includes(`STANCEB:${myName}`) ? 'B안' : 'A안';
+  const stance = myName && req.includes(`STANCEB:${myName}`) ? 'B안' : myName && req.includes(`STANCEC:${myName}`) ? 'C안' : 'A안';
   const posSignal = /POSSAME|POSMOVE/.test(req);
   if (text.includes('[회의 — 의견 내기') && text.includes('- 입장: 지금 미는 안 한 줄(맨 끝 줄로)') && (text.includes('[확정된 목표와 합격 기준') || posSignal)) chunks.push(`\n입장: ${stance}`);
   // 회의 차례 발언의 입장 줄(결정 0028): POSSAME 은 바퀴마다 같은 입장, POSMOVE 는 바퀴마다 바뀌는 입장, POSNONE:<이름> 은 그 사람만 입장 줄을 빼먹는다

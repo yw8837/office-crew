@@ -441,7 +441,7 @@ class Message extends Component {
     // 일 카드의 계획 블록(결정 0018)은 계획 카드로, 일 단계 답 끝의 막힘 블록은 "막힘: 이유" 줄로 보여 준다
     const body = m.review ? hideReview(m.text, m.reviewBlock, streaming) : m.prep?.kind === 'questions' ? hideResearch(m.text, m.researchBlock, streaming)
       : m.prep?.kind === 'plan' ? hidePlan(m.text, m.planBlock, streaming) : m.prep?.kind === 'team' ? hideTeam(m.text, m.teamBlock, streaming) // 팀 초안 블록은 팀 제안 카드로(결정 0024)
-        : hideBlocked(hideCheck(hideAsks(hideGoal(m.text, m.goalBlock, streaming), [...(m.asks || []), ...(m.leadAsks || [])], streaming), m.check, streaming), m.blockedBlock, streaming);
+        : hideBlocked(hideCheck(hideAsks(hideGoal(m.text, m.goalBlock, streaming), [...(m.asks || []), ...(m.leadAsks || []), ...(m.hidden || [])], streaming), m.check, streaming), m.blockedBlock, streaming);
     // 조사 결과: 누구의 어떤 질문에 답했는지(질문이 든 차례 글에서 찾는다)
     const asker = m.checkOf ? state.sessionData[state.currentId]?.messages.find((x) => x.id === m.checkOf) : null;
     // 배정 기록(결정 0022): 모델 칩에 마우스를 올리면 요청한 AI와 이유(모델을 기본값으로 둬서 모델 칩이 없으면 AI 칩에). 출처 표시: 목표 일 실행의 일 단계·일 카드 답과 회의 결론에 "에이전트가 씀"

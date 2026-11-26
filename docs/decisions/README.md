@@ -15,14 +15,14 @@ Keep a record under about 100 lines. When a decision changes, add a dated "Revis
 | [0007](0007-local-only-user-messages.md) | What you type to a local model stays away from cloud AIs | Accepted |
 | [0008](0008-handoff-to-another-ai.md) | Another AI that takes over a session gets the earlier conversation three ways | Accepted |
 | [0009](0009-agents-ask-with-a-marked-block.md) | An agent asks the user by writing a marked block in its answer | Accepted (revised by 0031) |
-| [0010](0010-meetings-take-turns.md) | Meetings take turns, and the chair judges after each round (replaces the flow part of 0005) | Accepted |
+| [0010](0010-meetings-take-turns.md) | Meetings take turns, and the chair judges after each round (replaces the flow part of 0005) | Accepted (see also 0031: two options after a goal meeting) |
 | [0011](0011-meetings-pause-for-research.md) | A meeting turn can ask a question, and the team's researcher looks it up once | Accepted |
 | [0012](0012-claude-usage-counts-the-whole-tree.md) | Claude usage counts sub-agents and is not counted twice in a continued conversation | Accepted |
 | [0013](0013-agents-keep-role-notes.md) | Agents keep short role notes, and only what the user accepts goes into their work | Accepted (revised by 0023) |
 | [0014](0014-goal-mode-confirmed-goal-card.md) | Goal mode turns a request into a goal card the user confirms, and only the confirmed values become instructions | Accepted |
 | [0015](0015-goal-mode-fresh-review.md) | Goal mode checks each confirmed criterion with a fresh reviewer, returns the work once, then asks | Accepted (revised by 0026) |
 | [0016](0016-goal-mode-continue-a-cut-goal.md) | A goal cut off by closing the app continues from where it stopped, only when the user asks | Accepted |
-| [0017](0017-goal-mode-research-and-meeting-first.md) | Goal mode researches and holds a meeting before the work, every turn in a new conversation | Accepted (revised by 0026) |
+| [0017](0017-goal-mode-research-and-meeting-first.md) | Goal mode researches and holds a meeting before the work, every turn in a new conversation | Accepted (revised by 0026; see also 0031: two options after a goal meeting) |
 | [0018](0018-goal-mode-task-cards.md) | Goal mode can split the work into task cards the lead plans and the code orders | Accepted (see 0027, 0030 and 0031 for later changes) |
 | [0019](0019-goal-mode-call-estimate-and-limit-wait.md) | Goal mode shows a rough call estimate before confirming, and waits for a usage-limit reset when no other AI can take over | Accepted (revised by 0026, 0030 and 0031) |
 | [0020](0020-flow-stage-default-picture.md) | The split view shows a flow stage above the chat; the village stays in the Large office view | Accepted |

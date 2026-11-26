@@ -9,6 +9,7 @@ import { sumEstimate, limitRows, recordAge } from '../mission-numbers.js';
 import { WIN_LABEL } from './session.js'; // 한도 창 이름(세션 화면의 계정 한도와 같은 이름)
 import { answerRows, durationWords, unverifiedLines, failWords, raisedWords, forkLines } from '../report-lines.js'; // 완주 보고의 글줄(서버가 기억에 넣는 글 판과 같은 함수, 결정 0025)
 import { goalEndWord, raiseChoices, gateKeys } from '../stage-model.js'; // 끝 상태 이름(흐름 무대의 끝 깃발과 같은 말), 넘기기 보기·번호 키(결정 0027)
+import { forkDigest } from '../fork-hash.js'; // 두 갈래 카드의 본 것 해시(서버 forkHash 와 같은 글, 결정 0031)
 
 const CRIT_COUNT = 7; // 서버와 같은 상한(server/mission.js)
 const lines = (text) => String(text || '').split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
@@ -380,14 +381,10 @@ export function ReportCard({ m }) {
 
 // ── 두 갈래(결정 0031) ──
 const FORK_WORD = () => ({ ask: t('묻고 요약 받기'), auto: t('바로 요약 받기'), off: t('두 갈래 안 함') });
-// 화면이 보여 준 글로 해시를 만든다(서버 forkHash 와 같은 글: 안마다 [키, 입장, 요약]). 서버는 저장된 요약으로 다시 만든 값과 대조하고 다르면 반영하지 않는다.
+// 화면이 보여 준 글로 해시를 만든다(서버 forkHash 와 같은 모듈 fork-hash.js 의 글: 안마다 [키, 입장, 요약]). 서버는 저장된 요약으로 다시 만든 값과 대조하고 다르면 반영하지 않는다.
 // 브라우저가 못 하면(안전하지 않은 주소 등) 서버가 카드에 실어 준 값
 async function seenHash(m) {
-  const text = JSON.stringify((m.options || []).map((o) => [o.key, o.position, o.summary || '']));
-  try {
-    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
-  } catch { return m.hash || ''; }
+  try { return await forkDigest(m.options || []); } catch { return m.hash || ''; }
 }
 const FORK_CHIP = () => ({ offer: [t('요약을 받을지 물어봄'), ' warn'], writing: [t('요약 쓰는 중'), ' accent'], open: [t('고르기 기다림'), ' warn'], picked: [t('골랐어'), ' ok'], team: [t('팀이 정함'), ''],
   failed: [t('요약 못 받음'), ' warn'], skipped: [t('상한으로 안 엶'), ' warn'], cancelled: [t('닫힘'), ''] });
@@ -407,7 +404,7 @@ export function ForkCard({ m }) {
     if (busy || !hold) return;
     setBusy(true);
     try {
-      const body = { action: 'fork', pick, ...(hold.step === 'pick' && pick !== 'team' ? { hash: await seenHash(m) } : {}) };
+      const body = { action: 'fork', pick, msgId: m.id, ...(hold.step === 'pick' && pick !== 'team' ? { hash: await seenHash(m) } : {}) };
       const r = await post(`/api/sessions/${sid}/control`, body);
       if (r?.ok === false) toast(r.reason || t('지금은 고를 수 없어.'), 'error');
     } catch (e) { toast(e.message, 'error'); }

@@ -4,7 +4,10 @@
 // 글 판(reportText)은 사용자가 "기억에 넣기"를 누를 때 프로젝트 기억에 넣는 글이다: 코드가 모은 사실과 기준별 결과만(회의 결론·조사 노트는 넣지 않는다)
 import { tr } from './i18n.js';
 import { verdictWord, answerNames, durationWords, unverifiedLines, failWords, raisedWords } from '../public/js/report-lines.js'; // 화면과 같은 글줄
-import { answerKind } from '../public/js/usage-numbers.js'; // 답의 종류는 세션의 "어디에 썼는지"와 같은 함수(결정 0026)
+import { answerKind, weighted } from '../public/js/usage-numbers.js'; // 답의 종류는 세션의 "어디에 썼는지"와 같은 함수(결정 0026)
+import { redact } from './memory.js'; // 실행 기록 내보내기의 비밀 가리기는 기억과 같은 함수(결정 0030)
+import { isQuotaError, isTransientError } from './failover.js';
+import { maskMore } from './mission.js'; // 메일 주소·Bearer 꼴 가리기(반복 실패 줄과 같은 함수)
 
 export const REPORT_EVIDENCE = 200; // 보고에 싣는 기준 근거(에이전트가 씀) 하나의 최대 글자
 export const REPORT_USER = 30; // 보고에 싣는 "사용자가 누른 것" 줄 수(넘으면 앞을 버리고 수만 센다)
@@ -75,6 +78,97 @@ export function buildReport({ m, messages = [], runs = [], now = Date.now(), nam
     logCut: log[0]?.kind === 'skip' ? Number(log[0].n) || 0 : 0,
     meetings: [...meet.values()].map((x) => ({ ...(x.prep ? { prep: true } : { stageIndex: x.stageIndex, label: String(lastWork?.stages?.[x.stageIndex]?.label || '') }), msgId: x.msgId, decision: x.decision || '', dissent: [...(x.dissent || [])] })),
   };
+}
+
+// ── 실행 기록 내보내기(결정 0030) ──
+// 목표 하나의 실행을 JSON 하나로: 목표·기준, 카드와 상태, 진행 기록, 회의 결론·사용자가 정한 것, 호출(답)마다 누가·어느 AI·모델·종류·시작/끝·사용량·배정·실패 종류, 완주 보고의 사실, 실행의 단계.
+// 답 글·요청 글·카드 꼬리(에이전트가 쓴 끝의 두 칸)는 body 일 때만. 프롬프트 전문은 앱이 저장하지 않아서 넣지 못한다(notes.prompts).
+// 모든 글은 내보내기 전에 가린다(exportCleaner): 설정의 비밀 값(API 키·알림 주소·앱 토큰 등, secrets)을 그대로 찾아 가리고, 기억과 같은 토큰 모양 가리기(redact),
+// 메일 주소·"Bearer 글자"(maskMore), 이름_KEY=값·이름_TOKEN=값·이름_SECRET=값 꼴의 값, 절대 경로는 작업 폴더(roots: 목표가 돈 폴더) 안이면 "." 기준 상대 경로로,
+// 앱 데이터 폴더는 <data>, 사용자 홈은 ~ 로 바꾼다(긴 경로부터)
+export const EXPORT_FORMAT = 'office-crew-goal-run';
+export const EXPORT_VERSION = 1;
+export const SECRET_MASK = '••••••••';
+const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const SEP = '[\\\\/]+'; // 경로 구분자 하나 이상(역슬래시·슬래시 섞임, JSON 이스케이프의 두 겹 역슬래시도)
+const AFTER = '(?=$|[\\\\/"\'`\\s)\\]},;:>])'; // 뿌리 경로 뒤: 구분자·글 끝·따옴표·공백·닫는 괄호·쉼표·쌍반점·쌍점(D:\work\app2 가 D:\work\app 로 읽히지 않게)
+// 뿌리 경로 하나 → 찾을 정규식. 드라이브가 있는 경로(Windows)는 C:\…·c:/… 와 Git Bash 의 /c/…, WSL 의 /mnt/c/… 꼴까지, 대소문자 무시.
+// 드라이브가 없는 경로(POSIX)는 그대로(대소문자 구분). 앞이 글자·숫자·점·물결·붙임표면 다른 경로의 한가운데라 바꾸지 않는다
+export function rootPattern(p) {
+  const parts = String(p ?? '').split(/[\\/]+/).filter(Boolean);
+  const drive = /^[A-Za-z]:$/.test(parts[0] || '') ? parts.shift()[0] : '';
+  if (!parts.length) return null;
+  const rest = parts.map(escRe).join(SEP);
+  const head = drive ? `(?:${drive}:|/${drive}|/mnt/${drive})` : '';
+  return new RegExp(`(?<![\\w.~-])${head}${SEP}${rest}${AFTER}`, drive ? 'gi' : 'g');
+}
+const ENV_SECRET = /(\b[A-Za-z][A-Za-z0-9_]*_(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD)\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s"'&,;]+)/gi;
+export function exportCleaner({ secrets = [], roots = [], dataDir = '', home = '' } = {}) {
+  const keys = [...new Set(secrets.map((x) => String(x ?? '')).filter((x) => x.length >= 4))].sort((a, b) => b.length - a.length);
+  const pathRes = [...roots.filter(Boolean).map((p) => [p, '.']), ...(dataDir ? [[dataDir, '<data>']] : []), ...(home ? [[home, '~']] : [])]
+    .map(([p, to]) => [String(p).replace(/[\\/]+$/, ''), to]).filter(([p]) => p).sort((a, b) => b[0].length - a[0].length)
+    .map(([p, to]) => [rootPattern(p), to]).filter(([re]) => re);
+  return (v) => {
+    let x = String(v);
+    for (const k of keys) x = x.split(k).join(SECRET_MASK);
+    x = maskMore(redact(x)).replace(ENV_SECRET, `$1${SECRET_MASK}`);
+    for (const [re, to] of pathRes) x = x.replace(re, to);
+    return x;
+  };
+}
+// 실패 종류(코드가 오류 문구로 가를 수 있는 것만): 사용량 한도 outside, 일시 장애 transient, 그 밖 unknown
+export const answerFail = (error) => (isQuotaError(error) ? 'outside' : isTransientError(error) ? 'transient' : 'unknown');
+// 본문을 빼면(body false) 사용자가 쓴 글도 뺀다: 세션 제목(첫 요청 앞부분), 진행 기록의 추가 지시 줄(글 없이 종류만), 완주 보고의 같은 줄.
+// 회의 질문에 사용자가 고른 답(decided, 답 줄)은 "사용자가 정한 것"이라 그대로 둔다
+const userText = (x) => x?.by === 'user' && x.kind === 'note';
+export function exportRun({ s, m, nameOf = (id) => id, body = false, secrets = [], roots = [], dataDir = '', home = '', now = Date.now(), appVersion = '' }) {
+  const clean = exportCleaner({ secrets, roots, dataDir, home });
+  const deep = (v) => (typeof v === 'string' ? clean(v) : Array.isArray(v) ? v.map(deep) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, deep(x)])) : v);
+  const who = (id) => (id ? { id: String(id), name: String(nameOf(id) || id) } : null);
+  const runs = (s.runs || []).filter((r) => r.missionId === m.id);
+  const runIds = new Set(runs.map((r) => r.id));
+  const answers = (s.messages || []).filter((x) => x.role === 'agent' && (x.missionId === m.id || runIds.has(x.runId)));
+  const first = (t) => [...String(t || '').split(/\r?\n/).find((l) => l.trim()) || ''].slice(0, 300).join('');
+  const rep = m.reportMsgId ? (s.messages || []).find((x) => x.id === m.reportMsgId && x.kind === 'report') : null;
+  const report = rep ? Object.fromEntries(Object.entries(rep).filter(([k]) => !['id', 'role', 'kind', 'status', 'text', 'createdAt', 'missionId', 'memory', 'memFolder'].includes(k))) : null;
+  // 본문을 빼면 사용자가 쓴 추가 지시 줄은 글 없이(종류·시각·누가만), 완주 보고의 "사용자가 확정한 것"에서도 같은 줄의 글을 뺀다
+  const omit = new Set(body ? [] : (m.log || []).filter(userText).map((x) => x.text));
+  if (report && !body && Array.isArray(report.user)) report.user = report.user.map((u) => (omit.has(u.text) ? { at: u.at, textOmitted: true } : u));
+  const out = {
+    format: EXPORT_FORMAT, version: EXPORT_VERSION, exportedAt: new Date(now).toISOString(), app: { version: appVersion }, body: !!body,
+    notes: { prompts: 'not-stored', paths: 'work-folder-relative', masked: ['secrets', 'token-like text', 'absolute paths'], ...(body ? {} : { omitted: ['answer text', 'request text', 'session title', 'extra instruction text', 'card closing lines'] }) },
+    session: { id: s.id, title: body ? s.title || '' : '' },
+    goal: {
+      id: m.id, status: m.status, goal: m.goal || '', work: m.work || 'stages', createdAt: m.createdAt || 0, confirmedAt: m.confirmedAt || 0, editedByUser: !!m.editedByUser,
+      criteria: (m.criteria || []).map((c) => ({ id: c.id, text: c.text, status: c.status || 'open', evidence: c.evidence || '', ...(c.check ? { check: c.check } : {}) })),
+      outOfScope: [...(m.outOfScope || [])], userDecides: [...(m.userDecides || [])], mustKeep: [...(m.mustKeep || [])],
+      lead: who(m.leadId), reviewer: who(m.reviewerId), dropped: [...(m.dropped || [])], prep: m.prep || null,
+      calls: m.calls || null, estimate: m.estimate || null, round: m.round || 0, returns: m.returns || 0, returnCap: m.returnCap ?? null,
+      ...(body ? { request: m.request || '' } : {}),
+    },
+    research: m.research ? { questions: (m.research.questions || []).map((q) => ({ id: q.id, text: q.text, status: q.status, agent: who(q.agentId) })), ...(m.research.fallback ? { fallback: true } : {}) } : null,
+    cards: (m.cards || []).map((c) => ({
+      id: c.id, title: c.title, owner: who(c.ownerId), kind: c.kind, needs: [...(c.needs || [])], files: [...(c.files || [])], done: c.done || '', not: c.not || '',
+      status: c.status, ...(c.by ? { by: c.by } : {}), ...(c.reason ? { reason: c.reason } : {}), starts: c.starts || 0, cap: c.cap || 0,
+      ...(c.raised?.length ? { raised: c.raised.map((r) => ({ from: who(r.from), to: who(r.to), at: r.at, why: r.why, ...(r.later ? { later: true } : {}) })) } : {}),
+      ...(c.proof ? { proof: { files: [...(c.proof.files || [])], at: c.proof.at } } : {}), msgId: c.msgId || null, ...(body && c.tail ? { tail: c.tail } : {}),
+    })),
+    log: (m.log || []).map((x) => ({ at: x.at, kind: x.kind, ...(body || !userText(x) ? { text: x.text } : { textOmitted: true }), ...(x.msgId ? { msgId: x.msgId } : {}), ...(x.fail ? { fail: x.fail } : {}), ...(x.by ? { by: x.by } : {}), ...(x.agentKind ? { agentKind: x.agentKind } : {}), ...(x.n ? { n: x.n } : {}) })),
+    meetings: (m.meetings || []).map((x) => ({ ...x })), decided: (m.decided || []).map((x) => ({ ...x })),
+    calls: answers.map((x) => ({
+      msgId: x.id, runId: x.runId || null, stageIndex: x.stageIndex ?? null, stage: x.stageLabel || '', agent: who(x.agentId),
+      provider: x.provider || '', model: x.model || '', effort: x.effort || '', kind: answerKind(x, { goal: true }), status: x.status,
+      start: x.createdAt || 0, end: (x.createdAt || 0) + (x.usage?.durationMs || 0),
+      usage: { input: x.usage?.input || 0, output: x.usage?.output || 0, cacheRead: x.usage?.cacheRead || 0, cacheWrite: x.usage?.cacheWrite || 0, cost: x.usage?.cost || 0, weighted: weighted(x.usage || {}) },
+      route: x.route || null, ...(x.card ? { card: x.card.id } : {}), ...(x.aiChain ? { aiChain: [...x.aiChain] } : {}),
+      ...(x.status === 'error' ? { fail: answerFail(x.error), error: first(x.error) } : {}),
+      ...(body ? { text: x.text || '' } : {}),
+    })),
+    report,
+    runs: runs.map((r) => ({ id: r.id, mission: r.mission, status: r.status, startedAt: r.startedAt || 0, endedAt: r.endedAt || null, ...(r.resumed ? { resumed: true } : {}),
+      stages: (r.stages || []).map((st) => ({ label: st.label, status: st.status, ...(st.mission ? { mission: st.mission } : {}), agents: (st.agentIds || []).map(who), ...(st.cardIds ? { cardIds: [...st.cardIds] } : {}), ...(st.raised ? { raised: true } : {}) })) })),
+  };
+  return deep(JSON.parse(JSON.stringify(out)));
 }
 
 // 끝 상태 이름(흐름 무대의 끝 깃발과 같은 말)

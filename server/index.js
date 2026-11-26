@@ -32,6 +32,8 @@ import { Scheduler, cleanSchedule } from './scheduler.js';
 import { alive } from './mission.js';
 import { cleanTier, cleanLadder } from './mission.js';
 import { browserRoute, cleanBrowserSettings } from './browser.js';
+import { exportRun } from './report.js';
+import os from 'node:os';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -660,6 +662,19 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   route('POST', '/api/sessions/([\\w-]+)/mission/resume', async (req, url, [id]) => { const b = await readJson(req); return orch.resumeMission(id, b); });
   // 완주 보고를 프로젝트 기억에 넣기({ on: true })·빼기({ on: false }). 결정 0025
   route('POST', '/api/sessions/([\\w-]+)/report/([\\w-]+)/memory', async (req, url, [id, mid]) => { const b = await readJson(req); return orch.reportMemory(id, mid, b.on !== false); });
+  // 실행 기록 내보내기(결정 0030): 이 세션의 지금 목표 하나(새 목표가 끝난 목표를 덮어써서 지난 목표는 없다). body=1 이면 답·요청 글도.
+  // 설정의 비밀 값(API 키·API 프로필 키·알림 주소·ACP 에이전트와 커넥터의 환경 변수·헤더 값 8자 이상)과 앱 토큰은 글에서 찾아 가린다
+  route('GET', '/api/sessions/([\\w-]+)/mission/([\\w-]+)/export', async (req, url, [id, mid]) => {
+    const s = store.getSession(id);
+    if (!s) throw new HttpError(404, tr('세션 없음'));
+    if (!s.mission || s.mission.id !== mid) throw new HttpError(404, tr('그 목표의 기록이 없어. 내보내기는 이 세션의 지금 목표만 돼.'));
+    const st = store.settings;
+    const long = (o) => Object.values(o || {}).map(String).filter((v) => v.length >= 8);
+    const secrets = [token, ...Object.values(st.apiKeys || {}), ...(st.apiProfiles || []).map((p) => p.apiKey), st.phoneUrl,
+      ...(st.acpAgents || []).flatMap((a) => long(a.env)), ...store.all('connectors').flatMap((c) => [...long(c.env), ...long(c.headers)])].filter(Boolean);
+    return exportRun({ s, m: s.mission, nameOf: (aid) => store.get('agents', aid)?.name || aid, body: url.searchParams.get('body') === '1', secrets,
+      roots: [s.mission.cwd, s.cwd || st.defaultCwd || path.join(dirs.workspaces, s.id)], dataDir: dirs.home, home: os.homedir(), appVersion: VERSION }); // 작업 폴더는 cwdOf 처럼 고르되 만들지 않는다
+  });
   route('POST', '/api/sessions/([\\w-]+)/open-folder', async (req, url, [id]) => {
     const s = store.getSession(id);
     if (!s) throw new HttpError(404, tr('세션 없음'));
@@ -732,6 +747,18 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     const m = await memory.of(cwd);
     return { on: store.settings.memory === true, key: projectKey(cwd), cwd, ...m.stats() };
   });
+  // 반복 실패 줄(결정 0030): 기억 폴더의 failures.json 보기·지우기(한 줄: item 에 열쇠, 전부: item 없이). 폴더는 키로만(경로를 받지 않는다)
+  route('GET', '/api/memory/failures', async (req, url) => {
+    const m = await memory.byKey(url.searchParams.get('key') || '');
+    if (!m) throw new HttpError(404, tr('그 기억이 없어.'));
+    return m.failures();
+  });
+  route('DELETE', '/api/memory/failures', async (req) => {
+    const b = await readJson(req);
+    const m = await memory.byKey(String(b.key || ''));
+    if (!m) throw new HttpError(404, tr('그 기억이 없어.'));
+    return m.dropFailures(typeof b.item === 'string' ? b.item : null);
+  });
   route('GET', '/api/memory/search', async (req, url) => {
     const m = await memory.byKey(url.searchParams.get('key') || '');
     if (!m) throw new HttpError(404, tr('그 기억이 없어.'));
@@ -766,6 +793,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     // 구독 한도 % 상한(0 = 끔, 숫자가 아니면 기본 90)과 절약 프로필(결정 0026)
     if ('limitCap' in b) { const n = Number(b.limitCap); b.limitCap = b.limitCap !== null && b.limitCap !== '' && Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : 90; }
     if ('savings' in b) b.savings = b.savings === 'lean' ? 'lean' : 'normal';
+    if ('transientRetry' in b) b.transientRetry = b.transientRetry !== false; // 일시 장애 1번 자동 다시(결정 0030, 기본 켬)
     if ('autoHandoff' in b) b.autoHandoff = b.autoHandoff === true;
     if ('agentAsks' in b) b.agentAsks = b.agentAsks !== false;
     if ('stallMinutes' in b) b.stallMinutes = Math.min(1440, Math.max(0, Math.round(Number(b.stallMinutes) || 0)));

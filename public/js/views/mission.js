@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { html, ProviderChip } from '../ui.js';
 import { state, changed, toast, agentById } from '../state.js';
-import { post, put } from '../api.js';
+import { get, post, put } from '../api.js';
 import { t, locale } from '../i18n/index.js';
 import { sumEstimate, limitRows, recordAge } from '../mission-numbers.js';
 import { WIN_LABEL } from './session.js'; // 한도 창 이름(세션 화면의 계정 한도와 같은 이름)
@@ -277,6 +277,32 @@ export function PlanCard({ m }) {
 // ── 완주 보고(결정 0025) ──
 // 목표가 끝나면 코드가 모은 사실로 만든 카드(AI 호출 없음). 처음엔 한 줄 요약으로 접혀 있고, 펼치면 호출·기준·사용자가 누른 것·확인 못 한 것·실패 종류·바뀐 파일·회의 결론.
 // 에이전트가 쓴 글(기준 근거·회의 결론)은 "에이전트가 씀" 표시와 함께. 기억에는 사용자가 "기억에 넣기"를 눌러야 들어가고, 빼면 검색에서 빠진다
+// 실행 기록 내보내기(결정 0030): 이 세션의 지금 목표 하나를 JSON 파일 하나로 받는다(서버가 비밀·경로를 가린 값. 기존 /api 인증 그대로).
+// "본문 포함"을 켜야 답·요청 글이 들어간다(프롬프트 전문은 앱이 저장하지 않아서 못 넣는다). 새 목표가 덮어쓴 지난 목표는 기록이 없어서 단추를 보이지 않는다
+export function ExportRun({ s, missionId }) {
+  const [body, setBody] = useState(false);
+  const [busy, setBusy] = useState(false);
+  if (!s?.mission || s.mission.id !== missionId) return null;
+  const save = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const data = await get(`/api/sessions/${s.id}/mission/${missionId}/export${body ? '?body=1' : ''}`);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+      a.download = `goal-run-${missionId}${body ? '-body' : ''}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast(t('실행 기록을 파일로 내보냈어(API 키·알림 주소·토큰은 가렸어)'), 'ok');
+    } catch (e) { toast(e.message, 'error'); }
+    setBusy(false);
+  };
+  return html`<span class="row small" style="gap:8px;flex-wrap:wrap">
+    <label class="row small" style="gap:4px" title=${t('켜면 답·요청 글도 넣어(비밀·경로는 똑같이 가려). 프롬프트 전문은 앱이 저장하지 않아서 못 넣어.')}><input type="checkbox" aria-label=${t('본문 포함')} checked=${body} disabled=${busy} onChange=${(e) => setBody(e.target.checked)} /> ${t('본문 포함')}</label>
+    <button type="button" class="btn sm" disabled=${busy} onClick=${save} title=${t('목표·기준·카드·진행 기록·호출마다의 기록·완주 보고의 사실을 JSON 파일 하나로 받아.')}>${t('실행 기록 내보내기')}</button>
+  </span>`;
+}
+
 export function ReportCard({ m }) {
   const sid = state.route.id;
   const [open, setOpen] = useState(false);
@@ -312,6 +338,7 @@ export function ReportCard({ m }) {
         : inMem ? html`<span class="chip ok">${t('기억에 넣었어')}</span><button type="button" class="btn sm" disabled=${busy} onClick=${() => remember(false)}>${t('기억에서 빼기')}</button>`
           : html`<button type="button" class="btn sm" disabled=${busy} onClick=${() => remember(true)}>${m.memory?.added ? t('기억에 다시 넣기') : t('기억에 넣기')}</button>`}
     </div>
+    <div class="hire-acts"><${ExportRun} s=${state.sessionData[sid]} missionId=${m.missionId} /></div>
     ${memOn && html`<div class="small muted">${inMem ? t('빼면 기억 검색에서 빠져(원문은 디스크에 남아).') : t('넣으면 이 작업 폴더의 다음 실행들이 참고 자료로 찾을 수 있어. 코드가 모은 사실과 기준별 결과만 넣고, 회의 결론·조사 노트는 넣지 않아.')}${m.local ? ` ${t('내 PC 모델만 받은 목표라 내 PC 모델 전용으로 넣어(클라우드 AI 에게는 안 줘).')}` : ''}</div>`}
     <div id=${bodyId} class="report-body" role="region" aria-label=${t('완주 보고 자세히')} hidden=${!open}>
       <div class="goal-sec"><div class="small muted"><b>${t('호출')}</b></div>
@@ -386,6 +413,7 @@ export function GoalCard({ m }) {
       ${mission?.calls && ['done', 'accepted', 'stopped'].includes(mission.status) && html`<div class="small muted">${mission.estimate ? t('실제 호출 {k}번(어림 {min}~{max}번)', { k: mission.calls.used, min: mission.estimate.min, max: mission.estimate.max }) : t('실제 호출 {k}번', { k: mission.calls.used })}</div>`}
       ${mission && ['active', 'waiting', 'cut'].includes(mission.status) && html`<${LimitLine} providers=${m.providers} ask=${s?.capAsk} />`}
       ${mission?.status === 'cut' && html`<${CutBox} s=${s} m=${mission} />`}
+      ${mission && html`<div class="hire-acts"><${ExportRun} s=${s} missionId=${m.missionId} /></div>`}
     </div></div>`;
   }
 
@@ -684,8 +712,8 @@ export function MissionGate({ s, run }) {
   </div>`;
 }
 
-// 진행 기록의 줄을 누르면 채팅에서 그 메시지로 간다("사무실 크게"면 채팅이 보이게 바꾼 뒤에)
-function jump(id) {
+// 진행 기록의 줄을 누르면 채팅에서 그 메시지로 간다("사무실 크게"면 채팅이 보이게 바꾼 뒤에). 흐름도 탭(views/flowmap.js, 결정 0030)도 같은 함수
+export function jump(id) {
   state.ui.jumpTo = id;
   if ((state.settings.viewMode || 'split') === 'office') {
     state.settings.viewMode = 'split';
@@ -723,7 +751,7 @@ export function MissionLog({ s }) {
   const L = (m.log || []).slice().reverse();
   const left = (m.criteria || []).filter((c) => c.status !== 'pass').length;
   // 실패 줄의 종류(결정 0015·0022): 코드가 아는 사실로 붙인 종류. 넘겨받음은 기다린 앞 카드에 결과가 없었다는 것, 원인 모름은 보통 오류
-  const FAIL = { review: t('검수에서 걸림'), outside: t('바깥 장애'), blocked: t('막힘'), hole: t('구멍'), keep: t('지킬 것 어김'), input: t('넘겨받음'), unknown: t('원인 모름') };
+  const FAIL = { review: t('검수에서 걸림'), outside: t('바깥 장애'), blocked: t('막힘'), hole: t('구멍'), keep: t('지킬 것 어김'), input: t('넘겨받음'), unknown: t('원인 모름'), transient: t('일시 장애') };
   // 막힘 줄에 에이전트가 블록에 적은 종류(결정 0022). 코드가 정한 종류가 아니라서 "에이전트가 적음"을 같이 보인다. 안 적었거나 모르는 값이면 칩 없음
   const TOLD = { unclear: t('지시가 모호함'), input: t('넘겨받은 것이 틀림'), capability: t('권한·도구가 없음'), dependency: t('다른 일이 먼저') };
   const text = (x) => html`<span>${x.text}${x.fail && FAIL[x.fail] ? html` <span class="chip warn">${FAIL[x.fail]}</span>` : ''}${x.agentKind && TOLD[x.agentKind] ? html` <span class="chip" title=${t('에이전트가 막힘 블록에 적은 종류야(사용자 확인 안 함).')}>${TOLD[x.agentKind]} · ${t('에이전트가 적음')}</span>` : ''}</span>`;

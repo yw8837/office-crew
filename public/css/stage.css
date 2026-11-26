@@ -213,3 +213,45 @@
   .stg-bd.pulse::after { display: none; }
   .stg-st, .stg-p { transition: none; }
 }
+
+/* 흐름도(오른쪽 패널의 탭, 결정 0030): 목표 하나의 읽기 전용 그림. 색은 테마 변수만 쓰고, 상태는 테두리 모양(점선·굵은 선·깎은 모서리·빈 점선·왼쪽 띠·흐린 점선·각진 네모)과
+   기호·낱말로도 가른다(views/flowmap.js). 그림 너비는 패널의 실제 너비라 가로로 넘치지 않는다 */
+.fm-wrap { min-width: 0; }
+.fm-head { margin: 2px 0 6px; }
+.fm-svg { display: block; max-width: 100%; height: auto; overflow: visible; }
+.fm-node { cursor: default; outline: none; }
+.fm-node.go { cursor: pointer; }
+.fm-box { fill: var(--panel); stroke: var(--border-2); stroke-width: 1.5; }
+.fm-node.go:hover .fm-box { fill: var(--panel-3); }
+.fm-node:focus-visible .fm-box { stroke: var(--accent); stroke-width: 3; }
+.fm-node .fm-t { fill: var(--text); font-size: 12px; font-weight: 700; }
+.fm-node .fm-s { fill: var(--muted); font-size: 11px; }
+.fm-node .fm-ico { fill: var(--text-2); font-size: 12px; font-weight: 700; }
+.fm-node.s-done .fm-box, .fm-legend .s-done .fm-box { stroke: var(--ok); }
+.fm-node.s-done .fm-ico { fill: var(--ok); }
+.fm-node.s-run .fm-box, .fm-legend .s-run .fm-box { stroke: var(--link); stroke-width: 3; fill: var(--info-soft); }
+.fm-node.s-run .fm-ico { fill: var(--link); }
+.fm-node.s-wait .fm-box, .fm-legend .s-wait .fm-box { stroke: var(--warn); stroke-dasharray: 5 3; }
+.fm-node.s-blocked .fm-box, .fm-legend .s-blocked .fm-box { stroke: var(--err); stroke-width: 2; fill: var(--err-soft); }
+.fm-node.s-hole .fm-box, .fm-legend .s-hole .fm-box { stroke: var(--muted); stroke-dasharray: 1.5 3; fill: none; }
+.fm-node.s-error .fm-box, .fm-legend .s-error .fm-box { stroke: var(--err); stroke-width: 2; }
+.fm-bar { fill: var(--err); }
+.fm-node.s-error .fm-ico { fill: var(--err); }
+.fm-node.s-skipped .fm-box, .fm-legend .s-skipped .fm-box { stroke: var(--faint); stroke-dasharray: 2 4; }
+.fm-node.s-skipped .fm-t, .fm-node.s-stopped .fm-t { fill: var(--text-2); }
+.fm-node.s-stopped .fm-box, .fm-legend .s-stopped .fm-box { stroke: var(--muted); stroke-width: 2; }
+.fm-node.k-ask .fm-box, .fm-node.k-quota .fm-box { fill: var(--panel-2); }
+.fm-edge { fill: none; stroke: var(--muted); stroke-width: 1.5; }
+.fm-edge.e-needs { stroke: var(--link); }
+.fm-edge.e-return { stroke: var(--warn); stroke-width: 2; stroke-dasharray: 6 3; }
+.fm-edge.e-raise { stroke: var(--link); stroke-width: 2; }
+.fm-edge.e-ask { stroke: var(--accent); stroke-dasharray: 3 3; }
+.fm-edge.e-quota { stroke: var(--muted); stroke-dasharray: 3 3; }
+.fm-head-flow, .fm-head-quota { fill: var(--muted); }
+.fm-head-needs { fill: var(--link); }
+.fm-head-return { fill: var(--warn); }
+.fm-head-ask { fill: var(--accent); }
+.fm-elabel { fill: var(--text-2); font-size: 11px; font-weight: 700; paint-order: stroke; stroke: var(--panel-2); stroke-width: 4px; stroke-linejoin: round; } /* 선이 글 밑을 지나도 읽히게 바탕색 테두리 */
+.fm-legend { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--muted); }
+.fm-legend li { display: inline-flex; align-items: center; gap: 4px; }
+.fm-legend svg { overflow: visible; }

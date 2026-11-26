@@ -21,6 +21,21 @@ export function isQuotaError(text = '') {
   return QUOTA_RE.test(s) && (PER_MINUTE_RE.test(s) || !NOT_QUOTA_RE.test(s));
 }
 
+// 일시 장애(결정 0030): 네트워크 끊김·시간 초과·서버 5xx·과부하처럼 잠시 뒤 같은 요청이 될 수 있는 오류. 사용량 한도(isQuotaError)는 아니다(결정 0019 의 한도 대기).
+// 5xx 는 숫자만으로는 줄 번호·종료 코드와 헷갈리니 앞에 http·status·error·code(또는 "API Error")가 있거나 뒤에 그 오류 이름이 올 때만
+const TRANSIENT_RE = new RegExp([
+  '\\b(?:ECONNRESET|ECONNREFUSED|ECONNABORTED|ETIMEDOUT|ESOCKETTIMEDOUT|EPIPE|EAI_AGAIN|ENETUNREACH|ENETDOWN|EHOSTUNREACH)\\b',
+  'socket hang up', 'fetch failed', 'network (?:error|is unreachable)', 'connection (?:reset|refused|closed|aborted|error|timed out)',
+  '\\btimed out\\b', '\\btime-?out\\b', 'stream (?:disconnected|closed|error)', 'upstream (?:connect )?error',
+  '(?:http|status|error|code)[\\s:=]*(?:50[0-4]|529)\\b', '\\b(?:50[0-4]|529) (?:internal|bad gateway|service|gateway|overloaded)',
+  'internal server error', 'bad gateway', 'service (?:temporarily )?unavailable', 'gateway time-?out', 'overloaded', 'temporarily unavailable',
+  '네트워크 오류', '연결이 끊', '시간 초과', '网络错误', '超时', 'ネットワークエラー', 'タイムアウト',
+].join('|'), 'i');
+export function isTransientError(text = '') {
+  const s = String(text);
+  return !!s.trim() && !isQuotaError(s) && TRANSIENT_RE.test(s);
+}
+
 const HALF_HOUR = 30 * 60 * 1000;
 
 /**

@@ -1,5 +1,6 @@
 // 테스트용 가짜 claude: 실측한 stream-json 형식을 그대로 흉내 낸다(실제 AI 호출 없음)
 import fs from 'node:fs';
+import path from 'node:path';
 import readline from 'node:readline';
 import { randomUUID } from 'node:crypto';
 
@@ -328,7 +329,36 @@ async function pump() {
     : goalLine.includes('BACKQUOTA') ? (text.includes('[지난 검수에서 걸린 것') ? 'event' : '')
     : goalLine.includes('MIXQUOTA:') ? (myName && goalLine.includes(`MIXQUOTA:${myName}`) ? 'event' : '')
     : goalLine.includes('WORKQUOTAK2') ? (cardId === 'k2' ? 'event' : '') : goalLine.includes('WORKQUOTANT') ? 'none' : goalLine.includes('WORKQUOTAIN') ? 'text' : goalLine.includes('WORKQUOTA') ? 'event' : '';
-  if (wq) {
+  // 반복 실패 줄(결정 0030): TOOLERR(확정 목표 줄)이면 일 차례가 실패한 도구 호출 하나를 남긴다(경로·프로세스 번호가 차례마다 다른 같은 오류)
+  if (workTurn && goalLine.includes('TOOLERR')) {
+    out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: `te${turn}`, name: 'Read', input: { file_path: 'src/missing.js' } }] } });
+    out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: `te${turn}`, content: `Error: ENOENT: no such file or directory, open '${path.join(process.cwd(), 'src', `missing-${process.pid}.js`)}'`, is_error: true }] } });
+  }
+  // 일시 장애(결정 0030): NETFAIL1:<이름>(그 에이전트의 일 차례가 작업 폴더마다 처음 한 번만 과부하 오류) · NETFAIL2:<이름>(늘 과부하 오류) ·
+  // NETFAILWRITE:<이름>(작업 폴더에 파일을 쓰고 과부하 오류) · NETSLOW(그 실패를 1.5초 늦춘다)
+  const netWho = (w) => workTurn && !!myName && goalLine.split(/\s+/).includes(`${w}:${myName}`);
+  const netMark = process.env.FAKE_LOG ? `${process.env.FAKE_LOG}.net-${myName}-${path.basename(process.cwd())}` : '';
+  let netFail = netWho('NETFAIL2') || netWho('NETFAILWRITE');
+  if (!netFail && netWho('NETFAIL1') && netMark && !fs.existsSync(netMark)) { fs.writeFileSync(netMark, '1'); netFail = true; }
+  // NETTOOL:<도구 이름>: 실패하기 전에 그 도구를 한 번 쓴다(읽기만 하는 도구가 아니면 자동 다시가 없어야 한다).
+  // NETHOLD: 실패하기 전에 FAKE_LOG 옆에 "held-<이름>-<n>"(n: 그 에이전트의 n번째 실패 시도)을 만들고 "go-<이름>-<n>" 이 생길 때까지 기다린다(시험이 그 사이에 값을 바꾼다. 30초까지)
+  if (netFail) {
+    const tool = goalLine.match(/(?:^|\s)NETTOOL:(\S+)/)?.[1];
+    if (tool) {
+      out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: `nt${turn}`, name: tool, input: { url: 'https://example.com/x' } }] } });
+      out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: `nt${turn}`, content: '했어' }] } });
+    }
+    if (goalLine.includes('NETHOLD') && process.env.FAKE_LOG) {
+      const dir = path.dirname(process.env.FAKE_LOG);
+      const base = path.basename(process.env.FAKE_LOG);
+      const n = fs.readdirSync(dir).filter((f) => f.startsWith(`${base}.held-${myName}-`)).length + 1;
+      fs.writeFileSync(`${process.env.FAKE_LOG}.held-${myName}-${n}`, '1');
+      for (let k = 0; k < 1200 && !fs.existsSync(`${process.env.FAKE_LOG}.go-${myName}-${n}`); k++) await sleep(25);
+    }
+    if (goalLine.includes('NETSLOW')) await sleep(1500);
+    if (netWho('NETFAILWRITE')) { fs.mkdirSync('src', { recursive: true }); fs.writeFileSync('src/net-write.js', `// ${Date.now()}\n`); }
+    out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}', session_id: sid, usage: {} });
+  } else if (wq) {
     if (wq === 'event') out({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', unifiedWindows: { five_hour: { utilization: 1, resetsAt: Math.floor(Date.now() / 1000) + 3600 } } } });
     out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: wq === 'text' ? 'Usage limit reached. Try again in 2 hours.' : 'Claude AI usage limit reached', session_id: sid, usage: {} });
   } else if (req.includes('SESSIONLIMIT') && !text.includes('[이어받기]')) {

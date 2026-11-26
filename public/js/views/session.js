@@ -10,6 +10,7 @@ import { MemoryBadge } from './memory.js';
 import { DraftChip } from './rolenotes.js';
 import { continueList, findInMessages, hideAsks, hideCheck, hideGoal, hideReview, hideResearch, hidePlan, hideBlocked, routeTip, agentWrote, hideTeam } from '../chat-tools.js';
 import { GoalCard, MissionLog, MissionGate, ReviewTable, CutBox, ResearchCard, PlanCard, ReportCard } from './mission.js';
+import { FlowMap } from './flowmap.js'; // 오른쪽 패널의 흐름도 탭(결정 0030)
 import { TeamCard } from './teamdoc.js';
 import { researcherOf, meetingView, boardCards } from '../office/meeting.js';
 import { meetLabel, goalWait } from '../stage-model.js';
@@ -1012,6 +1013,7 @@ export function RightPanel({ s }) {
       <button class=${tab === 'log' ? 'on' : ''} onClick=${() => setTab('log')}>${t('활동 로그')}</button>
       <button class=${tab === 'mission' ? 'on' : ''} onClick=${() => setTab('mission')}>${t('진행 기록')}</button>
       ${browsing && html`<${BrowserTabButton} s=${s} on=${tab === 'browser'} onClick=${() => setTab('browser')} />`}
+      <button class=${tab === 'flow' ? 'on' : ''} onClick=${() => setTab('flow')}>${t('흐름도')}</button>
     </div>
     <div class="right-body">
       ${tab === 'team' && html`
@@ -1054,6 +1056,7 @@ export function RightPanel({ s }) {
       </div>`}
       ${tab === 'mission' && html`<${MissionLog} s=${s} />`}
       ${tab === 'browser' && html`<${BrowserTab} s=${s} />`}
+      ${tab === 'flow' && html`<${FlowMap} s=${s} />`}
     </div>
   </aside>`;
 }

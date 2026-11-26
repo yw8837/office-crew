@@ -72,6 +72,7 @@
 - **AI별 결제 방식:** Claude Code와 Codex를 내 구독으로 쓸지, 공식 API 키(사용한 만큼 과금)로 쓸지 고릅니다. 구독 모드에서는 PC에 깔린 `ANTHROPIC_API_KEY`·`ANTHROPIC_AUTH_TOKEN`(Claude)·`CODEX_API_KEY` 환경변수를 무시해서 뜻밖의 과금을 막습니다. API 키 모드에서 앱에 키를 넣지 않으면 PC 환경변수의 키나 게이트웨이 토큰을 그대로 씁니다.
 - **ChatGPT 계정 여러 개:** 설정 → AI 계정에서 ChatGPT 계정을 더 붙일 수 있습니다. 계정마다 Codex 폴더를 따로 써서 각자 로그인하고, 사용량 한도도 따로인 AI로 동작합니다. 한 계정이 한도에 걸리면 자동 이어받기가 다음 계정으로 넘깁니다.
 - **ACP 에이전트:** [Agent Client Protocol](https://agentclientprotocol.com)을 지원하는 에이전트(Gemini CLI, Hermes, OpenCode, Goose, Qwen Code 등)를 그대로 붙입니다. 도구 권한 요청은 에이전트의 권한 단계에 맞춰 자동으로 답합니다. 에이전트가 오피스 크루에 맡기는 파일 읽기·쓰기는 작업 폴더 안으로 제한하고(읽기는 첨부 폴더도), 에이전트 자체 도구는 그 에이전트의 샌드박스와 권한 단계를 따릅니다.
+- **웹 브라우저 쓰기:** Claude·Codex 에이전트에 켜면 Microsoft 의 Playwright MCP 서버로 페이지를 열고, 누르고, 입력하고, 화면을 찍어(사용자의 CLI 가 `npx` 로 띄움, 버전 고정, 메모리에만 두는 프로필, 임의 코드 실행 도구는 뺌). 찍은 화면은 채팅 옆 "브라우저" 탭에 보여. 실시간 영상은 아니고, 진짜 CLI 로는 아직 확인하지 않았어([결정 0029](docs/decisions/0029-browser-tool-as-a-built-in-connector.md)).
 
 | 자동 이어받기가 있는 라우팅 보드 | Claude Code·Codex 세션 불러오기 |
 |---|---|

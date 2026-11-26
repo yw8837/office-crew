@@ -16,6 +16,7 @@ import { meetLabel, goalWait } from '../stage-model.js';
 import { FlowStage, StageStrip } from './stage.js';
 import { weighted, rawSum, cacheHit, usageBreakdown, windowPassed, ANSWER_KINDS } from '../usage-numbers.js';
 import { recordAge } from '../mission-numbers.js';
+import { BrowserTab, BrowserTabButton, browserUsed, ShotThumb } from './browser.js';
 
 export const sessionAgents = (s) => {
   if (!s) return [];
@@ -499,7 +500,7 @@ function ToolBlock({ b }) {
   return html`<details class="blk"><summary><span class="st">${icon}</span><span class="nm">${b.name}</span><span class="arg">${arg}</span></summary>
     ${b.input && html`<pre>${typeof b.input === 'string' ? b.input : JSON.stringify(b.input, null, 2)}</pre>`}
     ${b.output && html`<pre>${b.output}</pre>`}
-  </details>`;
+  </details>${b.shot && html`<${ShotThumb} b=${b} />`}`;
 }
 
 function AttThumb({ a, onRemove, uploading }) {
@@ -991,7 +992,9 @@ function UseBreakdown({ s }) {
 
 // ── 오른쪽 패널 ──
 export function RightPanel({ s }) {
-  const [tab, setTab] = useState('team');
+  const [picked, setTab] = useState('team');
+  const browsing = browserUsed(s); // 브라우저를 받은 실행이 있을 때만 "브라우저" 탭(결정 0029)
+  const tab = picked === 'browser' && !browsing ? 'team' : picked;
   const agents = sessionAgents(s);
   const live = state.live[s.id] || {};
   const lim = state.usage?.limits || {};
@@ -1008,6 +1011,7 @@ export function RightPanel({ s }) {
       <button class=${tab === 'usage' ? 'on' : ''} onClick=${() => setTab('usage')}>${t('사용량·한도')}</button>
       <button class=${tab === 'log' ? 'on' : ''} onClick=${() => setTab('log')}>${t('활동 로그')}</button>
       <button class=${tab === 'mission' ? 'on' : ''} onClick=${() => setTab('mission')}>${t('진행 기록')}</button>
+      ${browsing && html`<${BrowserTabButton} s=${s} on=${tab === 'browser'} onClick=${() => setTab('browser')} />`}
     </div>
     <div class="right-body">
       ${tab === 'team' && html`
@@ -1049,6 +1053,7 @@ export function RightPanel({ s }) {
         ${!L.length && html`<div class="muted small">${t('이 세션에서 아직 활동이 없어. (새로고침하면 초기화)')}</div>`}
       </div>`}
       ${tab === 'mission' && html`<${MissionLog} s=${s} />`}
+      ${tab === 'browser' && html`<${BrowserTab} s=${s} />`}
     </div>
   </aside>`;
 }

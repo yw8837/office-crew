@@ -72,6 +72,7 @@ Office Crew は、複数の AI エージェントをまとめて動かすため�
 - **AI ごとの課金方式：** Claude Code と Codex を、ご自身のサブスクリプションで使うか、公式 API キー（従量課金）で使うかを選べます。サブスクリプションモードでは PC にある `ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`（Claude）・`CODEX_API_KEY` 環境変数を無視するので、思わぬ課金を防げます。API キーモードでアプリにキーを入れていない場合は、PC の環境変数のキーやゲートウェイトークンをそのまま使います。
 - **ChatGPT アカウントを複数：** 設定 → AI アカウントで ChatGPT アカウントを追加できます。アカウントごとに別の Codex フォルダーでログインし、使用量の上限もそれぞれ別の AI として動きます。1 つのアカウントが上限に達すると、自動引き継ぎが次のアカウントに回します。
 - **ACP エージェント：** [Agent Client Protocol](https://agentclientprotocol.com) に対応したエージェント（Gemini CLI、Hermes、OpenCode、Goose、Qwen Code など）をそのまま接続できます。ツールの権限リクエストにはエージェントの権限レベルに合わせて自動で応答します。エージェントが Office Crew に頼むファイルの読み書きは作業フォルダー内に限り（読み取りは添付フォルダーも）、エージェント自身のツールはそのエージェントのサンドボックスと権限レベルに従います。
+- **Webブラウザを使う：** Claude・Codex のエージェントでオンにすると、Microsoft の Playwright MCP サーバーでページを開き、クリックし、入力し、画面を撮る（あなたの CLI が `npx` で起動、バージョン固定、メモリだけのプロファイル、任意のコードを実行するツールは外す）。撮った画面はチャットの横の「ブラウザ」タブに出る。ライブ映像ではなく、本物の CLI ではまだ確認していない（[決定 0029](docs/decisions/0029-browser-tool-as-a-built-in-connector.md)）。
 
 | 自動引き継ぎ付きのルーティングボード | Claude Code・Codex のセッションを読み込む |
 |---|---|

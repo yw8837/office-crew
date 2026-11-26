@@ -32,6 +32,7 @@ import { buildReport, reportText, reportLocal } from './report.js';
 import { projectKey } from './memory.js';
 import { weighted, overCap } from '../public/js/usage-numbers.js'; // 사용량 환산·구독 한도 상한은 화면과 같은 함수(결정 0026)
 import { isLean, leanTurns, prevTail, prevNote, writeNote, noteSummary, dropNotes } from './savings.js';
+import { BrowserShots, browserUse, browserConnector, browserHead } from './browser.js';
 
 const ACTIVE = new Set(['running', 'paused', 'waiting']);
 const FORCE_END_MS = 5000; // 멈춘 CLI를 끄라고 한 뒤 이만큼 기다려도 안 끝나면 강제로 끝낸다
@@ -106,6 +107,7 @@ export class Orchestrator {
     this.quotaTimers = new Set(); // 목표의 한도 대기에서 고른 자동 이어서 타이머(대기가 끝나면 지운다. 결정 0019)
     this.capAskSeen = new Map(); // 세션 → 화면에 보낸 "상한 넘음" 칩의 AI 목록(결정 0026)
     this.capAskBusy = new Map(); // 세션 → 칩을 다시 세는 중(값: 세는 동안 또 알림이 왔는지)
+    this.browser = new BrowserShots(dirs); // 웹 브라우저 쓰기의 출력 폴더와 화면 기록(결정 0029)
   }
 
   // 서버 재시작 시 끊긴 실행 정리
@@ -3294,10 +3296,12 @@ export class Orchestrator {
     const conv = cc ? (raised || cc.conv?.agentId !== String(agentId) ? (cc.conv = { agentId: String(agentId) }) : cc.conv) : null;
     // 배정 기록(결정 0022): 에이전트 설정이 요청한 AI(자동 라우팅이면 auto), 실제로 돈 AI, 코드가 한 일의 이유 코드. 이어받으면 고친다(돌지 못한 답에는 없다)
     const route = agent && prov ? { asked: asked.routing === 'auto' ? { provider: 'auto', model: '', effort: '' } : aiOf(asked), ran: aiOf(agent), why: [...(gone ? ['account-gone'] : []), ...(routed.why || []), ...(budgetNote ? ['daily-pace'] : []), ...(raised ? ['raised'] : [])] } : null;
+    // 웹 브라우저 쓰기(결정 0029): 이번 실행에 내장 커넥터를 붙이는가. 이어받는 AI 가 못 받으면 prepare 가 그 AI 에는 붙이지 않는다
+    const browse = !!agent && !!prov && browserUse({ agent, prov, settings: this.store.settings, once, override: !!s.agentOverride });
     const msg = {
       id: newId('m'), role: 'agent', agentId, runId: run.id, stageIndex: stageIdx, stageLabel: run.stages[stageIdx].label,
       text: '', blocks: [], status: 'streaming', provider: agent?.provider, model: agent?.model, effort: agent?.effort,
-      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, durationMs: 0 }, createdAt: Date.now(), ...(route ? { route } : {}),
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, durationMs: 0 }, createdAt: Date.now(), ...(route ? { route } : {}), ...(browse ? { browser: true } : {}),
     };
     const meet = ctx.meet?.get(agentId);
     if (meet) msg.meeting = { phase: meet.phase, round: meet.round || null, rounds: meet.rounds, ...(meet.opposer ? { opposer: true } : {}) };
@@ -3387,10 +3391,13 @@ export class Orchestrator {
       const talk = !!once && !!meet && meet.phase !== 'research';
       const prepare = (ag) => {
         const pv = PROVIDERS[ag.provider];
-        const connectors = pv.caps.connectors ? this.catalog.connectorsFor(ag) : [];
+        // 내장 브라우저 커넥터(결정 0029)는 저장된 커넥터 뒤에 붙인다(같은 이름의 저장된 커넥터는 뺀다). 받을 수 없는 AI 가 이어받았으면 붙이지 않는다
+        const box = msg.browser && pv.caps.browser ? this.browser.box(s.id, agentId) : null;
+        const bc = box ? browserConnector(box.dir, settings) : null;
+        const connectors = [...(pv.caps.connectors ? this.catalog.connectorsFor(ag) : []).filter((c) => !bc || c.key !== bc.key), ...(bc ? [bc] : [])];
         const mcpConfigPath = ag.provider === 'claude' ? this.catalog.writeClaudeMcpConfig(connectors) : null;
         if (mcpConfigPath) cfgFiles.push(mcpConfigPath);
-        const sys = this.#system(ag, cwd, askOk, ctx.userMsg?.text || '', talk);
+        const sys = this.#system(ag, cwd, askOk, ctx.userMsg?.text || '', talk, !!bc);
         // 역할 노트 파일이 깨져서 못 읽었으면 노트 없이 하고, 이 답에 한 번 알린다(파일은 그대로 둔다)
         if (sys.notesError && !notesWarned) { notesWarned = true; this.#notice(s, msg, `📒 ${tr('역할 노트 파일을 읽지 못해서 이번 실행은 역할 노트 없이 했어.')}`); }
         const base = {
@@ -3406,7 +3413,7 @@ export class Orchestrator {
           const forkSession = !!rid && ag.provider === 'claude' && s.importedFrom?.source === 'claude' && rid === s.importedFrom.id;
           const watch = this.#watchStall(ctx, pv.caps.quiet, () => { fresh = true; });
           // 이 CLI 호출: 이어 간 대화 id, 지금 대화 id, 정산한 결과 수, 직전 결과의 누적, 앱이 껐는지(사용량 정산용), 한 번 실행인지(세션의 직전 누적을 안 쓴다)
-          const call = { rid, sid: rid, n: 0, base: null, killed: false, ...(once ? { once: true, bases: onceBases } : conv ? { bases: (conv.bases ||= {}) } : {}) };
+          const call = { rid, sid: rid, n: 0, base: null, killed: false, ...(once ? { once: true, bases: onceBases } : conv ? { bases: (conv.bases ||= {}) } : {}), ...(box ? { browser: box } : {}) };
           const emit = (ev) => { if (watch.saw(ev) === false) return; this.#onEvent(ctx, msg, ag, ev, call); }; // 헛돌아서 끈 뒤에 밀려 나오는 출력은 버린다
           // 호출마다 달라지는 지시(head)는 새 대화의 첫 프롬프트 맨 앞에 붙인다(결정 0023). 이어 가는 대화(Claude 는 첫 요청의 시스템 지시를 그대로 쓰고, Codex 는 지시를 다시 받지 않는다)에는
           // 그 대화가 받은 것(convSent: 대화 번호에 묶인 앞머리 구성과 받은 노트 항목, noteHashes: 받은 노트 전체의 해시)과 견줘 모자란 것만 붙인다:
@@ -3672,9 +3679,10 @@ export class Orchestrator {
   // 규칙 파일 읽기 줄도 넣지 않는다(차례마다 파일을 읽는 비용, 결정 0017·0023)
   // 읽기 전용을 글 지시로만 묶는 AI(caps.permissions 가 false: Hermes·API·내 PC 모델)의 그 실행만 읽기 전용인 차례는 예전처럼 시스템 지시의 권한 문장을 읽기 전용 문장으로 바꾼다.
   // 그런 AI 에게는 글이 막는 장치의 전부라 "고칠 수 있어"와 부딪히는 문장을 같이 주지 않는다(이 AI 들만 그 차례의 시스템 지시가 달라진다. 결정 0023)
-  // → { text: 시스템 지시, head: 새 대화의 첫 프롬프트 앞머리(없으면 ''), headKeys·headParts: 앞머리 가운데 이어 가는 대화에 따로 붙일 수 있는 줄('rules' 규칙 파일 읽기, 'ask' 묻기 안내),
+  // → { text: 시스템 지시, head: 새 대화의 첫 프롬프트 앞머리(없으면 ''), headKeys·headParts: 앞머리 가운데 이어 가는 대화에 따로 붙일 수 있는 줄('rules' 규칙 파일 읽기, 'ask' 묻기 안내, 'browser' 브라우저 줄),
   //     notes: { text: 시스템 지시에 넣은 노트 글, refs: 참고 블록, rules·refItems: 이번에 고른 항목, ids: 고른 항목 id }, notesHash: 역할 노트 전체의 해시(이어 가는 대화에 다시 줄지 정할 때), notesError: 역할 노트 파일을 못 읽어서 노트 없이 만듦 }
-  #system(agent, cwd, canAsk = false, request = '', talk = false) {
+  // browser: 이번 호출에 내장 브라우저 커넥터가 붙는다(결정 0029). 화면 찍기와 웹 페이지 글을 자료로 볼 것을 앞머리 한 줄로
+  #system(agent, cwd, canAsk = false, request = '', talk = false, browser = false) {
     // 비대화형 실행에선 권한 요청이 자동 거부되므로, 할 수 있는 일을 미리 알려 헛시도·빈 답을 막는다(실측)
     // 목표의 조사·회의 차례(결정 0017, readOnlyRun): 그 AI가 읽기 전용을 실제로 막는지(caps.permissions: CLI 인자나 앱이 막는다), 도구만 있고 못 막는지, 도구가 없는지.
     // 조사는 웹 도구를 단정하지 않는다(읽기 전용에서 웹 도구가 허가 없이 도는지는 AI마다 다르고 확인 못 했다)
@@ -3714,8 +3722,9 @@ export class Orchestrator {
       // 그 실행만 읽기 전용으로 내린 조사·회의 차례에는 붙이지 않는다(차례마다 파일을 읽는 비용, 결정 0017)
       rules: agent.permission === 'plan' && !agent.readOnlyRun && !talk && caps?.tools ? tr('작업 폴더에 CLAUDE.md·AGENTS.md 같은 프로젝트 규칙 파일이 있으면 먼저 읽어.') : '',
       ask: canAsk ? askNote() : '',
+      browser: browser ? browserHead() : '',
     };
-    const head = [agent.readOnlyRun && !textOnly ? roPerm(agent.readOnlyRun, caps) : '', headParts.rules, headParts.ask, notes.refs];
+    const head = [agent.readOnlyRun && !textOnly ? roPerm(agent.readOnlyRun, caps) : '', headParts.rules, headParts.ask, headParts.browser, notes.refs];
     return {
       text: parts.filter(Boolean).join('\n'), head: head.filter(Boolean).join('\n'), headParts, headKeys: Object.keys(headParts).filter((k) => headParts[k]),
       notes: { text: notes.text, refs: notes.refs, rules: notes.rules, refItems: notes.refItems, ids: notes.ids }, notesHash: notesHash(notes.key), notesError: !!notes.error,
@@ -4452,6 +4461,7 @@ export class Orchestrator {
         if (ev.status) b.status = ev.status;
         if (ev.output) b.output = String(ev.output).slice(0, 4000);
         if (msg.blocks.length > 300) msg.blocks.splice(1, msg.blocks.length - 300);
+        if (call?.browser) this.browser.onTool(call.browser, b); // 브라우저 도구가 끝나면 그 뒤에 생긴 화면 그림을 b.shot 으로(결정 0029)
         this.#emitBlock(s, msg, b);
         if (b.status === 'running') this.#state(s.id, agent.id, toolCategory(b.name), b.name, b.name);
         else this.#state(s.id, agent.id, b.status === 'error' ? 'tool' : 'thinking', b.status === 'error' ? tr('{name} 실패', { name: b.name }) : tr('결과 확인 중…'), b.name);

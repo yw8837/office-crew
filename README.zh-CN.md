@@ -72,6 +72,7 @@ Office Crew 是一个在本地同时运行多个 AI 智能体的工作台。它�
 - **按 AI 选择计费方式：** Claude Code 和 Codex 可以使用你的订阅，也可以使用官方 API 密钥（按用量计费）。在订阅模式下会忽略电脑上的 `ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`（Claude）和 `CODEX_API_KEY` 环境变量，避免意外计费。API 密钥模式下若未在应用中填写密钥，则原样使用电脑环境变量中的密钥或网关令牌。
 - **多个 ChatGPT 账号：** 在 设置 → AI 账号 中添加更多 ChatGPT 账号。每个账号使用单独的 Codex 文件夹登录，作为拥有独立用量上限的 AI 运行；一个账号达到上限时，自动接力会转到下一个账号。
 - **ACP 智能体：** 直接接入支持 [Agent Client Protocol](https://agentclientprotocol.com) 的智能体，例如 Gemini CLI、Hermes、OpenCode、Goose、Qwen Code。工具权限请求会按智能体的权限级别自动回复。智能体请 Office Crew 代为读写的文件仅限工作文件夹内（读取也可访问附件文件夹）；智能体自带的工具遵循其自身的沙箱和你设置的权限级别。
+- **使用网页浏览器：** 给 Claude 或 Codex 代理打开后，它会通过 Microsoft 的 Playwright MCP 服务器打开页面、点击、输入并截图（由你的 CLI 用 `npx` 启动，固定版本，配置文件只放在内存里，去掉了执行任意代码的工具）。截图显示在聊天旁边的"浏览器"标签里。不是实时画面，也还没有用真实 CLI 验证（[决定 0029](docs/decisions/0029-browser-tool-as-a-built-in-connector.md)）。
 
 | 带自动接力的路由面板 | 导入 Claude Code 或 Codex 会话 |
 |---|---|

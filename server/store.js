@@ -307,6 +307,8 @@ export class Store {
     fs.rmSync(path.join(this.dirs.sessions, `${id}.json`), { force: true });
     // 건네려고 만든 대화 파일도 같이. 에이전트가 읽는 중이라 못 지워도 세션 삭제는 끝낸다
     try { if (this.dirs.handoff && /^[\w-]+$/.test(String(id))) fs.rmSync(path.join(this.dirs.handoff, id), { recursive: true, force: true }); } catch { /* 못 지운 폴더는 남는다(저장 공간 보고의 handoff 크기에 잡힌다) */ }
+    // 브라우저 화면 폴더도 같이(결정 0029). 브라우저가 파일을 잡고 있어 못 지워도 세션 삭제는 끝낸다
+    try { if (this.dirs.browser && /^[\w-]+$/.test(String(id))) fs.rmSync(path.join(this.dirs.browser, id), { recursive: true, force: true }); } catch { /* 남는다 */ }
     this.#saveIndexSoon();
   }
 

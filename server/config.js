@@ -23,6 +23,7 @@ export function dataDirs(home = homeDir()) {
     skills: path.join(home, 'skills'),
     tmp: path.join(home, 'tmp'),
     handoff: path.join(home, 'handoff'), // 다른 AI에게 건네는 대화 전체 파일(세션별 폴더)
+    browser: path.join(home, 'browser'), // 브라우저 MCP 의 출력 폴더(세션/에이전트별, 결정 0029)
   };
 }
 

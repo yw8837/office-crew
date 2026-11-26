@@ -44,6 +44,8 @@ export async function upload(file) {
 }
 
 export const uploadUrl = (id) => `/api/uploads/${id}?token=${encodeURIComponent(token)}`;
+// 에이전트 브라우저가 찍은 화면 그림(결정 0029)
+export const browserUrl = (sid, agentId, file) => `/api/browser/${encodeURIComponent(sid)}/${encodeURIComponent(agentId)}/${encodeURIComponent(file)}?token=${encodeURIComponent(token)}`;
 
 export function connectEvents(onEvent, onStatus) {
   let es = null, retry = 0, closed = false;

@@ -85,7 +85,7 @@ function encode(text, images) {
 export default {
   id: 'claude', label: 'Claude', get sub() { return tr('Claude Code CLI · 구독 로그인'); }, kind: 'cli', color: '#d97757',
   efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-  caps: { images: true, steer: true, resume: true, tools: true, connectors: true, permissions: true },
+  caps: { images: true, steer: true, resume: true, tools: true, connectors: true, permissions: true, browser: true }, // browser: 내장 브라우저 커넥터의 위험 도구를 막을 수 있다(결정 0029)
   login: { command: 'claude', get hint() { return tr('열린 터미널에서 /login 을 입력해 로그인해줘.'); } },
 
   async detect(settings) {
@@ -146,6 +146,12 @@ export default {
     }
     if (resumeId) args.push('--resume', resumeId, ...(opts.forkSession ? ['--fork-session'] : []));
     if (mcpConfigPath) args.push('--mcp-config', mcpConfigPath);
+    // 앱이 붙인 내장 커넥터(결정 0029): 그 서버의 도구는 묻지 않고 쓰게 하고(앱은 권한 질문을 받지 못한다), 위험 도구는 Claude 의 도구 목록에서 뺀다
+    for (const c of opts.connectors || []) {
+      if (!c.tools) continue;
+      args.push('--allowedTools', `mcp__${c.key}`);
+      if (c.tools.deny?.length) args.push('--disallowedTools', ...c.tools.deny.map((n) => `mcp__${c.key}__${n}`));
+    }
     for (const d of addDirs) args.push('--add-dir', d);
     if (agent.light) args.push('--safe-mode');
 

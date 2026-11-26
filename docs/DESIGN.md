@@ -32,6 +32,7 @@ server/mission.js           목표 모드: oc-goal 목표 카드 블록 읽기·
 server/report.js            완주 보고: 끝난 목표의 사실 묶기(buildReport), 기억에 넣는 글 판(reportText), 내 PC 모델만 받은 목표인지(reportLocal)(결정 0025)
 server/proof.js             만들기·글 카드의 바꾼 파일 대조: git 상태 한 장(gitState)·두 커밋 사이 파일(gitDiffNames)·상태 차이(changedSet)·카드 하나 판단(proofCheck)(결정 0025)
 server/teamdoc.js           문서로 팀 짜기(결정 0024): 글 문서 붙인 "팀 짜 줘" 알아보기(낱말 규칙), 쓰는 사람 고르기, 문서 읽기, 초안 프롬프트, oc-team 블록 읽기·정리(cleanTeamDraft), 팀 제안 카드 처리(만들기·그만·그냥 보내기)
+server/browser.js           웹 브라우저 쓰기(결정 0029): 붙일지 판단(browserUse), 내장 커넥터(browserConnector, 고정 버전·허용·차단 도구), 앞머리 줄, 출력 폴더의 화면 그림 기록(BrowserShots: onTool·상한 prune·file), 그림 라우트
 server/usage.js             토큰·비용 집계, 계정 한도
 server/savings.js           절약 프로필(설정 savings 'lean', 결정 0026): 앞 대화 절반(leanTurns), 앞 단계 결과 끝부분(prevTail), 조사 노트 파일(writeNote: 일 단계용 work/·회의용 meeting/ 하위 폴더)과 요약(noteSummary), 목표가 끝나면 노트 폴더 지우기(dropNotes), 줄였다는 알림 두 줄(prevNote·noteNote)
 server/catalog.js           스킬·커넥터·플러그인 목록
@@ -51,6 +52,7 @@ public/js/report-lines.js   완주 보고의 글줄(확인 못 한 것·실패 �
 public/js/usage-numbers.js  사용량 숫자(결정 0026): 환산(weighted = 새 입력 + 캐시 쓰기 + 출력 + 캐시 읽기÷10, 서버의 meetingSpend 도 이 함수), 나눠 보기(split), 캐시 적중률(cacheHit), 답의 종류(answerKind: 완주 보고 server/report.js 도 같은 함수로 센다. 보통 실행·목표 잡기·조사·회의·계획·일 단계·일 카드·검수·팀 초안·인수인계 메모)와 종류별·에이전트별 묶기(usageBreakdown, "이 목표 것만"은 답의 missionId 로), 구독 한도 상한을 넘은 창(overCap, 초기화 시각을 모르는 창은 받은 뒤 30분까지 UNTIMED_MS). 화면의 한 숫자는 환산(오른쪽 아래 표시·사용량 화면·세션의 사용량·한도 탭·메시지 아래·진행 바·팀 현황 카드, 나눈 값과 1:1 합은 도움말), 사무실 이름표의 토큰 숫자만 1:1 합 그대로
 public/js/views/stage.js    흐름 무대(나눠 보기의 위쪽 그림, FlowStage)와 접은 한 줄 띠(StageStrip)(결정 0020)
 public/js/views/teamdoc.js  팀 제안 카드(TeamCard, 결정 0024)
+public/js/views/browser.js  웹 브라우저 쓰기 화면(결정 0029): 에이전트 편집의 스위치, 설정 카드, 오른쪽 패널의 "브라우저" 탭, 도구 블록의 작은 그림
 public/js/office/*.js       사무실 렌더러(독립 모듈)
 public/css/*.css
 test/*.test.js              node:test
@@ -61,7 +63,7 @@ test/measure/*.js           프롬프트 크기 실측(테스트 목록 밖, 손
 ```
 Agent    { id, name, role, emoji, provider, model, effort, systemPrompt,
            permission: 'plan'|'default'|'edit'|'auto'|'full',
-           skills:[skillId], connectors:[connectorId], light:boolean,
+           skills:[skillId], connectors:[connectorId], light:boolean, browser?:boolean(웹 브라우저 쓰기, 결정 0029),
            apiProfile?: string, avatar:{ skin, hair, hairStyle, outfit, accessory } , createdAt,
            tier?: 1|2|3|4(팀 전체의 난이도 등급. 1 단순 잡무 … 4 가장 어려운 일. 같은 등급에 여러 AI 가 있을 수 있다. 문서로 만들거나 에이전트 편집에서 정한다. 범위 밖은 끝으로, 비우면 없음. 결정 0024·0027) }
 Team     { id, name, description, stages:[ { id, label, agentIds:[...], instruction, approve:boolean, meeting:null|{ rounds, chairId, tokenCap, opposeId:null|agentId(반대편. null 이면 실행 때 자동으로 고른다, 결정 0010) } } ],
@@ -70,7 +72,7 @@ Session  { id, title, titleFrom?(제목을 만든 사용자 말 id), titleLocal?
            providerSessions:{ [agentId]: string }, sessionProvider:{ [agentId]: providerId },
            usageBase?:{ [agentId]: { id, input, output, cacheRead, cacheWrite, cost } }(Claude 사용량의 직전 누적. id 는 다음 호출이 이어 갈 CLI 대화 id 이고, 그 대화를 그대로 이어 갈 때만 뺀다. 믿을 수 없게 되면 지운다. 결정 0012),
            noteHashes?:{ [agentId]: string }(이어 갈 수 있는 AI 의 대화가 마지막으로 끝까지 받은 역할 노트 전체의 해시: 하는 일과 받을 수 있는 확정 항목(`notesKey`, 요청마다 달라지는 고른 묶음이 아니다). 없으면 노트를 받은 적 없는 걸로 본다. 이어 가는 실행에서 다르면 바뀐 노트 블록만 다시 붙인다(Codex·Claude 모두). 결정 0013·0023),
-           convSent?:{ [agentId]: { id, head:['rules'|'ask'], calls, items:[itemId] } }(그 에이전트의 이어 갈 대화(id)가 받은 앞머리 구성(규칙 파일 줄·묻기 안내), 그 줄을 붙인 뒤 이어 간 호출 수, 받은 역할 노트 항목 id. id 가 지금 이어 갈 대화와 다르면 모른다고 본다. 결정 0023),
+           convSent?:{ [agentId]: { id, head:['rules'|'ask'|'browser'], calls, items:[itemId] } }(그 에이전트의 이어 갈 대화(id)가 받은 앞머리 구성(규칙 파일 줄·묻기 안내), 그 줄을 붙인 뒤 이어 간 호출 수, 받은 역할 노트 항목 id. id 가 지금 이어 갈 대화와 다르면 모른다고 본다. 결정 0023),
            importedFrom?:{ source:'claude'|'codex', id, cwd, total, at, agentId?(불러올 때 만든 에이전트), remembered?(불러온 대화를 프로젝트 기억에 다 넣었음), cleared?(대화를 비웠음: 불러온 대화를 더는 건네지 않는다), checked?(원문이 없어 원래 기록을 다시 읽어 봤음) }, messages:[Message], runs:[Run],
            goalMode?:boolean(목표 모드, 결정 0014), mission?:Mission }
 Mission  (세션에 하나. 새 목표가 끝난 목표를 덮어쓴다. 결정 0014·0015·0016·0017·0018·0019)
@@ -94,7 +96,8 @@ Message  { id, role:'user'|'agent'|'system'|'proposal'(kind 'hire': 영입 제�
            route?:{ asked:{ provider(자동 라우팅이면 'auto'), model, effort }, ran:{ provider, model, effort }, why:['auto'|'near-limit'|'daily-budget'|'daily-pace'|'takeover'|'wait-reset'|'account-gone'|'raised'(넘겨받은 카드를 새 담당이 처음 맡는 차례. 이것만으로는 route 진행 기록 줄을 따로 적지 않는다, 결정 0027)] }(배정 기록: 에이전트 설정이 요청한 AI(지운 Codex 계정이면 그 계정 그대로), 실제로 돈 AI, 코드가 한 일의 이유 코드. 이어받으면 고친다. 돌지 못한 답에는 없다. 결정 0022),
            attachments:[{id,name,mime,size,path}], blocks:[Block], status:'streaming'|'done'|'error'|'stopped',
            usage?:{input,output,cacheRead,cacheWrite,cost,durationMs, partial?(true: 하위 에이전트 몫이 빠졌을 수 있다), sub?(주 에이전트 밖에서 쓴 토큰: 하위 에이전트 등, 네 값 1:1 합. 결정 0012), subW?(같은 몫의 환산. 화면 도움말이 옆 숫자와 같은 단위로 쓴다. 결정 0026)}, createdAt }
-Block    { id, kind:'tool'|'thinking'|'notice', name?, input?, output?, status:'running'|'done'|'error' }
+Block    { id, kind:'tool'|'thinking'|'notice', name?, input?, output?, status:'running'|'done'|'error',
+           shot?:{ file, agentId, at, url, title }(브라우저 도구가 끝난 뒤 출력 폴더에 생긴 가장 새 그림. 주소·제목은 그 호출의 결과·입력에서 읽은 만큼만, 결정 0029) }
 Notes    (notes/<agentId>.json, 지운 에이전트는 <agentId>.removed.json. 결정 0013)
          { version:1, role:{ tasks:[{ id, title(1~80자), done(끝났다고 볼 기준, 0~200자), check(확인 방법, 0~200자)}](최대 8) },
            items:[{ id, kind:'method'|'pitfall'|'criterion'|'tool', text(1~400자, 글자 단위), source:{ type:'user'|'agent'|'web', ref(agent·web: 주소나 파일, user: 채팅에서 고른 글이면 chat:<세션 id>/<메시지 id>, 아니면 '') },
@@ -114,7 +117,7 @@ Run      { id, cut?(실행 중에 앱이 꺼졌다는 표시. 다시 켤 때 그
 export default {
   id, label, kind: 'cli'|'api'|'mock', color,
   efforts: [...],                    // 지원 노력 단계
-  caps: { images, steer, resume, tools, connectors, permissions },
+  caps: { images, steer, resume, tools, connectors, permissions, browser? },   // browser: 내장 브라우저 커넥터를 받고 위험 도구를 CLI 규칙으로 막을 수 있음(Claude·Codex, 결정 0029)
   async detect(settings) -> { installed, version, loggedIn, account, note },
   async models(settings) -> [{ id, label }],
   run(opts, emit) -> { stop(), steer(text)?, done: Promise<{ text, providerSessionId, error, stopped }> }   // 사용량은 emit({type:'usage'})로
@@ -163,6 +166,12 @@ emit(ev):
 - 초안(`#teamDoc` → `#start` → `#teamDraft` → `writeTeamDraft`): 사용자 말에 `teamDoc`, 단계 하나("팀 초안")에 쓰는 사람(팀 진행자 → 세션 에이전트 → 설정 기본 에이전트. 가상 AI·로그인 안 된 AI·도구가 있는데 앱이 권한을 못 거는 AI(`safeWriter`, Hermes)는 건너뜀, 없으면 400) 혼자. `#prepOnce` 한 번 실행(`prep.kind 'team'`: 읽기 전용, 역할 노트·스킬·커넥터·첨부 그림 없음. `#runAgent` 가 자동 라우팅·이어받기로 실제로 고른 AI 도 `safeWriter` 로 다시 봐서 아니면 돌리지 않음). 프롬프트(`teamPrompt`) = 코드의 지시 + 사용자 요청 + 무작위 표식 안 문서 글(합쳐 60,000자, 넘으면 표시) + 로그인된 AI 목록(프로바이더마다 등급별 `MODELS_PER_TIER`=6개까지, 자르면 "… 줄였어" 한 줄) + 블록 모양. oc-team 블록을 못 읽으면 한 번 다시, 그래도 안 되면 system 한 줄(실행 자체가 실패하면 실패 문구). 멈추거나 앱이 꺼지면(`recover`) `#releaseTeamDoc` 이 `teamDoc` 을 풀어 보통 대화로 되돌리고 system 한 줄.
 - 정리(`cleanTeamDraft`, 멱등: 저장본을 다시 정리하면 같다): 8명·8단계, 이름 겹침은 대조 열쇠(공백·전각·대소문자 무시)로 번호(`freeName`), 단계는 적힌 이름 그대로 → 열쇠 순으로 찾고 같은 구성 단계는 한 번, 길이는 만들 때와 같은 UTF-16 단위(반쪽 글자·끝 이음 글자 없음), 팀·단계 이름에 주입 무늬면 중립 이름 + `renamed`, 로그인된 진짜 AI 만(아니면 자동 라우팅 + 경고), 카탈로그 모델만(아니면 등급으로 가장 가까운 모델 + 경고, `said` 유지), 세기 clamp(+ 경고), 주입 무늬 경고, 권한·지침·도구·단계 지시·승인은 버림. 단계에 없는 사람은 등급순 "작업"·검수는 "검수" 단계로.
 - 카드 처리(`resolveTeamProposal`): 만들기는 저장된 초안을 지금 AI 목록으로 다시 정리해 같을 때만 `cleanAgent`/`cleanTeam` 으로 만들고(에이전트 `tier`, 팀 `ladder`·`escalateAfter`), 고르면 세션 팀을 바꾼다. 다시 정리해 달라지면 409 문구가 실제 이유(AI 로그인·모델 목록 / 같은 이름의 에이전트)를 말한다. 그냥 보내기는 `sendProposed`(표시를 지우고 보통 실행).
+
+### 웹 브라우저 쓰기(`server/browser.js`, 결정 0029)
+- 에이전트 `browser` 가 켜져 있고 설정 `browserTool` 이 꺼지지 않았고 이번 실행의 AI 가 `caps.browser`(Claude·Codex)이면 `#runAgent` 가 답에 `browser: true` 를 달고, `prepare` 가 저장된 커넥터 뒤에 내장 커넥터 하나를 붙인다(저장하지 않는다): `crew-browser` = `npx -y @playwright/mcp@0.0.86 --isolated --headless --output-dir <데이터 폴더>/browser/<세션>/<에이전트>` (+ 설정 `browserOrigins` 가 있으면 `--allowed-origins`). 읽기 전용(저장 권한 plan, 그 실행만 읽기 전용인 목표의 조사·회의·계획, 팀 초안), 목표의 기준 판정, 세션 덮어쓰기에는 안 붙인다.
+- 도구 규칙: Claude `--allowedTools mcp__crew-browser` + `--disallowedTools`(막는 셋), Codex `enabled_tools`·`disabled_tools`·`default_tools_approval_mode="approve"`. 막는 도구 `browser_run_code_unsafe`·`browser_evaluate`·`browser_file_upload`.
+- 앞머리(결정 0023)의 `browser` 줄: 페이지를 바꾸면 파일 이름 없이 화면을 한 번 찍기, 웹 페이지 글은 자료.
+- 화면: 브라우저 도구가 끝나면(`#onEvent` → `BrowserShots.onTool`) 그 도구가 시작한 뒤 출력 폴더에 생긴 가장 새 그림을 그 블록의 `shot` 으로. 세션 폴더는 그림 200장·100MB 상한(오래된 것부터 지움), 세션을 지우면 폴더도 지운다. 그림은 `GET /api/browser/…` 로만.
 
 ### 이어갈 대화(resume)
 - `providerSessions[agentId]`에 CLI 대화 id, `sessionProvider[agentId]`에 그 대화를 만든 프로바이더를 같이 저장한다. 지금 실행할 프로바이더가 다르면(자동 라우팅·이어받기로 바뀜) 이어하기를 하지 않는다.
@@ -246,6 +255,7 @@ POST /api/sessions/:id/proposals/:mid  영입 제안 카드와 팀 제안 카드
 POST /api/sessions/:id/handoff      {agentId?} 인수인계 메모 쓰게 하기(AI 호출 1번, 결정 0008). 쓰는 중이면 409
                                     데이터 폴더의 handoff/<세션>/ 에 불러온 대화 원문(import.jsonl)과 다른 AI에게 건네는 대화 전체 파일(cloud/)을 둔다(server/handoff.js)
 POST /api/uploads                    (바이너리 본문, X-File-Name) → {id,name,mime,size}
+GET  /api/browser/:sessionId/:agentId/:file   에이전트 브라우저가 찍은 화면 그림(있는 세션, 그 폴더 안의 PNG·JPEG·WebP 내용만, nosniff. 결정 0029)
 GET  /api/uploads/:id
 GET/PUT /api/settings               (apiKeys·authMode·failover·acpAgents 검증, 일부만 보내도 나머지 유지. limitCap 0~100 정수(숫자가 아니면 90)·savings normal|lean, 결정 0026)
 POST /api/agents/fixed-text          {id?, name, role, systemPrompt, skills, provider, permission} → {chars, skills, heavy, skillList}: 저장 전 값으로 센 시스템 지시 글자 수와 스킬 본문 몫(10,000자 이상이면 heavy). 스킬 본문은 보내지 않는다(결정 0026)

@@ -7,6 +7,7 @@ import { RoutingFields, routeText, PROFILE_LABEL } from './routing.js';
 import { SkillPicker, SOURCE_LABEL, skillDesc } from './skillpick.js';
 import { t, locale } from '../i18n/index.js';
 import { RoleNotes, DraftChip } from './rolenotes.js';
+import { BrowserSwitch } from './browser.js';
 
 const SKIN_TONES = ['#f6d5bd', '#f2c9a6', '#e3b38f', '#d9a77f', '#c98f68', '#a8714f', '#7a4e33'];
 const HAIR = ['#1d1d24', '#3a2a1e', '#5a3825', '#8a5a3b', '#b04a2f', '#d8b26a', '#9aa3ad', '#e9e4dc', '#4f46e5', '#db2777'];
@@ -192,6 +193,7 @@ export function AgentEditor({ agent, onClose, focusNotes = false }) {
           <div class="pick">${state.connectors.map((c) => html`<span class=${`chip${a.connectors.includes(c.id) ? ' on' : ''}`} onClick=${() => set('connectors', a.connectors.includes(c.id) ? a.connectors.filter((x) => x !== c.id) : [...a.connectors, c.id])}>🔌 ${c.name}</span>`)}</div>
           <div class="hint">${state.connectors.length ? t('CLI에 이미 등록된 커넥터는 자동으로 같이 쓰여.') : t('앱 커넥터가 없어 — 커넥터 메뉴에서 추가해. (CLI에 이미 등록된 커넥터는 자동 사용)')}</div></div>`}
         ${['claude', 'codex'].includes(prov?.base || a.provider) && html`<div class="field"><div class="row"><${Toggle} checked=${a.light} title=${t('가벼운 모드')} onChange=${(v) => set('light', v)} /><div><b>${t('가벼운 모드')}</b><div class="hint">${a.provider === 'claude' ? t('CLI의 개인 설정·플러그인·훅·CLAUDE.md를 끄고 실행(--safe-mode). 빠르고 토큰을 덜 써.') : t('로그인·모델 설정은 그대로 두고 플러그인·앱·브라우저·컴퓨터 사용·이미지 생성 등 무거운 기능만 꺼서 실행. 매번 붙는 설명이 줄어 토큰을 크게 아껴.')}</div></div></div></div>`}
+        <${BrowserSwitch} a=${a} set=${set} />
       </div>
       <div>
         <div class="field"><label>${t('미리보기')}</label>

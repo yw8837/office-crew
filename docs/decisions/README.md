@@ -33,3 +33,4 @@ Keep a record under about 100 lines. When a decision changes, add a dated "Revis
 | [0025](0025-goal-report-and-evidence.md) | A goal ends with a report the code puts together, and agents' claims are checked against facts where the code can check them | Accepted |
 | [0026](0026-usage-breakdown-limit-cap-and-lean-profile.md) | Usage is shown split and weighted, a goal asks before new work when a subscription window is over a cap, and a lean profile hands on less | Accepted |
 | [0027](0027-ask-before-raising-a-stuck-card.md) | Goal mode asks before handing a stuck task card to a higher-tier agent; it never raises one by itself | Accepted |
+| [0029](0029-browser-tool-as-a-built-in-connector.md) | The "Use a web browser" switch is a built-in Playwright MCP connector, and the browser tab shows the screenshots from its output folder | Accepted |

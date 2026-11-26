@@ -7,6 +7,7 @@ import { PageHead } from './manage.js';
 import { Limits, usageTip } from './session.js';
 import { t, LANGS, getLang, locale } from '../i18n/index.js';
 import { weighted, cacheHit } from '../usage-numbers.js';
+import { BrowserSettings } from './browser.js';
 
 async function saveSettings(patch) {
   try { state.settings = await put('/api/settings', patch); applyTheme(); applyLang(); changed(); return true; } catch (e) { toast(e.message, 'error'); return false; }
@@ -362,7 +363,8 @@ function Defaults() {
       <div class="row" style="margin-top:14px"><${Toggle} checked=${s.memory === true} onChange=${(v) => saveSettings({ memory: v })} title=${t('프로젝트 기억')} /><b>${t('프로젝트 기억')}</b></div>
       <div class="hint">${t('끝난 대화를 작업 폴더별로 내 PC에 원문 그대로 쌓아 두고, 실행을 시작할 때 요청과 관련된 조각만 정해진 양만큼 넣어 줘. 찾는 데 AI를 쓰지 않고, 넣은 만큼 "최근 대화"를 줄여서 전체 양을 맞춰. 켠 뒤의 대화부터 쌓여. 낱말이 겹치는 내용만 찾을 수 있어.')}</div>
       ${s.memory === true && html`<div class="field" style="max-width:260px;margin-top:8px"><label>${t('실행마다 넣는 기억의 최대 글자 수')}</label><input class="input" type="number" min="300" max="8000" step="100" value=${s.memoryBudget ?? 2000} onChange=${(e) => saveSettings({ memoryBudget: Number(e.target.value) })} /></div>`}
-    </div>`;
+    </div>
+    <${BrowserSettings} save=${saveSettings} />`;
 }
 
 // 계정 사용 원칙(정보 탭·첫 화면 공용). onOk 를 주면 "확인" 버튼이 붙는다

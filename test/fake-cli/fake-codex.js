@@ -25,6 +25,23 @@ process.stdin.on('end', async () => {
     out({ type: 'item.completed', item: { id: `msg_${k}`, type: 'agent_message', text: '먼저 기존 상태를 확인하겠습니다. ' } });
     await new Promise((r) => setTimeout(r, 10));
   }
+  // BROWSE: -c mcp_servers.<이름>.args 로 브라우저 MCP(--output-dir 이 든 것)를 받았으면 페이지 열기 → 화면 찍기 흉내(결정 0029).
+  // 찍기가 끝나기 전에 그 출력 폴더에 작은 PNG 를 쓴다. 결과 모양(result.content)은 MCP 의 도구 결과 형식을 따른 짐작이다(실제 Codex 출력은 확인 못 함)
+  const mcpArgs = args.filter((a, i) => args[i - 1] === '-c' && /^mcp_servers\.[^.]+\.args=/.test(a)).map((a) => ({ key: a.split('.')[1], list: JSON.parse(a.slice(a.indexOf('=') + 1)) }));
+  const browser = mcpArgs.find((x) => x.list.includes('--output-dir'));
+  if (input.includes('BROWSE') && browser) {
+    const dir = browser.list[browser.list.indexOf('--output-dir') + 1];
+    const page = '### Page\n- Page URL: https://example.com/\n- Page Title: Example Domain';
+    const call = (id, tool, args2, status, result) => ({ id, type: 'mcp_tool_call', server: browser.key, tool, arguments: args2, status, ...(result ? { result } : {}) });
+    out({ type: 'item.started', item: call('mcp_1', 'browser_navigate', { url: 'https://example.com/' }, 'in_progress') });
+    out({ type: 'item.completed', item: call('mcp_1', 'browser_navigate', { url: 'https://example.com/' }, 'completed', { content: [{ type: 'text', text: `### Ran Playwright code\nawait page.goto('https://example.com/');\n${page}` }] }) });
+    out({ type: 'item.started', item: call('mcp_2', 'browser_take_screenshot', {}, 'in_progress') });
+    await new Promise((r) => setTimeout(r, 20));
+    fs.mkdirSync(dir, { recursive: true });
+    const shot = `page-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
+    fs.writeFileSync(`${dir}/${shot}`, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64'));
+    out({ type: 'item.completed', item: call('mcp_2', 'browser_take_screenshot', {}, 'completed', { content: [{ type: 'text', text: `### Result\nTook the viewport screenshot and saved it as ${shot}\n${page}` }] }) });
+  }
   out({ type: 'item.started', item: { id: 'item_1', type: 'command_execution', command: 'ls', aggregated_output: '', status: 'in_progress' } });
   if (input.includes('HANGNOW')) await new Promise((r) => setTimeout(r, 120000)); // 출력 없이 멈춘 CLI 흉내
   await new Promise((r) => setTimeout(r, input.includes('SLOW') ? 1500 : 30));

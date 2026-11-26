@@ -276,7 +276,7 @@ export class Catalog {
     }
     for (const a of bundle.agents || []) {
       const saved = this.store.upsert('agents', {
-        ...a, id: undefined, pluginId, avatar: cleanAvatar(a.avatar),
+        ...a, id: undefined, pluginId, avatar: cleanAvatar(a.avatar), browser: a.browser === true, // 웹 브라우저 쓰기는 true 일 때만(결정 0029)
         connectors: (a.connectors || []).map((id) => conMap.get(id)).filter(Boolean),
         // 외부(CLI) 스킬은 그대로, 앱 스킬은 새로 만든 스킬 id 로 바꿔 연결
         skills: (a.skills || []).map((id) => (String(id).startsWith('ext:') ? id : skillMap.get(id))).filter(Boolean),

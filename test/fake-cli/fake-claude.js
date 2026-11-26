@@ -18,6 +18,11 @@ const myName = sysText.match(/에이전트 "([^"]+)"/)?.[1] || '';
 
 const settingsFile = val('--settings');
 if (process.env.FAKE_LOG && settingsFile) fs.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ cli: 'claude', pid: process.pid, settings: JSON.parse(fs.readFileSync(settingsFile, 'utf8')) })}\n`);
+// 받은 MCP 설정도 남긴다(실행이 끝나면 서버가 지운다). 브라우저 서버(--output-dir 이 든 것)의 출력 폴더는 BROWSE 가 쓴다(결정 0029)
+const mcpFile = val('--mcp-config');
+const mcpConf = mcpFile ? (() => { try { return JSON.parse(fs.readFileSync(mcpFile, 'utf8')); } catch { return null; } })() : null;
+if (process.env.FAKE_LOG && mcpConf) fs.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ cli: 'claude', pid: process.pid, mcp: mcpConf })}\n`);
+const browser = Object.entries(mcpConf?.mcpServers || {}).filter(([, v]) => (v.args || []).includes('--output-dir')).map(([key, v]) => ({ key, dir: v.args[v.args.indexOf('--output-dir') + 1] }))[0] || null;
 
 // stdin 을 읽기 전에 바로 죽는 CLI 흉내(서버가 EPIPE 로 죽지 않는지 확인용)
 if (process.env.FAKE_EXIT_NOW === '1') process.exit(3);
@@ -264,6 +269,19 @@ async function pump() {
   if (cardId && !tailRetry && goalLine.includes('CARDWRITE') && !(cardId === 'k2' && goalLine.includes('NOWRITEK2')) && !(cardId === 'k1' && myName && goalLine.split(/\s+/).includes(`NOWRITEK1BY:${myName}`))) {
     fs.mkdirSync('src', { recursive: true });
     fs.writeFileSync(`src/${cardId}.js`, `// ${cardId} ${Date.now()}\n`);
+  }
+  // BROWSE: 브라우저 MCP 를 받았으면(결정 0029) 페이지 열기 → 화면 찍기 흉내. 찍기 결과를 내기 전에 그 서버의 출력 폴더에 작은 PNG 를 쓴다(진짜 서버가 page-<시각>.png 로 쓰는 것처럼)
+  if (req.includes('BROWSE') && browser) {
+    const page = '### Page\n- Page URL: https://example.com/\n- Page Title: Example Domain';
+    out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: `bn${turn}`, name: `mcp__${browser.key}__browser_navigate`, input: { url: 'https://example.com/' } }] } });
+    await sleep(20);
+    out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: `bn${turn}`, content: [{ type: 'text', text: `### Ran Playwright code\nawait page.goto('https://example.com/');\n${page}\n### Snapshot\n- heading "Example Domain"` }] }] } });
+    out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: `bs${turn}`, name: `mcp__${browser.key}__browser_take_screenshot`, input: {} }] } });
+    await sleep(20);
+    fs.mkdirSync(browser.dir, { recursive: true });
+    const shot = `page-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
+    fs.writeFileSync(`${browser.dir}/${shot}`, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64'));
+    out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: `bs${turn}`, content: [{ type: 'text', text: `### Result\nTook the viewport screenshot and saved it as ${shot}\n${page}` }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }] }] } });
   }
   // READTALK: 건네받은 대화 전체 파일을 Read 도구로 여는 흉내
   const talkFile = text.match(/^.*conversation\.md$/m)?.[0];

@@ -83,7 +83,8 @@ export function makeCodex({ id = 'codex', name = '', home = null } = {}) {
   get sub() { return name ? tr('Codex CLI · 추가 ChatGPT 계정') : tr('Codex CLI · ChatGPT 구독 로그인'); }, kind: 'cli', color: '#10a37f',
   // 모델마다 실제 단계는 models_cache.json 에서 읽고, 이건 목록이 없을 때 쓰는 기본값(Codex 캐시와 같은 단계)
   efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-  caps: { images: true, steer: false, resume: true, tools: true, connectors: true, permissions: true },
+  // browser: 내장 브라우저 커넥터의 위험 도구를 막을 수 있다. mcpCwd: MCP 서버의 작업 폴더를 정할 수 있다(mcp_servers.<키>.cwd, 결정 0029)
+  caps: { images: true, steer: false, resume: true, tools: true, connectors: true, permissions: true, browser: true, mcpCwd: true },
   login: { command: 'codex login', env: home ? homeEnv : null, get hint() { return name ? tr('브라우저가 열리면 "{name}"으로 쓸 ChatGPT 계정으로 로그인해줘(다른 계정이면 먼저 로그아웃).', { name }) : tr('브라우저가 열리면 ChatGPT 계정으로 로그인해줘.'); } },
 
   async detect(settings) {
@@ -160,6 +161,13 @@ export function makeCodex({ id = 'codex', name = '', home = null } = {}) {
           const table = Object.entries(c.env).map(([k, v]) => `${JSON.stringify(k)}=${tomlStr(v)}`).join(',');
           args.push('-c', `${key}.env={${table}}`);
         }
+      }
+      // 앱이 붙인 내장 커넥터(결정 0029): 서버의 작업 폴더(출력 폴더), 허용 목록·차단 목록, 승인 묻기 없이(exec 는 승인 질문을 받을 수 없어 취소된다)
+      if (c.type !== 'http' && c.cwd) args.push('-c', `${key}.cwd=${tomlStr(c.cwd)}`);
+      if (c.tools) {
+        args.push('-c', `${key}.enabled_tools=${JSON.stringify(c.tools.allow || [])}`);
+        args.push('-c', `${key}.disabled_tools=${JSON.stringify(c.tools.deny || [])}`);
+        args.push('-c', `${key}.default_tools_approval_mode="approve"`);
       }
     }
     for (const img of images) args.push('-i', img);

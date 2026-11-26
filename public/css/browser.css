@@ -1,0 +1,17 @@
+/* 웹 브라우저 쓰기(결정 0029): 세션 오른쪽 패널의 "브라우저" 탭, 도구 블록의 작은 그림, 에이전트 편집의 스위치 */
+.bshot { display: flex; flex-direction: column; gap: 8px; }
+.bshot-note { line-height: 1.45; }
+.bshot-frame { display: block; width: 100%; padding: 0; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); overflow: hidden; cursor: zoom-in; }
+.bshot-frame img { display: block; max-width: 100%; height: auto; max-height: 60vh; margin: 0 auto; object-fit: contain; }
+.bshot-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bshot-title { font-weight: 700; overflow-wrap: anywhere; }
+.bshot-url { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; user-select: text; }
+.bshot-nav { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.bshot-gone { padding: 18px 10px; text-align: center; color: var(--muted); font-size: 12px; background: var(--panel-3); }
+.bshot-dot { display: inline-block; width: 7px; height: 7px; margin-left: 5px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
+.bshot-thumb { align-self: flex-start; padding: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); overflow: hidden; cursor: zoom-in; line-height: 0; }
+.bshot-thumb img { display: block; max-width: 220px; max-height: 140px; width: auto; height: auto; }
+.bshot-thumb .bshot-gone { line-height: 1.4; width: 180px; }
+.bshot-big img { display: block; max-width: 100%; height: auto; margin: 0 auto; border-radius: 8px; }
+.bshot-big + .bshot-url { margin-top: 8px; }
+.bswitch.off { opacity: .55; }

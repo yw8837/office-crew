@@ -31,6 +31,7 @@ import { tr, bindLang, serverLang } from './i18n.js';
 import { Scheduler, cleanSchedule } from './scheduler.js';
 import { alive } from './mission.js';
 import { cleanTier, cleanLadder } from './mission.js';
+import { browserRoute, cleanBrowserSettings } from './browser.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -164,7 +165,7 @@ function cleanAgent(a, prev = {}) {
     permission: PERMS.has(x.permission) ? x.permission : 'default', systemPrompt: String(x.systemPrompt || '').slice(0, 20000),
     skills: Array.isArray(x.skills) ? x.skills.map(String) : [], connectors: Array.isArray(x.connectors) ? x.connectors.map(String) : [],
     routing, routingProfile: ['economy', 'balanced', 'best'].includes(x.routingProfile) ? x.routingProfile : 'balanced',
-    light: !!x.light, apiProfile: String(x.apiProfile || ''), avatar: cleanAvatar(x.avatar),
+    light: !!x.light, browser: x.browser === true, apiProfile: String(x.apiProfile || ''), avatar: cleanAvatar(x.avatar), // browser: 웹 브라우저 쓰기(결정 0029)
     ...(x.pluginId ? { pluginId: x.pluginId } : {}),
     // 사다리 등급 1~4(결정 0024·0027). 범위 밖은 가까운 끝으로, 비우거나 숫자가 아니면 없음(저장할 때 합쳐도 지워지게 undefined). 보내지 않으면 저장된 값(prev) 그대로
     tier: cleanTier(x.tier) ?? undefined,
@@ -707,6 +708,8 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     return undefined;
   });
 
+  browserRoute(route, { shots: orch.browser, store }); // 에이전트 브라우저가 찍은 화면 그림(결정 0029)
+
   // 설정
   route('GET', '/api/settings', () => publicSettings());
   // 앱 끄기: 응답을 보낸 뒤 실행기가 서버를 닫는다(실행기 없이 띄운 서버는 끌 수 없다고 알린다)
@@ -768,6 +771,7 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     if ('stallMinutes' in b) b.stallMinutes = Math.min(1440, Math.max(0, Math.round(Number(b.stallMinutes) || 0)));
     if ('dailyBudget' in b) b.dailyBudget = b.dailyBudget === true;
     if ('dailyBudgetPercent' in b) b.dailyBudgetPercent = Math.min(50, Math.max(5, Math.round(Number(b.dailyBudgetPercent) || 13)));
+    Object.assign(b, cleanBrowserSettings(b)); // 웹 브라우저 쓰기의 전역 켜기·허용 도메인(결정 0029). 잘못된 주소는 400
     if ('desktopNotify' in b) b.desktopNotify = b.desktopNotify === true;
     if ('phoneNotify' in b) b.phoneNotify = b.phoneNotify === true;
     if ('phoneType' in b) b.phoneType = b.phoneType === 'webhook' ? 'webhook' : 'ntfy';

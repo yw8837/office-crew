@@ -10,7 +10,7 @@ With task cards, the calls left are estimated again once the plan exists, with t
 
 ## Revision (2026-11-26, with [0026](0026-usage-breakdown-limit-cap-and-lean-profile.md))
 
-The limit line on the goal card also shows the subscription cap (`limitCap`, 90% by default) and marks an AI already over it. A new wait (`limitcap`) asks before new work when the cap is reached; its "continue after the reset" uses this record's timer (`quotaDelay`) and shares its count (`mission.quota.autos`, `QUOTA_AUTO`). Choosing anything but Stop in this record's usage-limit wait puts that AI in `mission.capOk`, so the cap doesn't ask about the same limit again in that goal.
+The limit line on the goal card also shows the subscription cap (`limitCap`, 90% by default) and marks an AI already over it. A new wait (`limitcap`) asks before new work when the cap is reached; its "continue after the reset" uses this record's timer (`quotaDelay`) and shares its count (`mission.quota.autos`, `QUOTA_AUTO`). Choosing anything but Stop in this record's usage-limit wait puts that AI in `mission.capOk`, so the cap doesn't ask about the same limit again in that goal. An AI whose window is already full (this record's test: 100% or a rejection record) is left to this record's wait; the cap doesn't ask first. Answers a stage had already finished stay in the cut point at the call-cap question in general now, not only before a retry.
 
 ## Context
 

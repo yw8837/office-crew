@@ -350,7 +350,7 @@ function Defaults() {
         <div class="seg" role="group" aria-labelledby="savings-label" style="align-self:flex-start"><button class=${s.savings !== 'lean' ? 'on' : ''} aria-pressed=${s.savings !== 'lean'} onClick=${() => saveSettings({ savings: 'normal' })}>${t('보통')}</button><button class=${s.savings === 'lean' ? 'on' : ''} aria-pressed=${s.savings === 'lean'} onClick=${() => saveSettings({ savings: 'lean' })}>${t('절약')}</button></div>
         <div class="hint">${t('보통은 지금대로 넘겨. 절약을 고르면 아래 셋이 한 번에 바뀌어:')}
           <ul class="small" style="margin:4px 0">
-            <li>${t('처음 맡는 에이전트에게 주는 최근 대화를 위 설정의 절반(올림, 최소 1)만')}</li>
+            <li>${t('에이전트에게 주는 최근 대화를 위 설정의 절반(올림, 최소 1)만: 기억 못 하는 모델에는 매번, 대화를 이어 가는 모델(Claude·Codex)에는 처음 맡을 때')}</li>
             <li>${t('목표의 조사 노트는 파일로 두고, 파일을 읽을 수 있는 AI 에는 질문마다 첫 줄과 파일 경로만(파일을 못 읽는 AI 에는 지금처럼 전문)')}</li>
             <li>${t('앞 단계 결과는 바로 앞 단계만 전문, 그보다 앞 단계는 끝부분 {n}자만', { n: (1500).toLocaleString(locale()) })}</li>
           </ul>

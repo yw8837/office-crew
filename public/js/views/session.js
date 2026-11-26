@@ -14,7 +14,7 @@ import { TeamCard } from './teamdoc.js';
 import { researcherOf, meetingView, boardCards } from '../office/meeting.js';
 import { meetLabel, goalWait } from '../stage-model.js';
 import { FlowStage, StageStrip } from './stage.js';
-import { weighted, rawSum, cacheHit, usageBreakdown, USE_KINDS } from '../usage-numbers.js';
+import { weighted, rawSum, cacheHit, usageBreakdown, ANSWER_KINDS } from '../usage-numbers.js';
 
 export const sessionAgents = (s) => {
   if (!s) return [];
@@ -35,12 +35,23 @@ function addUsage(u, m) {
 }
 function agentUsage(s, agentId) {
   const u = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
-  let partial = false, sub = 0;
-  for (const m of s?.messages || []) if (m.agentId === agentId && m.usage) { addUsage(u, m); partial ||= m.usage.partial === true; sub += m.usage.sub || 0; }
-  return Object.assign(u, partial ? { partial } : {}, sub ? { sub } : {});
+  let partial = false, subOld = 0, subW = 0;
+  for (const m of s?.messages || []) {
+    if (m.agentId !== agentId || !m.usage) continue;
+    addUsage(u, m);
+    partial ||= m.usage.partial === true;
+    if (m.usage.subW !== undefined) subW += m.usage.subW || 0; else subOld += m.usage.sub || 0; // 환산 몫을 적지 않던 옛 답은 1:1 합으로 따로
+  }
+  return Object.assign(u, partial ? { partial } : {}, subOld ? { subOld } : {}, subW ? { subW } : {});
 }
-// Claude 사용량 도움말 줄: 하위 에이전트 몫이 빠졌을 수 있는지(partial), 주 에이전트 밖에서 쓴 양(하위 에이전트 등)을 얼마나 셌는지(sub)
-const treeTip = (u) => [u.partial && t('하위 에이전트가 쓴 양이 빠졌을 수 있어.'), u.sub > 0 && t('주 에이전트 밖에서 쓴 {n} 토큰 포함(하위 에이전트 등)', { n: fmtTok(u.sub) })].filter(Boolean);
+// Claude 사용량 도움말 줄: 하위 에이전트 몫이 빠졌을 수 있는지(partial), 주 에이전트 밖에서 쓴 양(하위 에이전트 등)을 얼마나 셌는지.
+// 옆 숫자와 같은 환산(subW, 결정 0026). 환산 몫을 적지 않던 옛 답(sub 만 있음, 여럿을 더한 값은 subOld)은 1:1 합이라고 밝혀 따로
+const treeTip = (u) => {
+  const old = u.subOld ?? (u.subW === undefined ? u.sub : 0);
+  return [u.partial && t('하위 에이전트가 쓴 양이 빠졌을 수 있어.'),
+    u.subW > 0 && t('주 에이전트 밖에서 쓴 환산 {n} 토큰 포함(하위 에이전트 등)', { n: fmtTok(u.subW) }),
+    old > 0 && t('주 에이전트 밖에서 쓴 {n} 토큰 포함(하위 에이전트 등, 네 값 1:1 합)', { n: fmtTok(old) })].filter(Boolean);
+};
 // 부분 집계 표시(*). 마우스 없이도 알 수 있게 도움말과 같은 글을 화면 낭독기 이름으로 단다
 const partialMark = (u) => (u.partial ? html` <span role="img" aria-label=${treeTip(u).join(' ')}>*</span>` : '');
 // 사용량 한 숫자는 환산(결정 0026: 새 입력 + 캐시 쓰기 + 출력 + 캐시 읽기÷10, 서버의 회의 사용량 상한과 같은 함수). 나눈 값과 1:1 합은 도움말에
@@ -538,7 +549,7 @@ function Chat({ s, run }) {
         return;
       }
     }
-    const h = run && !run.endedAt && run.status === 'waiting' && (run.hold?.reason === 'mission' || run.hold?.reason === 'cap' || run.hold?.reason === 'quota') ? run.hold : null;
+    const h = run && !run.endedAt && run.status === 'waiting' && ['mission', 'cap', 'quota', 'limitcap'].includes(run.hold?.reason) ? run.hold : null; // 구독 한도 상한(결정 0026)도
     if (el && h && gateAt.current !== h.at) {
       gateAt.current = h.at;
       const g = stick.current ? el.querySelector('.chat-inner .mission-gate') : null;
@@ -946,26 +957,34 @@ function Inspector({ s, agentId }) {
   </div>`;
 }
 
-// 이 세션에서 어디에 썼는지(결정 0026): 메시지마다 이미 있는 사용량을 종류별(메시지의 표시로)·에이전트별로 묶는다(새로 저장하지 않는다).
-// 목표가 있으면 그 목표의 실행 것만 볼 수 있다. 줄에 마우스를 올리면 나눈 값
-const USE_LABEL = () => ({ normal: t('보통 실행'), goal: t('목표 잡기'), research: t('조사'), meeting: t('회의'), plan: t('계획'), cards: t('일 카드'), review: t('검수') });
+// 이 세션에서 어디에 썼는지(결정 0026): 메시지마다 이미 있는 사용량을 종류별(메시지의 표시로, 완주 보고와 같은 answerKind)·에이전트별로 묶는다(새로 저장하지 않는다).
+// 목표가 있으면 그 목표의 답만(답에 단 목표 표시로) 볼 수 있다. "나눈 값 보기"를 켜면 줄마다 네 값을 보이는 줄로(키보드·화면 낭독기도 읽는다)
+const USE_LABEL = () => ({ normal: t('보통 실행'), goal: t('목표 잡기'), research: t('조사'), meeting: t('회의'), plan: t('계획'), work: t('일 단계'), cards: t('일 카드'), review: t('검수'), team: t('팀 초안'), handoff: t('인수인계 메모') });
 function UseBreakdown({ s }) {
   const [mine, setMine] = useState(false);
+  const [parts, setParts] = useState(false);
   const m = s.mission;
   const runIds = m ? (s.runs || []).filter((r) => r.missionId === m.id).map((r) => r.id) : [];
-  const only = mine && runIds.length > 0;
-  const b = usageBreakdown(s.messages, only ? { runIds } : {});
+  const has = !!m && (runIds.length > 0 || s.messages.some((x) => (x.missionId || x.card?.missionId) === m.id));
+  const only = mine && has;
+  const goalRuns = (s.runs || []).filter((r) => r.missionId).map((r) => r.id); // 목표 표시가 없던 옛 답을 일 단계로 알아볼 실행
+  const b = usageBreakdown(s.messages, only ? { missionId: m.id, runIds, goalRuns } : { goalRuns });
   const L = USE_LABEL();
   const hit = (v) => { const h = cacheHit(v); return h === null ? '—' : `${Math.round(h * 100)}%`; };
-  const row = (label, v, extra = null) => html`<tr title=${usageTip(v)}><td class="ellipsis">${label}</td><td class="num">${fmtTok(weighted(v))}</td>${extra !== null ? html`<td class="num">${extra}</td>` : ''}<td class="num">${v.n}</td></tr>`;
+  const split = (v) => t('새 입력 {i} · 캐시 쓰기 {cw} · 캐시 읽기 {cr} · 출력 {o}', { i: fmtTok(v.input || 0), cw: fmtTok(v.cacheWrite || 0), cr: fmtTok(v.cacheRead || 0), o: fmtTok(v.output || 0) });
+  const row = (label, v, extra = null) => html`<tr title=${usageTip(v)}><td class="ellipsis">${label}</td><td class="num">${fmtTok(weighted(v))}</td>${extra !== null ? html`<td class="num">${extra}</td>` : ''}<td class="num">${v.n}</td></tr>
+    ${parts && html`<tr class="use-parts"><td colspan=${extra !== null ? 4 : 3} class="small muted">${split(v)}</td></tr>`}`;
   return html`<div class="card use-card"><h4>🧾 ${t('어디에 썼는지')}</h4>
-    ${runIds.length > 0 && html`<label class="row small" style="gap:6px;margin-bottom:6px"><input type="checkbox" checked=${only} onChange=${(e) => setMine(e.target.checked)} />${t('이 목표 것만')}</label>`}
+    <div class="row small" style="gap:12px;flex-wrap:wrap;margin-bottom:6px">
+      ${has && html`<label class="row" style="gap:6px"><input type="checkbox" checked=${only} onChange=${(e) => setMine(e.target.checked)} />${t('이 목표 것만')}</label>`}
+      ${b.total.n > 0 && html`<label class="row" style="gap:6px"><input type="checkbox" checked=${parts} onChange=${(e) => setParts(e.target.checked)} />${t('나눈 값 보기')}</label>`}
+    </div>
     ${!b.total.n ? html`<div class="muted small">${t('아직 사용량이 없어.')}</div>` : html`
       <table class="use-table" aria-label=${t('종류별 사용량')}><thead><tr><th>${t('종류')}</th><th class="num">${t('환산')}</th><th class="num">${t('답')}</th></tr></thead>
-        <tbody>${USE_KINDS.filter((k) => b.kinds[k]).map((k) => row(L[k], b.kinds[k]))}</tbody></table>
+        <tbody>${ANSWER_KINDS.filter((k) => b.kinds[k]).map((k) => row(L[k], b.kinds[k]))}</tbody></table>
       <table class="use-table" aria-label=${t('에이전트별 사용량')}><thead><tr><th>${t('에이전트')}</th><th class="num">${t('환산')}</th><th class="num" title=${t('캐시 적중률: 캐시 읽기 ÷ (새 입력 + 캐시 읽기 + 캐시 쓰기). 캐시 숫자를 주지 않는 AI 는 —')}>${t('캐시')}</th><th class="num">${t('답')}</th></tr></thead>
         <tbody>${b.agents.map(([id, v]) => row(agentById(id)?.name || t('삭제된 에이전트'), v, hit(v)))}</tbody></table>
-      <div class="hint">${t('메시지마다 적힌 사용량으로 셌어(새로 저장하지 않아). 줄에 마우스를 올리면 나눈 값이 보여.')}</div>`}
+      <div class="hint">${t('메시지마다 적힌 사용량으로 셌어(새로 저장하지 않아). 작성 중인 답의 추정치(~)는 세지 않아서 위의 세션 합계보다 작을 수 있어.')}${has ? ` ${t('"이 목표 것만"은 답에 단 목표 표시로 골라(실행 기록이 지워져도 남아).')}` : ''}</div>`}
   </div>`;
 }
 

@@ -10,7 +10,7 @@ When a goal meeting (the pre-work meeting or a team meeting stage in a goal's wo
 
 ## Revision (2026-11-26, with [0026](0026-usage-breakdown-limit-cap-and-lean-profile.md))
 
-With the lean profile (`savings: 'lean'`, off by default), an AI with file tools gets the research note as a file in the data folder (`handoff/<session>/research/<goal>/`, answers not cut, the folder opened for that run as in [0008](0008-handoff-to-another-ai.md)) and, in the prompt, only the note's head lines, one line saying so, the path and the first line of each answer; an AI without file tools still gets the note as below. The plan step keeps the whole note. The scan, questions, research and meeting steps also stop before starting when the subscription cap of 0026 is reached.
+With the lean profile (`savings: 'lean'`, off by default), an AI with file tools gets the research note as a file in the data folder (`handoff/<session>/research/<goal>/work/` for work stages, without the instruction-like lines, and `.../meeting/` for meetings; answers not cut; only the folder for that turn is opened for the run, as in [0008](0008-handoff-to-another-ai.md), so the lines left out never reach a work stage by path; the folder is removed when the goal ends) and, in the prompt, only the note's head lines, one line saying so, the path and the first line of each answer; an AI without file tools still gets the note as below. The plan step keeps the whole note. The scan, questions, research and meeting steps also stop before starting when the subscription cap of 0026 is reached.
 
 ## Revision (2026-11-25, with [0022](0022-goal-mode-records-and-block-allow-list.md))
 

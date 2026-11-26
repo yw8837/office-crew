@@ -30,7 +30,7 @@ import { gitState, gitDiffNames, changedSet, proofCheck, PROOF_KINDS, PROOF_TIME
 import { buildReport, reportText, reportLocal } from './report.js';
 import { projectKey } from './memory.js';
 import { weighted, overCap } from '../public/js/usage-numbers.js'; // 사용량 환산·구독 한도 상한은 화면과 같은 함수(결정 0026)
-import { isLean, leanTurns, prevTail, prevNote, writeNote, noteSummary } from './savings.js';
+import { isLean, leanTurns, prevTail, prevNote, writeNote, noteSummary, dropNotes } from './savings.js';
 
 const ACTIVE = new Set(['running', 'paused', 'waiting']);
 const FORCE_END_MS = 5000; // 멈춘 CLI를 끄라고 한 뒤 이만큼 기다려도 안 끝나면 강제로 끝낸다
@@ -100,6 +100,8 @@ export class Orchestrator {
     this.throttle = new Map();
     this.cooldown = new Cooldown(); // 사용량 한도에 걸려 잠시 쉬는 AI
     this.quotaTimers = new Set(); // 목표의 한도 대기에서 고른 자동 이어서 타이머(대기가 끝나면 지운다. 결정 0019)
+    this.capAskSeen = new Map(); // 세션 → 화면에 보낸 "상한 넘음" 칩의 AI 목록(결정 0026)
+    this.capAskBusy = new Map(); // 세션 → 칩을 다시 세는 중(값: 세는 동안 또 알림이 왔는지)
   }
 
   // 서버 재시작 시 끊긴 실행 정리
@@ -238,9 +240,11 @@ export class Orchestrator {
   }
 
   // 목표나 목표 모드가 바뀌었다고 화면에 알린다(세션 요약 이벤트에는 실리지 않는다)
+  // capAsk: 목표 카드의 구독 한도 줄에서 "상한 넘음" 칩을 달 AI(결정 0026). 마지막으로 센 값을 같이 싣고, 지금 판단으로 다시 세어 바뀌면 한 번 더 알린다
   emitMission(s, now = false) {
-    this.bus.emit('mission', { sessionId: s.id, goalMode: !!s.goalMode, mission: s.mission || null });
+    this.bus.emit('mission', { sessionId: s.id, goalMode: !!s.goalMode, mission: s.mission || null, capAsk: this.capAskSeen.get(s.id) || [] });
     if (now) this.store.saveSessionNow(s); else this.store.saveSession(s, 50);
+    this.#capAskRefresh(s);
   }
 
   // 목표 실행의 CLI 호출 하나를 센다(결정 0015). 화면 알림은 0.5초에 한 번까지(단계 끝·판정마다 목표를 다시 알리니 마지막 값도 곧 간다)
@@ -514,6 +518,7 @@ export class Orchestrator {
     m.status = 'cancelled';
     delete m.cutNotice; // 다시 켤 때 남길 끊김 알림이 아직 남아 있었으면 지운다(버린 목표라 알릴 필요가 없다)
     logLine(m, 'cancel', tr('끊긴 목표를 버렸어.'), m.cardMsgId);
+    dropNotes(this.dirs.handoff, s.id, m.id); // 조사 노트 파일(결정 0026)
     this.emitMission(s, true);
     return { ok: true };
   }
@@ -712,6 +717,7 @@ export class Orchestrator {
       if (open.length) logLine(m, 'card', tr('목표가 끝나서 돌지 않은 카드 {ids}는 건너뜀으로 적었어.', { ids: open.map((c) => c.id).join(', ') }));
       // 완주 보고(결정 0025): 끝 상태가 정해진 뒤에 코드만으로. 실행의 끝 처리 안이라 던져도 세션 저장·대기열의 다음 말이 건너뛰어지지 않게 감싸고 대화에 한 줄
       try { this.#report(ctx); } catch { this.#systemNote(s, tr('완주 보고를 만들지 못했어. 목표는 끝난 그대로야.')); }
+      dropNotes(this.dirs.handoff, s.id, m.id); // 절약 프로필의 조사 노트 파일(결정 0026): 끝난 목표는 더 쓰지 않는다
     }
     this.emitMission(s);
   }
@@ -1488,7 +1494,7 @@ export class Orchestrator {
     const st = run.stages[i];
     const name = (id) => this.store.get('agents', id)?.name || id;
     if (!(await this.#capCheck(ctx, i, meetingCalls(st.agentIds.length, st.meeting?.rounds), 'meeting'))) return;
-    if (!(await this.#limitCheck(ctx, i, st.agentIds, { phase: 'meeting' }))) return;
+    if (!(await this.#limitCheck(ctx, i, this.#meetIds(run, st), { phase: 'meeting' }))) return; // 회의 중 조사 담당의 AI 도(조사 한 번이 호출 한 번)
     m.meetingMsgId = null;
     this.#prepRefs(ctx);
     this.#prepBegin(ctx, i, tr('회의: {names}이(가) 무엇을 해야 목표를 채우는지 정해(진행자 {chair}).', { names: st.agentIds.map(name).join(', '), chair: name(st.meeting?.chairId || st.agentIds[0]) }));
@@ -1498,6 +1504,14 @@ export class Orchestrator {
     m.meetingMsgId = st.status === 'done' && c ? c.id : null;
     logLine(m, 'prep', m.meetingMsgId ? tr('회의 끝: 결론이 나왔어. 일 단계에 참고 자료로 넘겨.') : tr('회의가 결론 없이 끝났어. 결론 없이 일해.'), m.meetingMsgId);
     this.emitMission(s);
+  }
+
+  // 회의 단계의 구독 한도 상한(결정 0026)이 볼 사람: 참석자와 회의 중 조사 담당(#meeting 이 고르는 사람과 같다. 단계 명단 밖의 팀원일 수 있다)
+  #meetIds(run, st) {
+    const byId = Object.fromEntries(run.stages.flatMap((x) => x.agentIds).map((id) => [id, this.store.get('agents', id)]));
+    const chair = st.agentIds.includes(st.meeting?.chairId) ? st.meeting.chairId : st.agentIds[0];
+    const r = pickResearcher({ stages: run.stages }, byId, chair);
+    return r ? [...st.agentIds, r] : st.agentIds;
   }
 
   // 회의와 일 단계에 넣을 조사 노트·회의 결론을 목표에 적어 둔 메시지에서 만든다(이어서 할 때도 같은 자리에서 다시 만든다)
@@ -1976,9 +1990,12 @@ export class Orchestrator {
       }
       // 호출 상한은 그 단계가 쓸 호출 수로 본다: 보통 단계는 인원, 회의를 여는 단계는 회의 호출 수 식(결정 0017. 준비 회의와 같다). 이어서 하는 첫 바퀴는 다시 돌릴 사람 수
       const need = first?.ids ? first.ids.length : st.meeting && !ids ? meetingCalls(st.agentIds.length, st.meeting.rounds) : (ids || st.agentIds).length;
-      if (!first?.wait && !(await this.#capCheck(ctx, i, need, 'work', back, first?.quota ? first.ids : null, pass > 0))) return;
-      // 구독 한도 상한(결정 0026): 이번에 돌 사람의 AI. 끊긴 대기부터·한도 대기 뒤 다시 하기 앞(first.quota, 한도 대기에서 이미 물었다)이면 보지 않는다
-      if (!first?.wait && !first?.quota && !(await this.#limitCheck(ctx, i, first?.ids || ids || st.agentIds, { phase: 'work', back, ran: pass > 0 }))) return;
+      // 이 단계에서 이미 끝내 그대로 쓰는 답(이어서 한 첫 바퀴·막힘 "한 번 더"의 다음 바퀴): 상한 질문에서 끊겨도 끊긴 자리에 남겨 그 사람은 다시 돌지 않는다(결정 0019 와 같다)
+      const kept = (first?.keep || []).flatMap((o) => [o.msgId, o.tailMsgId]).filter(Boolean);
+      if (!first?.wait && !(await this.#capCheck(ctx, i, need, 'work', back, first?.quota ? first.ids : null, pass > 0, kept))) return;
+      // 구독 한도 상한(결정 0026): 이번에 돌 사람의 AI(회의 단계면 회의 중 조사 담당도). 끊긴 대기부터·한도 대기 뒤 다시 하기 앞(first.quota, 한도 대기에서 이미 물었다)이면 보지 않는다
+      const capIds = first?.ids || ids || (st.meeting ? this.#meetIds(run, st) : st.agentIds);
+      if (!first?.wait && !first?.quota && !(await this.#limitCheck(ctx, i, capIds, { phase: 'work', back, ran: pass > 0, finished: kept }))) return;
       gate?.commit();
       if (st.mission === 'cards' && first?.quota) for (const c of (m.cards || []).filter((x) => (st.cardIds || []).includes(x.id) && first.ids.includes(x.ownerId))) c.status = 'running';
       m.phase = 'work';
@@ -2046,14 +2063,15 @@ export class Orchestrator {
   // 그 단계에서 끝낸 답(finished)을 끊긴 자리에 남기고 대기에 quota 표시와 그 사람들(failed)을 단다(끊겼다 이어서 해도 한도에 걸린 사람만 다시 돌고 — 사용자가 건너뛴 사람은 빼고 —,
   // 일 카드는 같은 시작을 잇는 것이라 시작 수에 세지 않게). ran: 이미 돈 단계에서 묻는다(막힘 "한 번 더"의 다음 바퀴·끝 두 칸 다시 요청).
   // 한도 대기 뒤도 이미 돈 단계다. 대기에 ran 표시를 달아 화면이 문을 그 역 안에 그린다(결정 0020)
-  async #capCheck(ctx, i, need, phase = 'work', back = false, quotaIds = null, ran = false) {
+  // kept: 이 단계에서 이미 끝내 그대로 쓰는 답(메시지 id). 한도 대기 뒤처럼 끊긴 자리에 남긴다(이어서 할 때 그 사람은 다시 돌지 않는다)
+  async #capCheck(ctx, i, need, phase = 'work', back = false, quotaIds = null, ran = false, kept = null) {
     const m = ctx.mission;
     const c = m.calls;
     while (!ctx.stopped && c && c.cap - c.used < need) {
       m.status = 'waiting';
       logLine(m, 'cap', tr('호출 {used}번에 닿았어(상한 {cap}번). 다음 단계에 {need}번이 들어서 물어봤어.', { used: c.used, cap: c.cap, need }));
       this.emitMission(ctx.s);
-      this.#missionAt(ctx, { stageIndex: i, phase, back, ...(quotaIds ? { finished: m.at?.finished || [] } : {}), wait: { reason: 'cap', ...(quotaIds ? { quota: true, failed: quotaIds.map((id) => ({ agentId: String(id) })) } : {}) } });
+      this.#missionAt(ctx, { stageIndex: i, phase, back, ...(quotaIds ? { finished: m.at?.finished || [] } : kept?.length ? { finished: kept } : {}), wait: { reason: 'cap', ...(quotaIds ? { quota: true, failed: quotaIds.map((id) => ({ agentId: String(id) })) } : {}) } });
       const d = await this.#hold(ctx, 'waiting', { reason: 'cap', stageIndex: i, used: c.used, cap: c.cap, step: CAP_STEP, ...(quotaIds || ran ? { ran: true } : {}) });
       if (ctx.stopped || d.action !== 'more') { ctx.stopped = true; break; }
       c.cap += CAP_STEP;
@@ -2178,10 +2196,12 @@ export class Orchestrator {
   // ids: 그 일을 돌 에이전트. 에이전트마다 실제로 돌 AI(#capTarget: 한도 임박이면 다른 AI 로 넘기는 라우팅이 먼저)의 알려진 한도 창 중 하나라도 설정 limitCap(%) 이상이면
   // 시작하지 않고 묻는다: 계속(accept. 이 목표가 끝날 때까지 그 AI 로는 다시 묻지 않는다, mission.capOk) / 초기화 뒤 이어서(later. 초기화 시각을 알 때만,
   // 한도 대기와 같은 타이머 quotaDelay·같은 횟수 mission.quota.autos·QUOTA_AUTO, 결정 0019. 울리면 다시 보고 넘은 창이 없으면 시작) / 그만.
-  // 사용률 숫자를 주지 않는 AI 와 한도 대기(0019)에서 이미 물은 AI(capOk)는 보지 않는다. 묻는 자리는 끊긴 자리에 적는다(이어서 하면 이 검사가 호출 없이 다시 묻는다).
-  // phase·back: 끊긴 자리에 적을 차례. ran: 이미 돈 단계에서 묻는다(막힘 "한 번 더"의 다음 바퀴. 화면은 문을 그 역 안에 그린다)
+  // 사용률 숫자를 주지 않는 AI 와 한도 대기(0019)에서 이미 물은 AI(capOk)는 보지 않는다. 한도가 이미 다 찬 AI(#capFull)도 묻지 않고 한도 대기에 맡긴다.
+  // 묻는 자리는 끊긴 자리에 적는다(이어서 하면 이 검사가 호출 없이 다시 묻는다).
+  // phase·back: 끊긴 자리에 적을 차례. ran: 이미 돈 단계에서 묻는다(막힘 "한 번 더"의 다음 바퀴. 화면은 문을 그 역 안에 그린다).
+  // finished: 이 단계에서 이미 끝내 다시 돌지 않을 답(메시지 id). 끊긴 자리에 남겨 이어서 할 때 그 사람은 다시 돌지 않는다(한도 대기 뒤 호출 상한 질문과 같다, 결정 0019)
   // → true(시작) | false(그만)
-  async #limitCheck(ctx, i, ids, { phase = 'work', back = false, ran = false } = {}) {
+  async #limitCheck(ctx, i, ids, { phase = 'work', back = false, ran = false, finished = null } = {}) {
     const m = ctx.mission;
     const cap = Number(this.store.settings.limitCap);
     if (!m || ctx.stopped || !(cap > 0)) return !ctx.stopped;
@@ -2194,7 +2214,7 @@ export class Orchestrator {
       const who = [];
       for (const id of [...new Set((ids || []).map(String))]) {
         const pv = await this.#capTarget(ctx, i, id, phase);
-        const over = pv && !ok.has(pv) ? overCap(this.store.usage.limits?.[pv], cap) : null;
+        const over = this.#capOver(pv, cap, ok);
         if (over) who.push({ agentId: id, name: this.store.get('agents', id)?.name || id, provider: pv, ai: PROVIDERS[pv]?.label || pv, windows: over.windows, until: over.until });
       }
       if (ctx.stopped) return false;
@@ -2213,7 +2233,7 @@ export class Orchestrator {
       m.status = 'waiting';
       logLine(m, 'limitcap', tr('일을 돌 AI({ais})의 구독 한도가 상한 {cap}%를 넘어서 시작하기 전에 물어봤어({wins}).', { ais, cap, wins }));
       this.emitMission(ctx.s);
-      this.#missionAt(ctx, { stageIndex: i, phase, back, wait: { reason: 'limitcap' } });
+      this.#missionAt(ctx, { stageIndex: i, phase, back, ...(finished?.length ? { finished } : {}), wait: { reason: 'limitcap' } });
       const at = Date.now();
       let autoAt = 0;
       let timer = null;
@@ -2227,13 +2247,13 @@ export class Orchestrator {
           timer = null;
           if (ctx.stopped || d.action === 'stop') {
             ctx.stopped = true;
-            if (!this.closing) logLine(m, 'answer', tr('구독 한도 상한 질문에서 그만을 골랐어.'));
+            if (!this.closing) userLine(m, 'answer', tr('구독 한도 상한 질문에서 그만을 골랐어.'));
             return false;
           }
           if (d.action === 'later') {
             const wait = quotaDelay(until);
             autoAt = Date.now() + wait;
-            logLine(m, 'answer', tr('{time}에 한도를 다시 보고 이어서 해. 기다리는 동안에도 "계속"이나 "그만"을 누를 수 있어.', { time: clock(autoAt) }));
+            userLine(m, 'answer', tr('{time}에 한도를 다시 보고 이어서 해. 기다리는 동안에도 "계속"이나 "그만"을 누를 수 있어.', { time: clock(autoAt) }));
             this.emitMission(ctx.s);
             timer = setTimeout(() => { if (ctx.gate && ctx.run.hold?.reason === 'limitcap') ctx.gate({ action: 'retry', auto: true }); }, Math.min(wait, 2 ** 31 - 1));
             timer.unref?.();
@@ -2243,7 +2263,7 @@ export class Orchestrator {
           if (d.action === 'accept') {
             for (const w of who) if (!(m.capOk ||= []).includes(w.provider)) m.capOk.push(w.provider);
             m.status = 'active';
-            logLine(m, 'answer', tr('계속을 골랐어. 이 목표가 끝날 때까지 {ais}로는 상한을 다시 묻지 않아.', { ais }));
+            userLine(m, 'answer', tr('계속을 골랐어. 이 목표가 끝날 때까지 {ais}로는 상한을 다시 묻지 않아.', { ais }));
             this.emitMission(ctx.s);
             return true;
           }
@@ -2263,9 +2283,54 @@ export class Orchestrator {
     }
   }
 
+  // 구독 한도 상한으로 물을 AI 인가(결정 0026): 넘은 창(overCap) 또는 null. 이 목표에서 이미 "계속"을 고른 AI(ok)와 한도가 이미 다 찬 AI(#capFull)는 묻지 않는다
+  #capOver(pv, cap, ok) {
+    if (!pv || ok.has(pv) || this.#capFull(pv)) return null;
+    return overCap(this.store.usage.limits?.[pv], cap);
+  }
+
+  // 한도가 이미 다 찼다(결정 0019 의 한도 대기가 쓰는 기준): 사용률 100% 이상이거나 거절 기록의 창이 아직 안 풀렸다(limitResetAt),
+  // 초기화 시각을 모르는 다 찬 창·창을 모르는 거절 기록은 받은 뒤 30분까지(avoidUntil 의 기준 100%). 이런 AI 로 일을 시작하면 한도에 걸려
+  // 한도 대기(0019)가 묻는다. 상한 질문에서 "계속"을 골라도 바로 그 질문이 또 오니, 상한으로는 묻지 않고 한도 대기에 맡긴다
+  #capFull(pv) {
+    const lim = this.store.usage.limits?.[pv];
+    return limitResetAt(lim) > 0 || avoidUntil(lim, 100) > Date.now();
+  }
+
+  // 목표 카드의 구독 한도 줄에 "상한 넘음" 칩을 달 AI(결정 0026): 지금 이 세션 팀의 일을 시작한다면 상한 질문이 물을 AI(#limitCheck 와 같은 판단:
+  // 실제로 돌 AI(#capTarget, 다른 AI 로 넘기는 것·곧 풀려 기다리는 것 포함), "계속"을 고른 AI 와 다 찬 AI 는 빼고). 검수가 만든 AI 를 피하는 것은 실행 전이라 보지 않는다
+  async capAsk(s) {
+    const m = s?.mission;
+    const cap = Number(this.store.settings.limitCap);
+    if (!m || !['draft', 'active', 'waiting', 'cut'].includes(m.status) || !(cap > 0)) return [];
+    const team = this.store.get('teams', s.teamId);
+    const ok = new Set(m.capOk || []);
+    const out = new Set();
+    for (const id of new Set((team?.stages || []).flatMap((st) => st.agentIds || []).map(String))) {
+      const pv = await this.#capTarget({ s }, 0, id, String(m.reviewerId ?? '') === id ? 'review' : null);
+      if (this.#capOver(pv, cap, ok)) out.add(pv);
+    }
+    return [...out].sort();
+  }
+
+  // 화면에 보낸 칩 값을 지금 판단으로 다시 센다(목표를 알릴 때마다. 같은 세션은 한 번에 하나만). 바뀌었을 때만 목표를 다시 알린다(저장하지 않는다)
+  #capAskRefresh(s) {
+    if (this.capAskBusy.has(s.id)) { this.capAskBusy.set(s.id, true); return; }
+    this.capAskBusy.set(s.id, false);
+    this.capAsk(s).catch(() => []).then((v) => {
+      const again = this.capAskBusy.get(s.id);
+      this.capAskBusy.delete(s.id);
+      if (JSON.stringify(v) !== JSON.stringify(this.capAskSeen.get(s.id) || [])) {
+        this.capAskSeen.set(s.id, v);
+        this.bus.emit('mission', { sessionId: s.id, goalMode: !!s.goalMode, mission: s.mission || null, capAsk: v });
+      }
+      if (again) this.#capAskRefresh(s);
+    });
+  }
+
   // 그 에이전트가 이번에 실제로 돌 AI(결정 0026): #route 와 같은 판단을 기다림·상태 표시 없이 미리 본다. 모르면 null(상한 대상이 아님).
   // 직접 정한 AI 가 쉬는 중·한도 임박(이어받기 기준)·하루 예산을 다 썼으면 이어받기 설정대로 다른 AI(없으면 그대로), 곧 풀려서 기다렸다가 같은 AI 로 할 거면(waitForResetMin) null,
-  // 자동 라우팅이면 지금 고를 AI(검수는 만든 AI 를 피한다)
+  // 자동 라우팅이면 지금 고를 AI(검수는 만든 AI 를 피한다. 실행 밖에서 미리 볼 때(ctx.run 없음)는 피할 AI 를 모른다)
   async #capTarget(ctx, i, agentId, phase) {
     let a = this.store.get('agents', agentId);
     if (!a) return null;
@@ -2282,7 +2347,7 @@ export class Orchestrator {
         if (near && this.#resetSoon(ctx, a.provider, opts)) return null;
         return pickFallback(a, await this.providers.catalog(), opts)?.provider || a.provider;
       }
-      const avoid = review ? [...new Set(this.#reviewedBy(ctx, i).map((x) => x.provider))] : null;
+      const avoid = review && ctx.run ? [...new Set(this.#reviewedBy(ctx, i).map((x) => x.provider))] : null;
       const cat = await this.providers.catalog();
       return ((fo && resolveRoute(a, { ...availableCatalog(cat, opts), avoid })) || resolveRoute(a, { ...cat, avoid }))?.provider || null;
     } catch { return a.routing !== 'auto' ? a.provider || null : null; }
@@ -3045,6 +3110,8 @@ export class Orchestrator {
     if (meet?.checkOf) msg.checkOf = meet.checkOf; // 조사 결과: 어느 차례 글의 질문에 답했는지
     if (ctx.userMsg?.handoffAsk) msg.handoff = true; // 이 답이 인수인계 메모다
     if (ctx.missionTurn === 'goal') msg.goalDraft = true; // 목표 카드 초안을 쓴 답(에이전트에게 넘기는 대화·기억에 싣지 않는다. 결정 0014)
+    // 목표 실행(목표 잡기·일 실행)의 답: 어느 목표 것인지(결정 0026). 사용량의 종류(일 단계)와 "이 목표 것만"이 실행 기록(30개까지) 대신 이 표시를 본다
+    if (ctx.missionTurn && ctx.mission?.id) msg.missionId = ctx.mission.id;
     if (once?.phase === 'review') msg.review = { round: once.round, ...(once.retried ? { retried: true } : {}) }; // 기준 판정 답(기억에 넣지 않는다. 끝나면 판정으로 채운다)
     if (once) msg.once = true; // 한 번 실행의 답: 이 에이전트의 CLI 대화에 없다(놓친 대화·인수인계 메모 자격을 셀 때 뺀다)
     if (once?.fresh) msg.freshMeet = true; // 긴 세션의 보통 회의 차례(결정 0023): 목표의 회의와 달리 넘기는 대화에서 빼지 않는다(notTalk)
@@ -3188,6 +3255,7 @@ export class Orchestrator {
       // 회의 2바퀴부터: 이 참석자가 이번 회의의 앞 차례를 자기 CLI 대화로 이어 갈 때만 앞 단계 결과를 다시 넣지 않는다.
       // 이어 가지 못하면(기억 못 하는 AI, 다른 AI가 이어받음, 이어하기 실패) full 을 써서 앞 단계 결과를 다시 준다
       const lean = !!resumeId && !!ctx.meetSeen?.has(agentId);
+      ctx.talkOut.get(agentId).resumes = !!resumeId; // 이어 가는 대화인지(그 CLI 가 폴더를 열 수 있는지 가른다. #notePart)
       const full = once ? onceText(agent, prov) : this.#prompt(ctx, stageIdx, agent, feedback, prov, false);
       const prompt = lean ? this.#prompt(ctx, stageIdx, agent, feedback, prov, true) : full;
       // 이어갈 대화가 없으면(처음 맡음·AI 바뀜·불러온 세션) 이 세션의 앞 대화를 넣어 맥락을 잇는다(앞 대화가 없으면 그대로)
@@ -3332,6 +3400,12 @@ export class Orchestrator {
       const opened = !!dir && msg.blocks.some((b) => b.kind === 'tool' && b.status !== 'error'
         && JSON.stringify(b.input ?? '').replace(/\\+/g, '/').toLowerCase().includes(`${dir}/conversation`));
       this.#notice(s, msg, `📄 ${opened ? tr('대화 전체 파일을 열어 봤어.') : tr('대화 전체 파일은 열지 않았어. 넣어 준 최근 대화와 고른 부분만 보고 답했어.')}`, true);
+    }
+    // 절약 프로필의 조사 노트 파일(결정 0026)도 같은 방식으로: 성공한 도구 호출이 그 파일을 가리켰는지
+    if (told?.note && !PROVIDERS[msg.provider]?.caps.quiet) {
+      const file = String(told.note).replace(/\\/g, '/').toLowerCase();
+      const opened = msg.blocks.some((b) => b.kind === 'tool' && b.status !== 'error' && JSON.stringify(b.input ?? '').replace(/\\+/g, '/').toLowerCase().includes(file));
+      this.#notice(s, msg, `📄 ${opened ? tr('조사 노트 파일을 열어 봤어.') : tr('조사 노트 파일은 열지 않았어. 프롬프트의 요약(질문마다 첫 줄)만 보고 답했어.')}`, true);
     }
     finish('done');
     this.#atWorking(ctx, stageIdx, agentId, false, (!once || once.meeting) && (!meet || meet.phase === 'conclude') ? msg.id : null); // 끝낸 일 단계 답(회의는 결론)
@@ -3505,13 +3579,20 @@ export class Orchestrator {
     return this.#historyList(s, currentMsg, agentId, receiver).map((m) => ({ role: m.role, text: m.text.slice(0, 8000) }));
   }
 
+  // 기억 못 하는 모델(Gemini·ACP·Hermes·내 PC 모델 등)에 [이전 대화]로, API 에이전트에 대화 배열로 주는 최근 대화.
+  // 절약 프로필(결정 0026)이면 설정 값의 절반(올림, 최소 1)이고, 잘린 앞머리에 남은 에이전트 답은 뺀다(대화 배열이 요청 없는 답으로 시작하지 않게 사용자 말부터)
   #historyList(s, currentMsg, agentId, receiver) {
-    const n = Math.max(0, Number(this.store.settings.historyTurns) || 0) * 2;
+    const turns = Math.max(0, Number(this.store.settings.historyTurns) || 0);
+    const lean = isLean(this.store.settings);
+    const n = (lean ? leanTurns(turns) : turns) * 2;
     // 지금 작성 중인 답(이어받기 때의 앞부분)은 빼고(이어받기 지시에 따로 들어감)
     const list = s.messages.filter((m) => m !== currentMsg && m.id !== s.runs.at(-1)?.userMessageId && m.status !== 'queued' && m.status !== 'streaming'
       && (m.role === 'user' || (m.role === 'agent' && m.agentId === agentId && !m.review)) && m.text && !m.hire && !m.handoffAsk && !m.missionNote && !m.goalDraft && !notTalk(m, s)
       && (!localOnly(m) || receiver === 'local'));
-    return n ? list.slice(-n) : []; // 0이면 넣지 않는다(slice(-0)은 전부를 돌려준다)
+    if (!n) return []; // 0이면 넣지 않는다(slice(-0)은 전부를 돌려준다)
+    const out = list.slice(-n);
+    if (lean && out.length < list.length) while (out.length && out[0].role !== 'user') out.shift();
+    return out;
   }
 
   // 이어갈 대화가 없을 때 세션의 최근 대화(모든 에이전트)를 프롬프트 앞에 붙인다
@@ -4066,13 +4147,18 @@ export class Orchestrator {
 
   // 회의와 일 단계에 넣는 조사 노트(결정 0017). 절약 프로필(결정 0026)이고 파일 도구가 있는 AI 면 노트를 파일로 두고(목표마다 데이터 폴더의 handoff/<세션>/research/<목표>/)
   // 그 폴더만 이 실행에 열어 준 뒤(결정 0008 의 대화 전체 파일과 같은 길) 요약 + 경로만 준다. 파일 도구가 없거나 파일을 못 쓰면 지금처럼 전문
+  // 일 단계는 지시처럼 보이는 줄을 뺀 판(work/), 회의는 그 줄이 그대로인 판(meeting/)의 폴더만 연다. Codex 는 이어 가는 대화에 폴더를 열지 않으니(codex.js) 그때는 전문.
+  // 건넨 파일은 끝난 답에 "열어 봤는지" 한 줄을 남긴다(결정 0008 의 대화 전체 파일과 같은 방식: 성공한 도구 호출이 그 파일을 가리켰는지)
   #notePart(ctx, agent, prov, work) {
     const qs = ctx.prepData.questions;
-    if (!isLean(this.store.settings) || !prov.caps.tools) return researchNote(qs, undefined, { work });
+    const out = ctx.talkOut?.get(agent.id);
+    if (!isLean(this.store.settings) || !prov.caps.tools || (out?.resumes && baseProvider(agent.provider) === 'codex')) return researchNote(qs, undefined, { work });
     const w = writeNote(this.dirs.handoff, ctx.s.id, ctx.mission?.id, qs, { work });
     if (!w) return researchNote(qs, undefined, { work });
-    const out = ctx.talkOut?.get(agent.id);
-    if (out) for (const d of [out.addDirs, out.extraDirs]) if (!d.includes(w.dir)) d.push(w.dir);
+    if (out) {
+      for (const d of [out.addDirs, out.extraDirs]) if (!d.includes(w.dir)) d.push(w.dir);
+      out.note = w.file;
+    }
     return noteSummary(qs, w.file, { work, mark: randomBytes(4).toString('hex') });
   }
 
@@ -4164,6 +4250,7 @@ export class Orchestrator {
         for (const k of ['input', 'output', 'cacheRead', 'cacheWrite', 'cost']) msg.usage[k] += got[k] || 0;
         if (got.partial) msg.usage.partial = true; // 하위 에이전트 몫이 빠졌을 수 있다
         if (got.sub > 0) msg.usage.sub = (msg.usage.sub || 0) + got.sub;
+        if (got.subW > 0) msg.usage.subW = (msg.usage.subW || 0) + got.subW; // 같은 몫의 환산(화면의 숫자와 같은 단위, 결정 0026)
         delete msg.usage.estOutput; // 실제 값이 오면 추정치는 버린다
         this.usage.record(agent.provider, agent.id, got);
         this.bus.emit('messageUsage', { sessionId: s.id, messageId: msg.id, usage: msg.usage });
@@ -4176,6 +4263,7 @@ export class Orchestrator {
         const was = restMin();
         this.usage.setLimits(ev);
         if (was !== restMin()) this.bus.emit('cooldown', this.restingList());
+        if (ctx.s.mission) this.#capAskRefresh(ctx.s); // 목표 카드의 "상한 넘음" 칩(결정 0026)도 새 기록으로
         break;
       }
       case 'session':

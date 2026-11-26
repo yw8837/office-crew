@@ -303,6 +303,9 @@ a { color: var(--link); }
 .use-table th:first-child, .use-table td:first-child { width: 100%; max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .use-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; padding-left: 8px; }
 .use-table td.num { font-weight: 600; }
+/* "나눈 값 보기"의 네 값 줄: 자르지 않고 줄을 바꿔 다 보인다(그 줄이 이 값을 읽는 길이라서) */
+.use-table tr.use-parts td { white-space: normal; word-break: keep-all; overflow: visible; text-overflow: clip; max-width: none; padding-top: 0; }
+.use-table tr:has(+ tr.use-parts) td { border-bottom: none; }
 .log { font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
 .log .li { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 6px; }
 .log .tm { color: var(--faint); font-variant-numeric: tabular-nums; }

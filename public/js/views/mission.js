@@ -6,7 +6,6 @@ import { state, changed, toast, agentById } from '../state.js';
 import { post, put } from '../api.js';
 import { t, locale } from '../i18n/index.js';
 import { sumEstimate, limitRows, recordAge } from '../mission-numbers.js';
-import { overCap } from '../usage-numbers.js';
 import { WIN_LABEL } from './session.js'; // 한도 창 이름(세션 화면의 계정 한도와 같은 이름)
 import { answerNames, durationWords, unverifiedLines, failWords } from '../report-lines.js'; // 완주 보고의 글줄(서버가 기억에 넣는 글 판과 같은 함수, 결정 0025)
 import { goalEndWord } from '../stage-model.js'; // 끝 상태 이름(흐름 무대의 끝 깃발과 같은 말)
@@ -75,13 +74,15 @@ const ageWords = (min) => {
   if (a.unit === 'min') return a.n < 1 ? t('방금 받은 기록') : t('{n}분 전 기준', { n: a.n });
   return a.unit === 'hour' ? t('{n}시간 전 기준', { n: a.n }) : t('{n}일 전 기준', { n: a.n });
 };
-// 구독 한도 % 상한(결정 0026): 줄 머리에 상한, 이미 상한을 넘은 AI 에는 "상한 넘음"(그 AI 가 일을 시작하기 전에 묻는다). 0 이면 끔
+// 구독 한도 % 상한(결정 0026): 줄 머리에 상한, 지금 일을 시작하면 상한 질문이 물을 AI 에는 "상한 넘음". 그 판단은 서버가 실제 검사와 같게 센 값(ask:
+// 일을 다른 AI 로 넘기면 넘겨받는 AI, 이 목표에서 "계속"을 고른 AI·이미 다 찬 AI 는 빼고)이고, 서버 값이 아직 없으면 칩을 달지 않는다. 0 이면 끔
 const capOf = () => { const n = Number(state.settings?.limitCap); return Number.isFinite(n) ? n : 90; };
-function LimitLine({ providers }) {
-  const rows = limitRows(state.usage?.limits, providers || []);
+function LimitLine({ providers, ask = [] }) {
+  const asked = ask || [];
+  const rows = limitRows(state.usage?.limits, [...new Set([...(providers || []), ...asked])]);
   if (!rows.length) return null;
   const cap = capOf();
-  const over = (p) => cap > 0 && !!overCap(state.usage?.limits?.[p], cap);
+  const over = (p) => cap > 0 && asked.includes(p);
   return html`<div class="goal-sec goal-limits">
     <div class="small muted"><b>${t('구독 한도(받은 기록)')}</b>${cap > 0 ? ` · ${t('상한 {n}%', { n: cap })}` : ` · ${t('상한 꺼짐')}`}</div>
     ${rows.map((r) => html`<div class="small"><${ProviderChip} id=${r.provider} /> ${r.windows.map((w) => `${WIN_LABEL[w.key] || w.key} ${w.pct}%${w.resetsAt ? ` (${t('{time} 초기화', { time: when(w.resetsAt * 1000) })})` : ''}`).join(' · ')}
@@ -376,7 +377,7 @@ export function GoalCard({ m }) {
       ${mission?.status === 'done' && html`<div class="notice">✅ ${t('기준 {n}개를 모두 통과해서 끝냈어.', { n: mission.criteria.length })}</div>`}
       ${mission?.status === 'accepted' && html`<div class="notice">${t('받아들여서 끝냈어 · 남은 기준 {n}개', { n: left })}</div>`}
       ${mission?.calls && ['done', 'accepted', 'stopped'].includes(mission.status) && html`<div class="small muted">${mission.estimate ? t('실제 호출 {k}번(어림 {min}~{max}번)', { k: mission.calls.used, min: mission.estimate.min, max: mission.estimate.max }) : t('실제 호출 {k}번', { k: mission.calls.used })}</div>`}
-      ${mission && ['active', 'waiting', 'cut'].includes(mission.status) && html`<${LimitLine} providers=${m.providers} />`}
+      ${mission && ['active', 'waiting', 'cut'].includes(mission.status) && html`<${LimitLine} providers=${m.providers} ask=${s?.capAsk} />`}
       ${mission?.status === 'cut' && html`<${CutBox} s=${s} m=${mission} />`}
     </div></div>`;
   }
@@ -468,7 +469,7 @@ export function GoalCard({ m }) {
   </div>`;
   // 호출 어림(결정 0019): 조사·회의 체크, 일하는 방식, 남기기를 바꾸면 바로 다시 더한다(옛 카드는 이 칸이 없어 안 보인다). 구독 한도는 받은 기록이 있을 때만
   const estLine = est && html`<${EstimateLine} est=${est} pick=${estPick} />`;
-  const limLine = html`<${LimitLine} providers=${m.providers} />`;
+  const limLine = html`<${LimitLine} providers=${m.providers} ask=${s?.capAsk} />`;
   const openEdit = () => setEdit({ goal: v.goal, criteria: v.criteria.join('\n'), checks: checksOf(v).join('\n'), outOfScope: v.outOfScope.join('\n'), userDecides: v.userDecides.join('\n'), keep: (v.keep || []).join('\n') });
   const closeEdit = () => { setEdit(null); setTimeout(() => editBtn.current?.focus(), 0); };
   const cancel = () => send('cancel', { missionId: m.missionId });

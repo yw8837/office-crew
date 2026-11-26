@@ -539,7 +539,8 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
   route('GET', '/api/sessions/([\\w-]+)', async (req, url, [id]) => {
     const s = store.getSession(id);
     if (!s) throw new HttpError(404, tr('세션 없음'));
-    return { ...s, live: orch.liveStates(id), cwdResolved: s.cwd || store.settings.defaultCwd || path.join(dirs.workspaces, s.id) };
+    // capAsk: 목표 카드의 구독 한도 줄에서 "상한 넘음" 칩을 달 AI(실제 상한 검사와 같은 판단, 결정 0026)
+    return { ...s, live: orch.liveStates(id), cwdResolved: s.cwd || store.settings.defaultCwd || path.join(dirs.workspaces, s.id), capAsk: await orch.capAsk(s).catch(() => []) };
   });
   route('PATCH', '/api/sessions/([\\w-]+)', async (req, url, [id]) => {
     const s = store.getSession(id);

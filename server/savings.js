@@ -1,6 +1,6 @@
 // "절약" 프로필(결정 0026): 설정 savings 가 'lean' 이면 에이전트에게 넘겨주는 글을 줄인다. 기본(normal)은 지금대로.
 // - 처음 맡는 에이전트의 [이전 대화]는 설정한 수의 절반(올림, 최소 1)
-// - 목표의 조사 노트는 파일로 두고(목표마다 데이터 폴더의 handoff/<세션>/research/<목표>/), 파일 도구가 있는 AI 에는 요약 + 경로만. 파일 도구가 없으면 지금처럼 전문
+// - 목표의 조사 노트는 파일로 두고(목표마다 데이터 폴더의 handoff/<세션>/research/<목표>/work/·meeting/), 파일 도구가 있는 AI 에는 요약 + 경로만. 파일 도구가 없으면 지금처럼 전문
 // - [이전 단계 결과]는 바로 앞 단계만 전문, 그보다 앞 단계는 끝부분만
 // 검수 자료(기준 판정)는 줄이지 않는다. 줄였다는 건 프롬프트에 한 줄로 알린다
 import fs from 'node:fs';
@@ -30,14 +30,23 @@ export const prevNote = () => tr('앞 단계 결과는 바로 앞 단계만 전�
 export const noteNote = () => tr('조사 노트는 질문마다 답의 첫 줄만 실었어. 전문은 아래 파일에서 읽어.');
 
 const SAFE = /^[\w-]{1,80}$/;
+const noteRoot = (root, sessionId, missionId) => path.join(root, String(sessionId), 'research', String(missionId));
+
+// 목표가 끝나면(통과·받아들임·중지, 끊긴 목표를 버림) 그 목표의 조사 노트 폴더를 지운다. 완주 보고와 이어서 하기는 이 파일을 쓰지 않는다
+// (이어서 할 때는 목표에 적어 둔 메시지로 노트를 다시 쓴다). 끊긴 목표는 이어 갈 수 있어 그대로 둔다
+export function dropNotes(root, sessionId, missionId) {
+  if (!root || !SAFE.test(String(sessionId)) || !SAFE.test(String(missionId))) return;
+  try { fs.rmSync(noteRoot(root, sessionId, missionId), { recursive: true, force: true }); } catch { /* 쓰는 중·잠김: 세션을 지울 때 지운다 */ }
+}
 const name = (v) => String(v || '?').replace(/[\r\n#]+/g, ' ').trim().slice(0, 60) || '?';
 const oneLine = (v, max) => cps(String(v ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim()).slice(0, max).join(''); // \s 는 줄 나눔 문자(U+2028·U+2029)도 잡는다
 
 // 조사 노트 파일을 쓴다(일 단계용·회의용 두 벌: 일 단계용은 지시처럼 보이는 줄을 뺀다. 답은 자르지 않는다). 표식은 목표마다 고정이라 내용이 같으면 다시 쓰지 않는다.
+// 두 벌은 서로 다른 하위 폴더(work/·meeting/)에 두고 그 차례에 맞는 폴더만 CLI 에 연다: 일 단계가 회의용 판(지시처럼 보이는 줄이 그대로)을 경로로 읽지 못하게(결정 0017)
 // root: 데이터 폴더의 handoff 폴더. → { dir(CLI 에 열어 줄 폴더), file } 또는 null(쓸 수 없음)
 export function writeNote(root, sessionId, missionId, questions, { work = false } = {}) {
   if (!root || !SAFE.test(String(sessionId)) || !SAFE.test(String(missionId)) || !questions?.length) return null;
-  const dir = path.join(root, String(sessionId), 'research', String(missionId));
+  const dir = path.join(noteRoot(root, sessionId, missionId), work ? 'work' : 'meeting');
   const file = path.join(dir, work ? 'note-work.md' : 'note-meeting.md');
   const mark = createHash('sha256').update(`${missionId}:${work ? 'work' : 'meeting'}`).digest('hex').slice(0, 8);
   const text = `${researchNote(questions, mark, { work, show: Infinity })}\n`;

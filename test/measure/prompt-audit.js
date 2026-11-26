@@ -2,11 +2,12 @@
 // startTestApp(가짜 CLI, 임시 데이터 폴더, OFFICE_CREW_FAKE_ONLY)으로 앱을 띄우고, 프로바이더 run 을 감싸 호출마다 프롬프트·시스템 지시를 그대로 적는다.
 // 실제 AI CLI 는 띄우지 않고(가짜 CLI 밖의 명령은 막힌다), 사용자 설정 폴더(~/.claude 등)도 쓰지 않는다. 저장소 파일은 고치지 않는다.
 //
-// 사용: node test/measure/prompt-audit.js <출력 폴더> [--repo <저장소 폴더>] [--pad] [--skills <스킬 폴더>]
+// 사용: node test/measure/prompt-audit.js <출력 폴더> [--repo <저장소 폴더>] [--pad] [--skills <스킬 폴더>] [--savings normal|lean]
 //   --repo   잴 저장소(기본: 이 파일이 든 저장소). 바꾸기 전 코드를 재려면 그 커밋을 풀어 둔 폴더를 준다(예: git archive <커밋> | tar -x -C <폴더>)
 //   --pad    가짜 CLI 의 답 길이를 실제 답 길이 어림으로 채운다(표의 숫자는 --pad 로 잰 것)
 //   --skills 조사 역할의 기본 스킬 두 개(agent-reach, insane-search)를 <폴더>/<이름>/SKILL.md 에서 복사한다.
 //            주지 않으면 같은 길이(본문 2,925자·17,719자)의 시험용 글로 만든다(숫자는 글자 수만 본다)
+//   --savings 넘겨주는 글의 양 설정(결정 0026). normal(기본, 지금대로) 과 lean(절약)을 같은 장면으로 재서 prompt-compare.js 로 견준다
 // 나온 calls.jsonl 두 벌을 test/measure/prompt-compare.js 로 견준다.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -16,10 +17,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const argv = process.argv.slice(2);
 const opt = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : null; };
-const OUT = path.resolve(argv.find((a, i) => !a.startsWith('--') && !['--repo', '--skills'].includes(argv[i - 1])) || 'prompt-audit-out');
+const OUT = path.resolve(argv.find((a, i) => !a.startsWith('--') && !['--repo', '--skills', '--savings'].includes(argv[i - 1])) || 'prompt-audit-out');
 const REPO = path.resolve(opt('--repo') || path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..'));
 const PAD = argv.includes('--pad');
 const SKILLS = opt('--skills');
+const SAVINGS = opt('--savings') === 'lean' ? 'lean' : 'normal';
 fs.mkdirSync(OUT, { recursive: true });
 
 // 조사 역할 기본 스킬 두 개를 이 실측만의 임시 Claude 설정 폴더에 둔다
@@ -63,6 +65,7 @@ for (const id of ['claude', 'codex']) {
 }
 
 const t = await startTestApp();
+t.app.store.settings.savings = SAVINGS; // 바꾸기 전 코드(--repo)에는 이 설정이 없어 무시된다
 // ── 가짜 CLI 를 이 임시 폴더 안에서만 바꾼다: 프롬프트 전체 길이를 기록, (--pad 면) 답 길이를 실제 어림으로 채움, PLAN4 신호어(카드 4장) ──
 const bin = path.join(t.root, 'bin');
 const FILL = `const FILLER = (n) => { const line = '가짜 답 문장 ' + process.pid + '번이야. 실제 답 길이를 흉내 내려고 채운 줄이고 내용은 없어. '; let s = ''; let k = 0; while (s.length < n) { s += line + (k++) + '\\n'; } return s.slice(0, n) + '\\n'; };\n`;
@@ -220,7 +223,7 @@ for (const c of calls) {
 }
 const variants = Object.fromEntries(Object.entries(sysVariants).map(([k, v]) => [k, { newConvs: v.n, rawVariants: v.raw.size, normVariants: v.norm.size }]));
 fs.writeFileSync(path.join(OUT, 'calls.jsonl'), calls.map((c) => JSON.stringify(c)).join('\n'));
-fs.writeFileSync(path.join(OUT, 'summary.json'), JSON.stringify({ pad: PAD, skillSizes, sysVariants: variants }, null, 1));
+fs.writeFileSync(path.join(OUT, 'summary.json'), JSON.stringify({ pad: PAD, savings: SAVINGS, skillSizes, sysVariants: variants }, null, 1));
 // 가짜 CLI 기록과 대조: 가짜 CLI 가 받은 글 길이 = 잡은 프롬프트 길이인가
 const flog = t.fakeLog();
 const fakeTexts = flog.filter((l) => l.cli === 'claude' && l.text !== undefined).map((l) => l.text.length);
@@ -232,7 +235,7 @@ const check = { claudePrompts: { fake: fakeTexts.length, captured: mine.length, 
   claudeSystem: { fake: fakeSys.length, captured: mineSys.length, sameMultiset: JSON.stringify([...fakeSys].sort()) === JSON.stringify([...mineSys].sort()) },
   codexPrompts: { fake: fakeCodex.length, captured: calls.filter((c) => c.provider === 'codex').length } };
 fs.writeFileSync(path.join(OUT, 'fake-log-check.json'), JSON.stringify(check, null, 1));
-console.log(JSON.stringify({ pad: PAD, calls: calls.length, errors: calls.filter((c) => c.error).map((c) => [c.n, c.scenario, c.error]), check }, null, 1));
+console.log(JSON.stringify({ pad: PAD, savings: SAVINGS, calls: calls.length, errors: calls.filter((c) => c.error).map((c) => [c.n, c.scenario, c.error]), check }, null, 1));
 await t.close().catch(() => {});
 fs.rmSync(cfgRoot, { recursive: true, force: true });
 process.exit(0);

@@ -4,6 +4,7 @@
 // 글 판(reportText)은 사용자가 "기억에 넣기"를 누를 때 프로젝트 기억에 넣는 글이다: 코드가 모은 사실과 기준별 결과만(회의 결론·조사 노트는 넣지 않는다)
 import { tr } from './i18n.js';
 import { verdictWord, answerNames, durationWords, unverifiedLines, failWords } from '../public/js/report-lines.js'; // 화면과 같은 글줄
+import { answerKind } from '../public/js/usage-numbers.js'; // 답의 종류는 세션의 "어디에 썼는지"와 같은 함수(결정 0026)
 
 export const REPORT_EVIDENCE = 200; // 보고에 싣는 기준 근거(에이전트가 씀) 하나의 최대 글자
 export const REPORT_USER = 30; // 보고에 싣는 "사용자가 누른 것" 줄 수(넘으면 앞을 버리고 수만 센다)
@@ -11,16 +12,6 @@ export const REPORT_TEXT_MAX = 6000; // 기억에 넣는 글 판의 최대 글�
 
 const cut = (s, max) => { const c = [...String(s ?? '').replace(/\s+/g, ' ').trim()]; return c.length > max ? c.slice(0, max).join('') : c.join(''); };
 
-// 답 메시지 → 종류(메시지에 코드가 단 표시로): 목표 잡기·조사(훑어보기·조사 질문·조사·회의 중 조사)·회의 차례·계획·일 카드·일 단계·검수
-export function answerKind(x) {
-  if (x.goalDraft) return 'goal';
-  if (x.review) return 'review';
-  if (x.prep?.kind === 'plan') return 'plan';
-  if (['scan', 'questions', 'research'].includes(x.prep?.kind) || x.meeting?.phase === 'research') return 'research';
-  if (x.meeting) return 'meeting';
-  if (x.card) return 'cards';
-  return 'work';
-}
 
 // 이 목표의 실행(목표 잡기·일 실행. 실행 기록이 잘렸으면 남은 것만)
 const runsOf = (m, runs) => (runs || []).filter((r) => r.missionId === m.id && (r.mission === 'goal' || r.mission === 'work'));
@@ -42,7 +33,9 @@ export function buildReport({ m, messages = [], runs = [], now = Date.now() }) {
   let answerFails = 0;
   for (const x of messages) {
     if (x.role !== 'agent' || !ids.has(x.runId)) continue;
-    answers[answerKind(x)]++;
+    // 이 목표의 실행에서 고른 답이라 표시 없는 답은 일 단계. 팀 초안·인수인계 메모는 목표 실행에 생기지 않는다(생겨도 일 단계로 센다)
+    const k = answerKind(x, { goal: true });
+    answers[k in answers ? k : 'work']++;
     if (x.status !== 'done') answerFails++;
   }
   const log = m.log || [];

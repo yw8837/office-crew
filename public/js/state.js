@@ -193,7 +193,7 @@ function handle(type, d) {
       }
       if (['running', 'paused', 'waiting'].includes(d.run.status) && !d.run.endedAt) state.active.add(d.sessionId);
       else state.active.delete(d.sessionId);
-      if (d.run.status === 'waiting' && d.sessionId !== state.route.id) toast({ approve: t('다른 세션에서 승인이 필요해'), mission: t('다른 세션에서 목표 판정을 보고 답해 줘'), cap: t('다른 세션에서 목표가 호출 상한에 닿았어'), quota: t('다른 세션에서 목표가 사용량 한도에 걸려 멈췄어') }[d.run.hold?.reason] || t('다른 세션에서 결정이 필요해'), 'warn');
+      if (d.run.status === 'waiting' && d.sessionId !== state.route.id) toast({ approve: t('다른 세션에서 승인이 필요해'), mission: t('다른 세션에서 목표 판정을 보고 답해 줘'), cap: t('다른 세션에서 목표가 호출 상한에 닿았어'), quota: t('다른 세션에서 목표가 사용량 한도에 걸려 멈췄어'), limitcap: t('다른 세션에서 목표가 구독 한도 상한에 닿아 시작하기 전에 물어봤어') }[d.run.hold?.reason] || t('다른 세션에서 결정이 필요해'), 'warn');
       notifyRun(d.sessionId, d.run);
       notifyAsk(d.sessionId, d.run);
       break;
@@ -203,7 +203,7 @@ function handle(type, d) {
     case 'agents': state.agents = d; break;
     case 'notes': state.noteDrafts = { ...state.noteDrafts, [d.agentId]: d.drafts || 0 }; break;
     // 목표 모드와 목표(결정 0014): 세션 요약 이벤트에는 실리지 않아서 따로 온다
-    case 'mission': { const s = state.sessionData[d.sessionId]; if (s) { s.goalMode = !!d.goalMode; s.mission = d.mission || null; } break; }
+    case 'mission': { const s = state.sessionData[d.sessionId]; if (s) { s.goalMode = !!d.goalMode; s.mission = d.mission || null; s.capAsk = d.capAsk || []; } break; } // capAsk: 목표 카드의 "상한 넘음" 칩(서버가 센 값, 결정 0026)
     case 'teams': state.teams = d; break;
     case 'skills': state.skills = d; break;
     case 'connectors': state.connectors = d; break;
@@ -241,7 +241,7 @@ function notifyAsk(sessionId, run) {
 }
 function notifyRun(sessionId, run) {
   const title = {
-    waiting: { approve: t('승인이 필요해'), mission: t('목표 판정을 보고 답해 줘'), cap: t('목표가 호출 상한에 닿았어'), quota: t('목표가 사용량 한도에 걸려 멈췄어') }[run.hold?.reason] || t('결정이 필요해'),
+    waiting: { approve: t('승인이 필요해'), mission: t('목표 판정을 보고 답해 줘'), cap: t('목표가 호출 상한에 닿았어'), quota: t('목표가 사용량 한도에 걸려 멈췄어'), limitcap: t('목표가 구독 한도 상한에 닿아 시작하기 전에 물어봤어') }[run.hold?.reason] || t('결정이 필요해'),
     done: t('작업이 끝났어'),
     error: t('작업이 실패했어'),
   }[run.status];

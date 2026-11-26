@@ -38,8 +38,8 @@ const openImport = () => { state.ui.importOpen = true; changed(); };
 const closeImport = () => { state.ui.importOpen = false; changed(); };
 
 // ── 기다리는 일: 승인·결정 대기, 오류로 멈춤, 일시정지, 끝난 지 하루 안 된 결과(열어 보면 확인한 걸로 친다) ──
-const ATTN = () => ({ ask: ['🙋', t('답 필요')], approve: ['✋', t('승인 필요')], verdict: ['🎯', t('목표 판정 확인')], cap: ['🔢', t('호출 상한')], quota: ['⏳', t('한도 대기')], decide: ['⚠️', t('결정 필요')], failed: ['🛑', t('오류로 멈춤')], paused: ['⏸️', t('일시정지됨')], done: ['✅', t('결과 확인')] });
-const ATTN_ORDER = ['ask', 'approve', 'verdict', 'cap', 'quota', 'decide', 'failed', 'paused', 'done'];
+const ATTN = () => ({ ask: ['🙋', t('답 필요')], approve: ['✋', t('승인 필요')], verdict: ['🎯', t('목표 판정 확인')], cap: ['🔢', t('호출 상한')], quota: ['⏳', t('한도 대기')], limitcap: ['📊', t('구독 한도 상한')], decide: ['⚠️', t('결정 필요')], failed: ['🛑', t('오류로 멈춤')], paused: ['⏸️', t('일시정지됨')], done: ['✅', t('결과 확인')] });
+const ATTN_ORDER = ['ask', 'approve', 'verdict', 'cap', 'quota', 'limitcap', 'decide', 'failed', 'paused', 'done'];
 const DAY = 86400000;
 const seenRuns = (() => { try { return new Set(JSON.parse(localStorage.getItem('ui.seen') || '[]')); } catch { return new Set(); } })();
 function markSeen(a) {

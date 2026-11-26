@@ -40,7 +40,7 @@ export class PhoneNotify {
     const st = this.store.settings;
     if (!st.phoneNotify || !st.phoneUrl) return;
     const title = {
-      waiting: { approve: tr('승인이 필요해'), mission: tr('목표 판정을 보고 답해 줘'), cap: tr('목표가 호출 상한에 닿았어'), quota: tr('목표가 사용량 한도에 걸려 멈췄어') }[run.hold?.reason] || tr('결정이 필요해'), // 목표의 판정 뒤 묻기·호출 상한(결정 0015)·한도 대기(결정 0019)
+      waiting: { approve: tr('승인이 필요해'), mission: tr('목표 판정을 보고 답해 줘'), cap: tr('목표가 호출 상한에 닿았어'), quota: tr('목표가 사용량 한도에 걸려 멈췄어'), limitcap: tr('목표가 구독 한도 상한에 닿아 시작하기 전에 물어봤어') }[run.hold?.reason] || tr('결정이 필요해'), // 목표의 판정 뒤 묻기·호출 상한(결정 0015)·한도 대기(결정 0019)·구독 한도 상한(결정 0026)
       done: tr('작업이 끝났어'),
       error: tr('작업이 실패했어'),
     }[run.status];

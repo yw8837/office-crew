@@ -235,7 +235,11 @@ test('5. 한도가 줄면 부가 일부터: 조사 담당 AI의 구독 한도가
     const { tm } = await teamStages('한도조사');
     const from = mark();
     const sid = await goal(tm.id, 'NEARLIMIT', { prep: { research: true, meeting: true }, request: 'CHECKME 정리해 줘' });
+    // 구독 한도 상한(결정 0026, 기본 90%): 97%를 알린 뒤 다음 일 앞에서 한 번 묻는다. "계속"이면 이 목표에서 그 AI 로는 다시 묻지 않고, 부가 일은 지금처럼 멈춘다
+    await waitHold(sid, 'limitcap');
+    assert.equal((await ctl(sid, 'accept')).json.ok, true);
     await done(sid);
+    assert.equal(S(sid).mission.log.filter((x) => x.kind === 'limitcap').length, 1);
     const s = S(sid);
     const turn = agentMsgs(s, (x) => x.meeting?.phase === 'turn');
     assert.deepEqual(turn.map((x) => x.check?.status), ['near']);

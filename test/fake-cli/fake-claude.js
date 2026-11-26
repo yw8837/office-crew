@@ -244,6 +244,8 @@ async function pump() {
     : /ASKME|ASKMORE/.test(text) ? ['먼저 확인할게.\n\n', '```oc-ask\n{"questions":[{"header":"범위","question":"' + (text.includes('ASKMORE') ? 'ASKMORE ' : '') + '어디까지 할까?","options":[{"label":"전부 (추천)","description":"처음부터 끝까지"},{"label":"일부만","description":"앞부분만"}],"multi":false},{"question":"무엇을 넣을까?","options":["표","그림","요약"],"multi":true}]}\n```']
     : text.includes('ASKBAD') ? ['```oc-ask\n{"questions":[{"question":"보기가 하나뿐","options":["하나"]}]}\n```']
     : text.includes('도구를 더 쓰지 말고') ? ['조사 결과 ', '정리했어'] : text.includes('EMPTYANSWER') ? [] : ['안녕', '하세요 ', `turn${turn}`]);
+  // LONGANSWER(이번 요청): 보통 답을 길게(앞에 LONGHEAD, 가운데 2,500자, 끝에 LONGTAIL). 앞 단계 결과의 끝부분만 넘기는지 보려고(결정 0026)
+  if (chunks.length && req.includes('LONGANSWER') && !goalTurn && !reviewTurn) chunks.splice(0, chunks.length, `LONGHEAD p${process.pid} `, '긴 답 줄이야. '.repeat(312), ` LONGTAIL p${process.pid}`);
   // 목표 회의의 1바퀴 의견("입장" 줄을 맨 끝에 쓰라는 형식): 입장 한 줄을 붙인다. 요청에 STANCEB:<이 에이전트 이름> 이 있으면 B안, 아니면 A안
   if (text.includes('[회의 — 의견 내기') && text.includes('- 입장: 지금 미는 안 한 줄(맨 끝 줄로)')) chunks.push(`\n입장: ${myName && req.includes(`STANCEB:${myName}`) ? 'B안' : 'A안'}`);
   for (const ch of chunks) {

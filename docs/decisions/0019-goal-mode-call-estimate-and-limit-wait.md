@@ -8,6 +8,10 @@
 
 With task cards, the calls left are estimated again once the plan exists, with the same `sumEstimate` (the card steps, the check and the returns left), and shown on the plan card. When the top of that range is more than the calls left under the cap, the run asks the call-cap question ("20 more" / stop, `hold.kind: 'plan'`) before the first card step instead of stopping at the cap midway; a goal cut at that question asks it again when continued. The goal report shows the actual calls next to the confirm-time estimate.
 
+## Revision (2026-11-26, with [0026](0026-usage-breakdown-limit-cap-and-lean-profile.md))
+
+The limit line on the goal card also shows the subscription cap (`limitCap`, 90% by default) and marks an AI already over it. A new wait (`limitcap`) asks before new work when the cap is reached; its "continue after the reset" uses this record's timer (`quotaDelay`) and shares its count (`mission.quota.autos`, `QUOTA_AUTO`). Choosing anything but Stop in this record's usage-limit wait puts that AI in `mission.capOk`, so the cap doesn't ask about the same limit again in that goal. An AI whose window is already full (this record's test: 100% or a rejection record) is left to this record's wait; the cap doesn't ask first. Answers a stage had already finished stay in the cut point at the call-cap question in general now, not only before a retry.
+
 ## Context
 
 Before confirming a goal the user saw an estimate for research and the pre-work meeting only (0017); the whole goal had no figure until the call cap of 40 stopped it midway (0015). The subscription percentages the app already receives were shown in the usage panel, away from the goal. And when a stage of a goal hit a usage limit with no other AI to take over, the work stage fell into the generic error wait and the criteria check ended with no verdict; the user had to notice, come back after the reset and press retry.

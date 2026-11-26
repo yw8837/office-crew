@@ -5,7 +5,7 @@ import { state, changed, toast, agentById, providerById } from '../state.js';
 import { get, post, put, del } from '../api.js';
 import { RoutingFields, routeText, PROFILE_LABEL } from './routing.js';
 import { SkillPicker, SOURCE_LABEL, skillDesc } from './skillpick.js';
-import { t } from '../i18n/index.js';
+import { t, locale } from '../i18n/index.js';
 import { RoleNotes, DraftChip } from './rolenotes.js';
 
 const SKIN_TONES = ['#f6d5bd', '#f2c9a6', '#e3b38f', '#d9a77f', '#c98f68', '#a8714f', '#7a4e33'];
@@ -74,6 +74,19 @@ export function AgentEditor({ agent, onClose, focusNotes = false }) {
     }, 350); // 역할을 치는 동안 매 글자마다 묻지 않게
     return () => { live = false; clearTimeout(timer); };
   }, [a.role, a.provider, touched]);
+
+  // 새 대화마다 보내는 고정 글(결정 0026): 서버가 지금 고친 값으로 센 시스템 지시 글자 수와 스킬 본문 몫(화면은 스킬 본문을 받지 않는다)
+  const [fixed, setFixed] = useState(null);
+  const skillKey = (a.skills || []).join(',');
+  useEffect(() => {
+    let live = true;
+    const timer = setTimeout(() => {
+      post('/api/agents/fixed-text', { id: a.id, name: a.name, role: a.role, systemPrompt: a.systemPrompt, skills: a.skills, provider: a.provider, permission: a.permission })
+        .then((r) => { if (live) setFixed(r); }).catch(() => {});
+    }, 400); // 지시를 치는 동안 매 글자마다 묻지 않게
+    return () => { live = false; clearTimeout(timer); };
+  }, [a.name, a.role, a.systemPrompt, a.provider, a.permission, skillKey]);
+  const num = (n) => Number(n || 0).toLocaleString(locale());
 
   // 역할 노트에서 저장 안 한 것(RoleNotes 가 알려 준다): 고쳐 둔 하는 일 목록, 더하기 칸·고치던 항목의 글
   const notesLeft = useRef({ tasks: null, text: false });
@@ -167,6 +180,8 @@ export function AgentEditor({ agent, onClose, focusNotes = false }) {
         <div class="field"><label>${t('스킬 (항상 적용)')} ${a.skills.length > 0 && html`<span class="chip accent">${t('{n}개 선택', { n: a.skills.length })}</span>`}</label>
           <${SkillPicker} agent=${a} onChange=${(ids) => { setTouched(true); set('skills', ids); }} />
           ${isNew && !touched && auto.length > 0 && html`<div class="hint">${t('조사 역할이라 조사 스킬 {n}개를 기본으로 켰어. 이 스킬은 명령을 실행해야 동작해서, 권한이 "읽기 전용"이나 "기본"이면 쓰지 못해.', { n: auto.length })}</div>`}
+          ${fixed && html`<div class="hint fixed-text" title=${(fixed.skillList || []).map((x) => `${x.name}: ${num(x.chars)}`).join(' · ')}>${t('새 대화마다 보내는 고정 글: {n}자(그중 스킬 본문 {s}자). 이름·역할·지시·역할 노트·스킬을 센 글자 수이지 토큰이 아니야.', { n: num(fixed.chars), s: num(fixed.skills) })}</div>`}
+          ${fixed?.heavy && html`<div class="warnbox" role="note" style="margin-top:4px">${t('스킬 본문 {n}자가 새 대화마다 들어가. 자주 안 쓰는 스킬은 빼 두면 덜 보내.', { n: num(fixed.skills) })}</div>`}
         </div>
         ${prov?.caps?.connectors && html`<div class="field"><label>${t('커넥터 (MCP 서버)')}</label>
           <div class="pick">${state.connectors.map((c) => html`<span class=${`chip${a.connectors.includes(c.id) ? ' on' : ''}`} onClick=${() => set('connectors', a.connectors.includes(c.id) ? a.connectors.filter((x) => x !== c.id) : [...a.connectors, c.id])}>🔌 ${c.name}</span>`)}</div>
@@ -292,7 +307,7 @@ function TeamEditor({ team, onClose }) {
               const others = st.agentIds.filter((id) => id !== chair);
               return html`<label>${t('반대편')}<select class="select" value=${others.includes(st.meeting.opposeId) ? st.meeting.opposeId : ''} onChange=${(e) => setStage(i, 'meeting', { ...st.meeting, opposeId: e.target.value || null })}><option value="">${t('자동')}</option>${others.map((id) => html`<option value=${id}>${state.agents.find((a) => a.id === id)?.name || id}</option>`)}</select></label>`;
             })()}
-            <label>${t('사용량 상한 (토큰, 0이면 없음)')}<input class="input" type="number" min="0" step="100000" value=${st.meeting.tokenCap ?? 1000000} onInput=${(e) => setStage(i, 'meeting', { ...st.meeting, tokenCap: Math.max(0, Number(e.target.value) || 0) })} /></label>
+            <label>${t('사용량 상한 (환산 토큰, 0이면 없음)')}<input class="input" type="number" min="0" step="100000" value=${st.meeting.tokenCap ?? 1000000} onInput=${(e) => setStage(i, 'meeting', { ...st.meeting, tokenCap: Math.max(0, Number(e.target.value) || 0) })} /></label>
             <div class="small muted">${t('첫 바퀴는 서로의 글을 보지 않고 각자 써. 그다음 바퀴부터는 한 명씩 차례로 앞사람 말에 답해. 바퀴가 끝날 때마다 진행자가 합의인지 보고, 합의면 남은 바퀴를 건너뛰고 결론을 내. 한 명은 반대편에 서서 약점을 찾아.')}</div>
             <div class="small muted">${t('상한은 새로 읽고 쓴 토큰에, 앞 대화를 다시 읽은 토큰의 10분의 1을 더해서 세. 대화가 긴 세션에서는 한 바퀴에 수십만 토큰이 들 수 있어.')}</div>
           </div>`}

@@ -1,6 +1,7 @@
 // 사용량 집계(토큰·비용)와 계정 한도(5시간·주간 %) 관리
 import { readCodexLimits } from './providers/codex.js';
 import { noteWeekly, dayBudget } from './budget.js';
+import { weighted } from '../public/js/usage-numbers.js'; // 화면의 환산과 같은 함수(결정 0026)
 
 const day = (t = Date.now()) => new Date(t).toLocaleDateString('sv-SE'); // YYYY-MM-DD(로컬)
 const blank = () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, calls: 0 });
@@ -48,7 +49,8 @@ export function treeTotals(modelUsage) {
 // 이번 호출 몫. usage: 이번 결과의 주 에이전트 몫, modelUsage·totalCost: 결과 그대로, baseline: 직전 누적(없으면 null),
 // resumed: 앞 대화를 이어 간 결과인지(같은 프로세스의 다음 결과 포함), sameCall: baseline 이 같은 CLI 프로세스의 앞 결과인지,
 // cliVersion: CLI 버전 문자열(모르면 null). 모르는 것은 실제보다 많이 세지 않고(덜 세고) partial 로 표시한다.
-// → { input, output, cacheRead, cacheWrite, cost, cumulative(이 결과의 누적, 모르면 null), partial, sub(주 에이전트 밖에서 쓴 것으로 보이는 토큰) }
+// → { input, output, cacheRead, cacheWrite, cost, cumulative(이 결과의 누적, 모르면 null), partial, sub(주 에이전트 밖에서 쓴 것으로 보이는 토큰, 네 값 1:1 합),
+//     subW(같은 몫의 환산. 화면의 숫자와 같은 단위, 결정 0026) }
 export function settleClaude({ usage = {}, modelUsage = null, totalCost = null, baseline = null, resumed = false, sameCall = false, cliVersion = null } = {}) {
   const main = Object.fromEntries(TOKENS.map((k) => [k, amount(usage?.[k]) ?? 0]));
   const cum = treeTotals(modelUsage);
@@ -67,7 +69,7 @@ export function settleClaude({ usage = {}, modelUsage = null, totalCost = null, 
   const done = (tok, [cost, costPartial], partial) => {
     const out = Object.fromEntries(TOKENS.map((k) => [k, Math.max(amount(tok[k]) ?? 0, main[k])])); // 항목마다 주 에이전트 몫보다 작아지지 않는다
     const cumulative = cum ? { ...Object.fromEntries(TOKENS.map((k) => [k, cum[k]])), cost: costNow ?? 0 } : null;
-    return { ...out, cost, cumulative, partial: partial || costPartial, sub: Math.max(0, tokenSum(out) - tokenSum(main)) };
+    return { ...out, cost, cumulative, partial: partial || costPartial, sub: Math.max(0, tokenSum(out) - tokenSum(main)), subW: Math.max(0, weighted(out) - weighted(main)) };
   };
   const ownOrMain = () => (cum && tokenSum(cum) >= tokenSum(main) ? cum : main); // 받은 값이 이번 호출 몫(주 에이전트 몫보다 작으면 주 에이전트 몫)
   // modelUsage 가 없으면 하위 에이전트 몫이 들었는지 모른다

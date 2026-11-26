@@ -74,14 +74,20 @@ const ageWords = (min) => {
   if (a.unit === 'min') return a.n < 1 ? t('방금 받은 기록') : t('{n}분 전 기준', { n: a.n });
   return a.unit === 'hour' ? t('{n}시간 전 기준', { n: a.n }) : t('{n}일 전 기준', { n: a.n });
 };
-function LimitLine({ providers }) {
-  const rows = limitRows(state.usage?.limits, providers || []);
+// 구독 한도 % 상한(결정 0026): 줄 머리에 상한, 지금 일을 시작하면 상한 질문이 물을 AI 에는 "상한 넘음". 그 판단은 서버가 실제 검사와 같게 센 값(ask:
+// 일을 다른 AI 로 넘기면 넘겨받는 AI, 이 목표에서 "계속"을 고른 AI·이미 다 찬 AI 는 빼고)이고, 서버 값이 아직 없으면 칩을 달지 않는다. 0 이면 끔
+const capOf = () => { const n = Number(state.settings?.limitCap); return Number.isFinite(n) ? n : 90; };
+function LimitLine({ providers, ask = [] }) {
+  const asked = ask || [];
+  const rows = limitRows(state.usage?.limits, [...new Set([...(providers || []), ...asked])]);
   if (!rows.length) return null;
+  const cap = capOf();
+  const over = (p) => cap > 0 && asked.includes(p);
   return html`<div class="goal-sec goal-limits">
-    <div class="small muted"><b>${t('구독 한도(받은 기록)')}</b></div>
+    <div class="small muted"><b>${t('구독 한도(받은 기록)')}</b>${cap > 0 ? ` · ${t('상한 {n}%', { n: cap })}` : ` · ${t('상한 꺼짐')}`}</div>
     ${rows.map((r) => html`<div class="small"><${ProviderChip} id=${r.provider} /> ${r.windows.map((w) => `${WIN_LABEL[w.key] || w.key} ${w.pct}%${w.resetsAt ? ` (${t('{time} 초기화', { time: when(w.resetsAt * 1000) })})` : ''}`).join(' · ')}
-      ${r.ago !== null && html`<span class="muted"> · ${ageWords(r.ago)}</span>`}${recordAge(r.ago)?.old ? html` <span class="chip warn">${t('오래된 기록')}</span>` : ''}</div>`)}
-    <div class="small muted">${t('앱이 이미 받은 기록이야. 이 목표가 몇 %를 쓸지는 어림하지 않아.')}</div>
+      ${r.ago !== null && html`<span class="muted"> · ${ageWords(r.ago)}</span>`}${recordAge(r.ago)?.old ? html` <span class="chip warn">${t('오래된 기록')}</span>` : ''}${over(r.provider) ? html` <span class="chip warn">${t('상한 넘음 · 일을 시작하기 전에 물어')}</span>` : ''}</div>`)}
+    <div class="small muted">${t('앱이 이미 받은 기록이야. 이 목표가 몇 %를 쓸지는 어림하지 않아.')}${cap > 0 ? ` ${t('일을 돌 AI 의 창이 상한 이상이면 새 일을 시작하기 전에 물어(사용률을 알려 주는 AI 만).')}` : ''}</div>
   </div>`;
 }
 
@@ -148,7 +154,7 @@ export function resumeFrom(s, m) {
   if (!at || !Array.isArray(m.keep)) return null;
   const prep = PREP.includes(at.phase);
   // 승인·오류·판정 뒤 묻기·호출 상한. 준비 대목(결정 0017)은 호출 상한만 다시 묻고, 그 밖의 대기는 그 대목을 처음부터 다시
-  if (at.wait && (!prep || at.wait.reason === 'cap')) return t('끊기기 전에 묻던 질문을 다시 띄워(AI 호출 없음).');
+  if (at.wait && (!prep || ['cap', 'limitcap'].includes(at.wait.reason))) return t('끊기기 전에 묻던 질문을 다시 띄워(AI 호출 없음).'); // 구독 한도 상한(결정 0026)도 그 대목 앞에서 다시 묻는다
   const run = (s?.runs || []).findLast((r) => r.mission === 'work' && r.missionId === m.id);
   const st = run?.stages?.[at.stageIndex];
   const label = st?.label || '?';
@@ -371,7 +377,7 @@ export function GoalCard({ m }) {
       ${mission?.status === 'done' && html`<div class="notice">✅ ${t('기준 {n}개를 모두 통과해서 끝냈어.', { n: mission.criteria.length })}</div>`}
       ${mission?.status === 'accepted' && html`<div class="notice">${t('받아들여서 끝냈어 · 남은 기준 {n}개', { n: left })}</div>`}
       ${mission?.calls && ['done', 'accepted', 'stopped'].includes(mission.status) && html`<div class="small muted">${mission.estimate ? t('실제 호출 {k}번(어림 {min}~{max}번)', { k: mission.calls.used, min: mission.estimate.min, max: mission.estimate.max }) : t('실제 호출 {k}번', { k: mission.calls.used })}</div>`}
-      ${mission && ['active', 'waiting', 'cut'].includes(mission.status) && html`<${LimitLine} providers=${m.providers} />`}
+      ${mission && ['active', 'waiting', 'cut'].includes(mission.status) && html`<${LimitLine} providers=${m.providers} ask=${s?.capAsk} />`}
       ${mission?.status === 'cut' && html`<${CutBox} s=${s} m=${mission} />`}
     </div></div>`;
   }
@@ -463,7 +469,7 @@ export function GoalCard({ m }) {
   </div>`;
   // 호출 어림(결정 0019): 조사·회의 체크, 일하는 방식, 남기기를 바꾸면 바로 다시 더한다(옛 카드는 이 칸이 없어 안 보인다). 구독 한도는 받은 기록이 있을 때만
   const estLine = est && html`<${EstimateLine} est=${est} pick=${estPick} />`;
-  const limLine = html`<${LimitLine} providers=${m.providers} />`;
+  const limLine = html`<${LimitLine} providers=${m.providers} ask=${s?.capAsk} />`;
   const openEdit = () => setEdit({ goal: v.goal, criteria: v.criteria.join('\n'), checks: checksOf(v).join('\n'), outOfScope: v.outOfScope.join('\n'), userDecides: v.userDecides.join('\n'), keep: (v.keep || []).join('\n') });
   const closeEdit = () => { setEdit(null); setTimeout(() => editBtn.current?.focus(), 0); };
   const cancel = () => send('cancel', { missionId: m.missionId });
@@ -548,6 +554,26 @@ export function MissionGate({ s, run }) {
         ${review ? row(++k, t('받아들이기'), t('이번 검수는 판정 없이 끝내고, 기준은 "확인 못 함"인 채로 목표를 받아들여.'), 'accept')
           : row(++k, t('건너뛰기'), t('한도에 걸린 일은 빼고 다음으로 넘어가(일 카드면 그 카드는 구멍으로 적어).'), 'skip')}
       </div>
+      <div class="ask-foot"><span class="grow"></span><button type="button" class="btn sm danger" disabled=${busy} onClick=${() => ctl('stop')}>${t('그만')}</button></div>
+    </div>`;
+  }
+  // 구독 한도 % 상한(결정 0026): 새 일을 시작하기 전에 멈춤. 보기 순서: 계속 · 초기화 뒤 이어서(자동, 시각을 알 때만) · 그만
+  if (hold.reason === 'limitcap') {
+    const auto = !!hold.canAuto && !hold.autoAt;
+    const ais = [...new Set((hold.who || []).map((w) => w.ai || w.provider))].join(', ');
+    let k = 0;
+    return html`<div class="ask-panel mission-gate" role="group" aria-label=${t('구독 한도 상한')}>
+      <div class="ask-head"><span class="ask-who">📊 ${t('구독 한도 상한')}</span></div>
+      <div class="ask-question">${t('다음 일을 시작하기 전에 멈췄어. 이 일을 돌 AI 의 구독 한도가 상한({cap}%) 이상이야. 어떻게 할까?', { cap: hold.cap })}</div>
+      <ul class="small">${(hold.who || []).map((w) => html`<li><b>${w.name}</b> (${w.ai || w.provider}): ${(w.windows || []).map((x) => `${WIN_LABEL[x.key] || x.key} ${x.pct}%${x.resetsAt ? ` (${t('{time} 초기화', { time: when(x.resetsAt * 1000) })})` : ''}`).join(' · ')}</li>`)}</ul>
+      ${!hold.until && html`<div class="small">${t('초기화 시각을 모르는 창이 있어서 자동으로 이어서는 못 해.')}</div>`}
+      ${!!hold.autoAt && html`<div class="notice" role="status">${t('{time}에 한도를 다시 보고 이어서 해. 그 전에 "계속"이나 "그만"을 눌러도 돼.', { time: when(hold.autoAt) })}</div>`}
+      ${!!hold.until && !hold.canAuto && html`<div class="small muted">${t('자동 이어서는 목표 하나에 {n}번까지야. 이번엔 직접 골라 줘.', { n: hold.autoMax })}</div>`}
+      <div class="ask-rows">
+        ${row(++k, t('계속'), t('지금 시작해. 이 목표가 끝날 때까지 {ais}로는 상한을 다시 묻지 않아.', { ais }), 'accept')}
+        ${auto && row(++k, t('{time} 뒤 이어서(자동)', { time: when(hold.until) }), t('초기화 시각에 여유를 조금 두고 한도를 다시 본 뒤 시작해(자동 이어서 {n}/{max}번째, 한도 대기와 같은 횟수).', { n: (hold.autos || 0) + 1, max: hold.autoMax }), 'later')}
+      </div>
+      <div class="small muted">${t('사용률은 앱이 이미 받은 기록이야. 사용률을 알려 주지 않는 AI 는 보지 않아. 상한은 라우팅 화면에서 바꿔.')}</div>
       <div class="ask-foot"><span class="grow"></span><button type="button" class="btn sm danger" disabled=${busy} onClick=${() => ctl('stop')}>${t('그만')}</button></div>
     </div>`;
   }

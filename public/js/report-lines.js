@@ -3,7 +3,7 @@
 
 // 끝 상태 이름은 흐름 무대의 끝 깃발과 같은 말(stage-model.js 의 goalEndWord)
 export const verdictWord = (t, s) => ({ pass: t('통과'), fail: t('불합격'), unknown: t('확인 못 함') }[s] || t('판정 안 됨'));
-export const failName = (t, k) => ({ review: t('검수에서 걸림'), outside: t('바깥 장애'), blocked: t('막힘'), hole: t('구멍'), keep: t('지킬 것 어김'), input: t('넘겨받음'), unknown: t('원인 모름') }[k] || k);
+export const failName = (t, k) => ({ review: t('검수에서 걸림'), outside: t('바깥 장애'), blocked: t('막힘'), hole: t('구멍'), keep: t('지킬 것 어김'), input: t('넘겨받음'), unknown: t('원인 모름'), transient: t('일시 장애') }[k] || k);
 export const answerNames = (t) => ({ goal: t('목표 잡기'), research: t('조사'), meeting: t('회의'), plan: t('계획'), cards: t('일 카드'), work: t('일 단계'), review: t('검수') });
 
 // 걸린 시간: 1분 안 · n분 · h시간 n분

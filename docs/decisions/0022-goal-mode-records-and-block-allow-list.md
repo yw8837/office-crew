@@ -4,6 +4,10 @@
 - Date: 2026-11-25
 - Related: [0014](0014-goal-mode-confirmed-goal-card.md) (goal mode), [0015](0015-goal-mode-fresh-review.md) (the criteria check and its mixed-block rule), [0016](0016-goal-mode-continue-a-cut-goal.md) (the "[Continuing]" line), [0017](0017-goal-mode-research-and-meeting-first.md) (research during a goal meeting), [0018](0018-goal-mode-task-cards.md) (task cards and the blocked exit), [0019](0019-goal-mode-call-estimate-and-limit-wait.md) (usage limits), [0009](0009-agents-ask-with-a-marked-block.md) (`oc-ask`), [0008](0008-handoff-to-another-ai.md) (handoff notes), `server/mission.js` (`BLOCK_ACCEPTS`, `BLOCK_NAMES`, `blocksIn`, `foreignBlocks`, `blockPart`, `partName`, `parseReview`, `BLOCKED_KINDS`, `parseBlocked`, `blockedRule`, `outsideRule`, `resumeSent`), `server/orchestrator.js` (`#runAgent`, `#route`, `#failover`, `#nearLimit`, `#missionMsgLines`, `#autoNote`, `#meeting`, `#runStage`, `#failLines`, `#missedInputs`, `#cardsAfter`, `#blockedOf`, `#blockedAsk`, `#prompt`), `public/js/chat-tools.js` (`routeTip`, `agentWrote`), `public/js/views/session.js`, `public/js/views/mission.js` (`MissionLog`), `public/js/state.js`, `test/goal-records.test.js`, `test/mission-review.test.js`, `test/handoff.test.js`, `test/mission-resume.test.js`, `test/fake-cli/fake-claude.js`
 
+## Revision (2026-11-26, with [0030](0030-goal-run-records-retry-and-flow-map.md))
+
+The code names one more failure kind it can tell from the error text: `transient` (a temporary outage, [0030](0030-goal-run-records-retry-and-flow-map.md)). The error lines before the error wait use it before `input`, and the line written when such a failure is retried by itself carries it; a usage limit is still `outside`. Lines `kind: 'transient'` without `fail` say why an outage was not retried.
+
 ## Revision (2026-11-26, with [0027](0027-ask-before-raising-a-stuck-card.md))
 
 `route.why` gains `raised`: the first turn of a task card's new owner after the user handed the card to a higher tier. That reason alone doesn't add a `route` log line, because the `raise` line written when the card was handed over already says it; with other reasons the line names it too.

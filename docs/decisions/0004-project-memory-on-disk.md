@@ -4,6 +4,10 @@
 - Date: 2026-11-11
 - Related: 0001 (no runtime dependencies), `server/memory.js`, `test/memory.test.js`
 
+## Revision (2026-11-26, with [0030](0030-goal-run-records-retry-and-flow-map.md))
+
+A memory folder can also hold `failures.json` ([0030](0030-goal-run-records-retry-and-flow-map.md)): repeated tool and step errors from goals' work steps, each a first line with numbers, paths and times replaced, counted per goal, at most 100 lines (oldest dropped). It is not text of the conversation and is not searched or indexed; lines seen in two goals go into the next goal's work prompts as marked reference. It is written only while memory is on, the memory page shows it with Delete per line and Delete all, and a broken file is moved to `failures.json.bad` like `hidden.json`.
+
 ## Revision (2026-11-26, with [0025](0025-goal-report-and-evidence.md))
 
 A goal report can be added to memory by the user (role `report`), and removed again: removing writes the message id to `hidden.json` in that memory's folder and search skips its pieces; the text and the index are not changed, and adding it again takes the id off the list. Nothing else in memory can be removed. Older versions ignore `hidden.json` and find those pieces.

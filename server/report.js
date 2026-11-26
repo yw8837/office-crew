@@ -4,7 +4,9 @@
 // 글 판(reportText)은 사용자가 "기억에 넣기"를 누를 때 프로젝트 기억에 넣는 글이다: 코드가 모은 사실과 기준별 결과만(회의 결론·조사 노트는 넣지 않는다)
 import { tr } from './i18n.js';
 import { verdictWord, answerNames, durationWords, unverifiedLines, failWords, raisedWords } from '../public/js/report-lines.js'; // 화면과 같은 글줄
-import { answerKind } from '../public/js/usage-numbers.js'; // 답의 종류는 세션의 "어디에 썼는지"와 같은 함수(결정 0026)
+import { answerKind, weighted } from '../public/js/usage-numbers.js'; // 답의 종류는 세션의 "어디에 썼는지"와 같은 함수(결정 0026)
+import { redact } from './memory.js'; // 실행 기록 내보내기의 비밀 가리기는 기억과 같은 함수(결정 0030)
+import { isQuotaError, isTransientError } from './failover.js';
 
 export const REPORT_EVIDENCE = 200; // 보고에 싣는 기준 근거(에이전트가 씀) 하나의 최대 글자
 export const REPORT_USER = 30; // 보고에 싣는 "사용자가 누른 것" 줄 수(넘으면 앞을 버리고 수만 센다)
@@ -77,8 +79,78 @@ export function buildReport({ m, messages = [], runs = [], now = Date.now(), nam
   };
 }
 
+// ── 실행 기록 내보내기(결정 0030) ──
+// 목표 하나의 실행을 JSON 하나로: 목표·기준, 카드와 상태, 진행 기록, 회의 결론·사용자가 정한 것, 호출(답)마다 누가·어느 AI·모델·종류·시작/끝·사용량·배정·실패 종류, 완주 보고의 사실, 실행의 단계.
+// 답 글·요청 글·카드 꼬리(에이전트가 쓴 끝의 두 칸)는 body 일 때만. 프롬프트 전문은 앱이 저장하지 않아서 넣지 못한다(notes.prompts).
+// 모든 글은 내보내기 전에 가린다: 설정의 비밀 값(API 키·알림 주소·앱 토큰 등, secrets)을 그대로 찾아 가리고, 기억과 같은 토큰 모양 가리기(redact),
+// 절대 경로는 작업 폴더(roots: 목표가 돈 폴더) 안이면 "." 기준 상대 경로로, 앱 데이터 폴더는 <data>, 사용자 홈은 ~ 로 바꾼다(긴 경로부터)
+export const EXPORT_FORMAT = 'office-crew-goal-run';
+export const EXPORT_VERSION = 1;
+export const SECRET_MASK = '••••••••';
+const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// 실패 종류(코드가 오류 문구로 가를 수 있는 것만): 사용량 한도 outside, 일시 장애 transient, 그 밖 unknown
+export const answerFail = (error) => (isQuotaError(error) ? 'outside' : isTransientError(error) ? 'transient' : 'unknown');
+export function exportRun({ s, m, nameOf = (id) => id, body = false, secrets = [], roots = [], dataDir = '', home = '', now = Date.now(), appVersion = '' }) {
+  const keys = [...new Set(secrets.map((x) => String(x ?? '')).filter((x) => x.length >= 4))].sort((a, b) => b.length - a.length);
+  const win = process.platform === 'win32';
+  const places = [...roots.filter(Boolean).map((p) => [p, '.']), ...(dataDir ? [[dataDir, '<data>']] : []), ...(home ? [[home, '~']] : [])]
+    .flatMap(([p, to]) => { const b = String(p).replace(/[\\/]+$/, ''); return b ? [b, b.replace(/\\/g, '/'), b.replace(/\\/g, '\\\\')].map((v) => [v, to]) : []; })
+    .sort((a, b) => b[0].length - a[0].length);
+  const pathRes = places.map(([v, to]) => [new RegExp(escRe(v), win ? 'gi' : 'g'), to]);
+  const clean = (v) => {
+    let x = String(v);
+    for (const k of keys) x = x.split(k).join(SECRET_MASK);
+    x = redact(x);
+    for (const [re, to] of pathRes) x = x.replace(re, to);
+    return x;
+  };
+  const deep = (v) => (typeof v === 'string' ? clean(v) : Array.isArray(v) ? v.map(deep) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, deep(x)])) : v);
+  const who = (id) => (id ? { id: String(id), name: String(nameOf(id) || id) } : null);
+  const runs = (s.runs || []).filter((r) => r.missionId === m.id);
+  const runIds = new Set(runs.map((r) => r.id));
+  const answers = (s.messages || []).filter((x) => x.role === 'agent' && (x.missionId === m.id || runIds.has(x.runId)));
+  const first = (t) => [...String(t || '').split(/\r?\n/).find((l) => l.trim()) || ''].slice(0, 300).join('');
+  const rep = m.reportMsgId ? (s.messages || []).find((x) => x.id === m.reportMsgId && x.kind === 'report') : null;
+  const report = rep ? Object.fromEntries(Object.entries(rep).filter(([k]) => !['id', 'role', 'kind', 'status', 'text', 'createdAt', 'missionId', 'memory', 'memFolder'].includes(k))) : null;
+  const out = {
+    format: EXPORT_FORMAT, version: EXPORT_VERSION, exportedAt: new Date(now).toISOString(), app: { version: appVersion }, body: !!body,
+    notes: { prompts: 'not-stored', paths: 'work-folder-relative', masked: ['secrets', 'token-like text', 'absolute paths'], ...(body ? {} : { omitted: ['answer text', 'request text', 'card closing lines'] }) },
+    session: { id: s.id, title: s.title || '' },
+    goal: {
+      id: m.id, status: m.status, goal: m.goal || '', work: m.work || 'stages', createdAt: m.createdAt || 0, confirmedAt: m.confirmedAt || 0, editedByUser: !!m.editedByUser,
+      criteria: (m.criteria || []).map((c) => ({ id: c.id, text: c.text, status: c.status || 'open', evidence: c.evidence || '', ...(c.check ? { check: c.check } : {}) })),
+      outOfScope: [...(m.outOfScope || [])], userDecides: [...(m.userDecides || [])], mustKeep: [...(m.mustKeep || [])],
+      lead: who(m.leadId), reviewer: who(m.reviewerId), dropped: [...(m.dropped || [])], prep: m.prep || null,
+      calls: m.calls || null, estimate: m.estimate || null, round: m.round || 0, returns: m.returns || 0, returnCap: m.returnCap ?? null,
+      ...(body ? { request: m.request || '' } : {}),
+    },
+    research: m.research ? { questions: (m.research.questions || []).map((q) => ({ id: q.id, text: q.text, status: q.status, agent: who(q.agentId) })), ...(m.research.fallback ? { fallback: true } : {}) } : null,
+    cards: (m.cards || []).map((c) => ({
+      id: c.id, title: c.title, owner: who(c.ownerId), kind: c.kind, needs: [...(c.needs || [])], files: [...(c.files || [])], done: c.done || '', not: c.not || '',
+      status: c.status, ...(c.by ? { by: c.by } : {}), ...(c.reason ? { reason: c.reason } : {}), starts: c.starts || 0, cap: c.cap || 0,
+      ...(c.raised?.length ? { raised: c.raised.map((r) => ({ from: who(r.from), to: who(r.to), at: r.at, why: r.why, ...(r.later ? { later: true } : {}) })) } : {}),
+      ...(c.proof ? { proof: { files: [...(c.proof.files || [])], at: c.proof.at } } : {}), msgId: c.msgId || null, ...(body && c.tail ? { tail: c.tail } : {}),
+    })),
+    log: (m.log || []).map((x) => ({ at: x.at, kind: x.kind, text: x.text, ...(x.msgId ? { msgId: x.msgId } : {}), ...(x.fail ? { fail: x.fail } : {}), ...(x.by ? { by: x.by } : {}), ...(x.agentKind ? { agentKind: x.agentKind } : {}), ...(x.n ? { n: x.n } : {}) })),
+    meetings: (m.meetings || []).map((x) => ({ ...x })), decided: (m.decided || []).map((x) => ({ ...x })),
+    calls: answers.map((x) => ({
+      msgId: x.id, runId: x.runId || null, stageIndex: x.stageIndex ?? null, stage: x.stageLabel || '', agent: who(x.agentId),
+      provider: x.provider || '', model: x.model || '', effort: x.effort || '', kind: answerKind(x, { goal: true }), status: x.status,
+      start: x.createdAt || 0, end: (x.createdAt || 0) + (x.usage?.durationMs || 0),
+      usage: { input: x.usage?.input || 0, output: x.usage?.output || 0, cacheRead: x.usage?.cacheRead || 0, cacheWrite: x.usage?.cacheWrite || 0, cost: x.usage?.cost || 0, weighted: weighted(x.usage || {}) },
+      route: x.route || null, ...(x.card ? { card: x.card.id } : {}), ...(x.aiChain ? { aiChain: [...x.aiChain] } : {}),
+      ...(x.status === 'error' ? { fail: answerFail(x.error), error: first(x.error) } : {}),
+      ...(body ? { text: x.text || '' } : {}),
+    })),
+    report,
+    runs: runs.map((r) => ({ id: r.id, mission: r.mission, status: r.status, startedAt: r.startedAt || 0, endedAt: r.endedAt || null, ...(r.resumed ? { resumed: true } : {}),
+      stages: (r.stages || []).map((st) => ({ label: st.label, status: st.status, ...(st.mission ? { mission: st.mission } : {}), agents: (st.agentIds || []).map(who), ...(st.cardIds ? { cardIds: [...st.cardIds] } : {}), ...(st.raised ? { raised: true } : {}) })) })),
+  };
+  return deep(JSON.parse(JSON.stringify(out)));
+}
+
 // 끝 상태 이름(흐름 무대의 끝 깃발과 같은 말)
-const endWord = (s) => ({ done: tr('통과로 끝'), accepted: tr('받아들여 끝'), stopped: tr('중지됨') }[s] || s);
+const endWord =(s) => ({ done: tr('통과로 끝'), accepted: tr('받아들여 끝'), stopped: tr('중지됨') }[s] || s);
 
 // 완주 보고의 글 판(프로젝트 기억에 넣는 글). 머리에 출처(report, 목표 id, 시각)와 "사용자가 확정하지 않은 기록" 표시.
 // 코드가 모은 사실과 기준별 결과만 넣고, 에이전트가 쓴 근거는 "에이전트가 씀" 표시와 함께. 회의 결론·조사 노트는 넣지 않는다(저장소 주인 결정)

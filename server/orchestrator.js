@@ -8,7 +8,7 @@ import { detectHire, draftHire } from './hire.js';
 import { detectTeamDoc, teamPlan, writeTeamDraft, safeWriter } from './teamdoc.js';
 import { toolCategory, resolveCommand } from './providers/util.js';
 import { resolveRoute, roleKind, aiKey, baseProvider } from './routing.js';
-import { Cooldown, isQuotaError, nearLimit, avoidUntil, resetTime, resetFromText, limitResetAt, availableCatalog, pickFallback, continuationPrompt, handoffFacts } from './failover.js';
+import { Cooldown, isQuotaError, isTransientError, nearLimit, avoidUntil, resetTime, resetFromText, limitResetAt, availableCatalog, pickFallback, continuationPrompt, handoffFacts } from './failover.js';
 import { nextMidnight, lowerEffort } from './budget.js';
 import { settleClaude, tokenSum } from './usage.js';
 import { tr } from './i18n.js';
@@ -26,6 +26,7 @@ import { parseGoal, goalBlock, goalWarn, newMission, toCriteria, cardOf, sameCar
   CARD_TRIES, CARD_RATE, HOUR, porcelainPaths, testLike, estimateParts, estimateCalls, QUOTA_AUTO, quotaDelay,
   BLOCK_ACCEPTS, foreignBlocks, blockPart, partName, outsideRule, resumeSent, recordMeeting, planEstimate, tailClaims, userLine, decidedPrompt, sameFails } from './mission.js';
 import { ladderOf, cardCap, raiseTargets, raisedPrompt } from './mission.js'; // 윗등급에게 넘길지 묻기(결정 0027)
+import { failKey, pickFails, failuresPrompt } from './mission.js'; // 반복 실패 줄(결정 0030)
 import { execFile } from 'node:child_process';
 import { gitState, gitDiffNames, changedSet, proofCheck, PROOF_KINDS, PROOF_TIMEOUT } from './proof.js';
 import { buildReport, reportText, reportLocal } from './report.js';
@@ -1054,6 +1055,9 @@ export class Orchestrator {
     const order = (list) => list.map((r, k) => [st.agentIds.indexOf(String(r.agent?.id)), k, r]).sort((x, y) => (x[0] < 0 ? 1e9 : x[0]) - (y[0] < 0 ? 1e9 : y[0]) || x[1] - y[1]).map((x) => x[2]);
     let first = resume;
     let quotaSaved; // 이어서: 끊기기 전 한도 대기의 초기화 시각(결정 0019. 그 대기를 다시 물을 때만)
+    // 일시 장애 1번 자동 다시(결정 0030): 이 단계에서 이미 한 번 봤는가(했든 못 했든 한 번만), 그 바퀴를 돌기 전의 git 상태(그 실행이 파일을 바꿨는지 볼 앞 상태)
+    let retried = false;
+    let snap = null;
     for (;;) {
       let results;
       if (first?.wait) {
@@ -1063,6 +1067,7 @@ export class Orchestrator {
         st.status = 'running';
         this.#emitRun(ctx);
         const ids = first?.ids || agentIds;
+        snap = !retried && this.#canRetry(ctx, st) ? await gitState(this.cwdOf(ctx.s)) : null;
         results = st.meeting && !ids ? await this.#meeting(ctx, i, feedback) : await this.#together(ctx, i, ids || st.agentIds, feedback);
         if (first?.keep?.length) results = order([...first.keep, ...results]);
       }
@@ -1085,6 +1090,18 @@ export class Orchestrator {
           ctx.stopped = true;
           break;
         }
+        // 일시 장애 1번 자동 다시(결정 0030): 목표 일 실행의 일 단계·카드 단계에서 실패한 사람이 모두 일시 장애(네트워크·시간 초과·5xx·과부하, 한도 아님)로 끝났으면
+        // 묻기 전에 그 사람만 한 번 다시 돈다(끝낸 사람의 답은 그대로). 조건은 #transientRetry. 못 하면 까닭 한 줄을 남기고 지금처럼 묻는다
+        if (!fromCut && !retried && this.#canRetry(ctx, st) && !ctx.stalled && failed.every((f) => isTransientError(f.error))) {
+          retried = true;
+          if (await this.#transientRetry(ctx, i, failed, snap)) {
+            first = { ids: failed.map((f) => String(f.agent?.id || '')), keep: results.filter((r) => !failed.includes(r)) };
+            this.#missionStage(ctx, i, 'again'); // 그사이 온 추가 지시도 다시 도는 사람에게
+            this.#missionAt(ctx, { ...ctx.mission.at, stageIndex: i, working: [], wait: null });
+            continue;
+          }
+        }
+        retried = true;
         // 한도 대기(결정 0019): 목표 일 실행의 일 단계(단계표·일 카드. 준비 대목과 회의 단계는 빼고 지금처럼 오류 대기)에서 실패한 사람이 모두 사용량 한도 오류면
         // (이어받을 AI 도 없었다) 보통 오류 대기 대신 한도 대기로 묻는다. 다시 하면(호출 상한을 본 뒤) 한도에 걸린 사람만 다시 돌고, 끝낸 사람의 답은 그대로 쓴다.
         // 건너뛰기는 오류 대기의 건너뛰기와 같다(일 카드면 한도에 걸린 카드를 구멍으로 빼고 이어 간다. 막힘 받아들이기와 같은 처리).
@@ -1167,6 +1184,7 @@ export class Orchestrator {
     const m = ctx.mission;
     await this.#ensureImported(s);
     this.rememberImported(s);
+    ctx.pastFails = await this.#pastFails(ctx); // 반복 실패 줄(결정 0030): 이 작업 폴더의 지난 목표들에서 되풀이된 실패
     // 준비 대목(결정 0017): 단계표 맨 앞의 훑어보기·조사 질문·조사·회의. 처음이거나 그 대목에서 끊겼으면 거기부터 돌고, 그 뒤에는 일 단계에 넣을 조사 노트·회의 결론을 만든다
     const P = run.stages.filter(isPrep).length;
     const prepFrom = !!from && PREP_KINDS.includes(from.phase);
@@ -1982,9 +2000,66 @@ export class Orchestrator {
       const text = !card ? tr('"{label}" 단계에서 {name}이(가) 오류로 끝났어.', { label: st.label, name })
         : miss.length ? tr('"{label}" 단계의 {id}({name})이(가) 오류로 끝났어. 기다린 앞 카드 {ids}은(는) 결과 없이 끝났어.', { label: st.label, id: card.id, name, ids: miss.join(', ') })
           : tr('"{label}" 단계의 {id}({name})이(가) 오류로 끝났어.', { label: st.label, id: card.id, name });
-      logLine(m, 'error', text).fail = isQuotaError(f.error || '') ? 'outside' : miss.length ? 'input' : 'unknown';
+      // 일시 장애(결정 0030)는 오류 문구로 코드가 가르는 종류라 넘겨받음보다 먼저
+      logLine(m, 'error', text).fail = isQuotaError(f.error || '') ? 'outside' : isTransientError(f.error || '') ? 'transient' : miss.length ? 'input' : 'unknown';
     }
     this.emitMission(ctx.s);
+  }
+
+  // 일시 장애 1번 자동 다시(결정 0030)를 볼 단계인가: 목표 일 실행의 일 단계(단계표·카드. 준비 대목·회의 단계·계획·기준 판정은 빼고 한도 대기와 같은 자리), 설정 transientRetry(기본 켬)
+  #canRetry(ctx, st) {
+    return ctx.missionTurn === 'work' && !!ctx.mission && ctx.mission === ctx.s.mission && this.store.settings.transientRetry !== false
+      && !isPrep(st) && !st.meeting && st.mission !== 'review' && st.mission !== 'plan';
+  }
+
+  // 일시 장애로 끝난 사람(failed)을 묻기 전에 한 번 저절로 다시 돌려도 되는가. 되면 진행 기록에 "일시 장애로 한 번 다시" 줄(fail transient, 완주 보고의 실패 집계)을 남기고 true,
+  // 안 되면 까닭 한 줄(fail 없음. 뒤의 오류 줄이 실패로 센다)을 남기고 false. 다 맞아야 한다:
+  // (1) 그 실행이 파일을 바꾸지 않았다: 실패한 답의 도구 기록에 파일을 고친 도구·명령이 없고(handoffFacts), 단계를 돌기 전과 지금의 git 상태가 같다(바꾼 파일 대조와 같은 gitState·changedSet,
+  //     그 사이 커밋이 생겼으면 그 커밋의 파일도). git 저장소가 아니거나 git 이 답하지 않으면 확인 못 한 것이라 하지 않는다(같은 단계의 다른 사람이 바꾼 것도 가를 수 없어서 하지 않는다)
+  // (2) 남은 호출(결정 0015)이 다시 돌 사람 수 이상 (3) 다시 돌 AI(#capTarget)가 구독 한도 상한(결정 0026) 아래이고 다 차지 않음("계속"을 고른 AI 도 자동으로는 다시 하지 않는다)
+  // (4) 일 카드면 그 카드가 시작 상한(결정 0018, 사다리 팀은 escalateAfter, 결정 0027)에 닿지 않았고 시간당 시작 수 안: 자동 다시도 한 번의 시작으로 센다(오류 다시 하기와 같다)
+  async #transientRetry(ctx, i, failed, before) {
+    const m = ctx.mission;
+    const st = ctx.run.stages[i];
+    const ids = failed.map((f) => String(f.agent?.id || ''));
+    const names = failed.map((f, k) => f.agent?.name || this.store.get('agents', ids[k])?.name || ids[k]).join(', ');
+    const no = (why) => {
+      logLine(m, 'transient', tr('{names}이(가) 일시 장애로 보이는 오류로 끝났지만, {why} 자동으로 다시 하지 않고 물어.', { names, why }));
+      this.emitMission(ctx.s);
+      return false;
+    };
+    const msgs = ids.map((id) => ctx.s.messages.findLast((x) => x.role === 'agent' && x.runId === ctx.run.id && x.stageIndex === i && x.agentId === id));
+    if (msgs.some((x) => !x)) return no(tr('그 답을 찾지 못해서'));
+    if (msgs.some((x) => { const f = handoffFacts(x.blocks, ''); return !!f && (f.files.length > 0 || f.cmds.length > 0); })) return no(tr('파일을 고치는 도구나 명령을 써서'));
+    if (!before || before.off) return no(tr('작업 폴더가 git 저장소가 아니거나 git 이 답하지 않아 파일이 바뀌었는지 확인하지 못해서'));
+    const cwd = this.cwdOf(ctx.s);
+    const after = await gitState(cwd);
+    if (!after || after.off) return no(tr('git 이 답하지 않아 파일이 바뀌었는지 확인하지 못해서'));
+    let extra = [];
+    if (before.head !== after.head) {
+      const d = before.head && after.head ? await gitDiffNames(cwd, before.head, after.head) : null;
+      if (!d || d.off) return no(tr('git 이 답하지 않아 파일이 바뀌었는지 확인하지 못해서'));
+      extra = d.names;
+    }
+    if (changedSet(before, after, extra).size) return no(tr('그 단계가 도는 동안 작업 폴더의 파일이 바뀌어서'));
+    if (m.calls && m.calls.cap - m.calls.used < failed.length) return no(tr('남은 호출({left}번)이 모자라서', { left: Math.max(0, m.calls.cap - m.calls.used) }));
+    const cap = Number(this.store.settings.limitCap);
+    for (const id of ids) {
+      const pv = await this.#capTarget(ctx, i, id, 'work');
+      if (pv && (this.#capFull(pv) || (cap > 0 && overCap(this.store.usage.limits?.[pv], cap)))) return no(tr('{ai}의 구독 한도가 상한에 닿아서', { ai: PROVIDERS[pv]?.label || pv }));
+    }
+    if (st.mission === 'cards') {
+      const cards = (m.cards || []).filter((c) => (st.cardIds || []).includes(c.id) && ids.includes(c.ownerId));
+      if (cards.some((c) => c.limited || c.starts >= c.cap)) return no(tr('카드를 시작한 횟수가 상한에 닿아서'));
+      m.rate ||= { cap: CARD_RATE, starts: [] };
+      const now = Date.now();
+      m.rate.starts = (m.rate.starts || []).filter((x) => now - x < HOUR);
+      if (m.rate.starts.length + cards.length > m.rate.cap) return no(tr('한 시간 안에 시작한 카드가 상한에 닿아서'));
+      for (const c of cards) { c.starts++; c.status = 'running'; m.rate.starts.push(now); }
+    }
+    logLine(m, 'transient', tr('{names}이(가) 일시 장애로 보이는 오류(네트워크·시간 초과·서버 과부하)로 끝나서, 묻기 전에 한 번 자동으로 다시 해. 그 사이 파일은 바뀌지 않았어(git 대조).', { names })).fail = 'transient';
+    this.emitMission(ctx.s);
+    return true;
   }
 
   // 되돌림이 다시 돌리는 마지막 카드 단계에 만들기·글 카드가 하나도 없는가(조사·확인 카드만)
@@ -3793,6 +3868,33 @@ export class Orchestrator {
       added = true;
     }
     if (added) this.emitMission(ctx.s);
+    this.#recordFails(ctx, msg);
+  }
+
+  // 반복 실패 줄(결정 0030): 목표 일 실행의 일 단계·일 카드 답에서 실패한 도구 호출(도구 블록 error 의 출력 첫 줄)과 단계 오류(답이 오류로 끝남)를
+  // 프로젝트 기억 폴더(#remember 와 같은 폴더)의 failures.json 에 이 목표 id 와 함께 센다. 프로젝트 기억이 켜져 있을 때만(꺼져 있으면 아무것도 안 한다).
+  // 사용량 한도·일시 장애(계정·바깥 사정이라 프로젝트의 실패가 아니다)와 앱이 끈 멈춤·헛돌기는 단계 오류로 세지 않는다. 준비 대목·회의·계획·기준 판정의 답은 보지 않는다.
+  // 내 PC 모델 답에서만 나온 줄은 표시해 클라우드 AI 프롬프트에 넣지 않는다(결정 0007). 실패해도 실행에는 영향이 없다
+  #recordFails(ctx, msg) {
+    const st = ctx.run?.stages?.[msg.stageIndex];
+    if (!this.memory || !this.store.settings.memory || ctx.missionTurn !== 'work' || !ctx.mission || !st || st.meeting || (st.mission && st.mission !== 'cards') || msg.once) return;
+    const list = [];
+    for (const b of msg.blocks || []) if (b.kind === 'tool' && b.status === 'error') { const k = failKey(b.output || '', b.name || ''); if (k) list.push(k); }
+    if (msg.status === 'error' && msg.error && !ctx.stalled && !isQuotaError(msg.error) && !isTransientError(msg.error)) { const k = failKey(msg.error); if (k) list.push(k); }
+    if (!list.length) return;
+    const local = msg.provider === 'local' || (msg.aiChain || []).includes('local');
+    const id = ctx.mission.id;
+    const job = this.memory.of(this.memoryFolder(ctx.s))
+      .then((mem) => mem.addFailures(list, id, { local }))
+      .catch(() => { /* 기억 쓰기 실패는 조용히 넘긴다 */ })
+      .finally(() => this.remembering.delete(job));
+    (this.remembering ||= new Set()).add(job);
+  }
+
+  // 이 목표 일 실행이 일 단계 프롬프트에 넣을 반복 실패 줄의 원본(결정 0030): 실행을 시작할 때 한 번 읽어 둔다(프롬프트를 만드는 #prompt 는 기다리지 않는다). 기억이 꺼져 있으면 없음
+  async #pastFails(ctx) {
+    if (!this.memory || !this.store.settings.memory) return [];
+    try { return (await (await this.memory.of(this.memoryFolder(ctx.s))).failures()).items; } catch { return []; }
   }
 
   // 에이전트 편집 화면의 "새 대화마다 보내는 고정 글"(결정 0026): 이 에이전트(저장 전에 고친 값)의 시스템 지시 글자 수와 그중 스킬 본문 몫, 스킬마다 글자 수.
@@ -4449,6 +4551,12 @@ export class Orchestrator {
     // 일하기 전 조사·회의(결정 0017): 조사 노트는 일하기 전 회의와 일 단계에, 회의 결론은 일 단계에 무작위 표식 안의 참고 자료로(기준 판정에는 안 준다)
     if (ctx.prepData?.questions && (st.mission === 'meeting' || workStage)) parts.push(this.#notePart(ctx, agent, prov, workStage));
     if (ctx.prepData?.conclusion && workStage) parts.push(conclusionPrompt(ctx.prepData.conclusion));
+    // 반복 실패 줄(결정 0030): 이 작업 폴더의 다른 목표 둘 이상에서 난 같은 실패를 목표 일 단계·카드에 무작위 표식 안의 참고 자료로(회의 차례·기준 판정에는 안 준다).
+    // 내 PC 모델 답에서만 나온 줄은 내 PC 모델에게만(결정 0007)
+    if (ctx.missionTurn === 'work' && ctx.goalCard && workStage && !meet && ctx.pastFails?.length) {
+      const fails = pickFails(ctx.pastFails, ctx.mission?.id, { cloud: agent.provider !== 'local' });
+      if (fails.length) parts.push(failuresPrompt(fails));
+    }
     // 일 카드(결정 0018): 이 담당의 카드와 기다린 앞 카드의 결과(꼬리 먼저). 카드 글·앞 결과는 에이전트가 쓴 글이라 무작위 표식 안의 참고 자료
     if (cardStage) {
       const m = ctx.mission;

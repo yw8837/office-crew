@@ -119,6 +119,7 @@ export function RoutingPage() {
 
     <${FailoverCard} />
     <${LimitCapCard} />
+    <${TransientCard} />
     <${BudgetCard} />
 
     <div class="list rtable">
@@ -242,6 +243,17 @@ function LimitCapCard() {
     <label class="row small" style="gap:6px">${t('상한')}
       <select class="select sm" value=${String(cap)} onChange=${(e) => save({ limitCap: Number(e.target.value) })}>
         ${[...new Set([0, 70, 80, 90, 95, 100, cap])].sort((a, b) => a - b).map((x) => html`<option value=${String(x)}>${x === 0 ? t('끄기') : t('사용률 {n}% 이상', { n: x })}</option>`)}</select></label>
+  </div>`;
+}
+
+// 일시 장애 1번 자동 다시(결정 0030, 기본 켬): 목표의 일 단계·카드가 네트워크·시간 초과·서버 과부하로 끝나면 묻기 전에 한 번만 다시
+function TransientCard() {
+  const on = state.settings.transientRetry !== false;
+  const save = (b) => put('/api/settings', b).catch((e) => toast(e.message, 'error'));
+  return html`<div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+    <${Toggle} checked=${on} onChange=${(v) => save({ transientRetry: v })} title=${t('일시 장애 한 번 자동 다시')} />
+    <div style="flex:1;min-width:240px"><b>🔁 ${t('일시 장애 한 번 자동 다시')}</b>
+      <div class="hint">${t('목표의 일 단계·카드가 네트워크 끊김·시간 초과·서버 오류(5xx)·과부하로 보이는 오류로 끝나면, 묻기 전에 그 사람만 한 번 자동으로 다시 돌려. 그 실행이 작업 폴더의 파일을 안 바꿨다고 git 으로 확인될 때만(git 저장소가 아니면 하지 않아), 호출 상한·구독 한도 상한·카드 시작 상한 안에서만. 사용량 한도는 여기 말고 한도 대기로 가. 두 번째도 실패하면 지금처럼 물어.')}</div></div>
   </div>`;
 }
 

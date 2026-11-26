@@ -293,6 +293,7 @@ a { color: var(--link); }
 .limit .lh { display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 4px; }
 .limit .lh b { font-weight: 700; }
 .limit .ls { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+.limit.passed .lh b { color: var(--muted); font-weight: 500; }
 .stat { display: flex; justify-content: space-between; font-size: 12.5px; padding: 3px 0; }
 .stat span:last-child { font-weight: 700; font-variant-numeric: tabular-nums; }
 /* 세션의 "어디에 썼는지" 표(결정 0026): 종류별·에이전트별 환산 사용량 */
@@ -453,6 +454,8 @@ pre.raw { background: var(--code-bg); padding: 10px 12px; border-radius: 10px; f
 .usage-dock .ud-p.mid i { background: var(--warn); }
 .usage-dock .ud-p.high i { background: var(--err); }
 .usage-dock .ud-p.high b { color: var(--err); }
+.usage-dock .ud-p.passed i { background: var(--panel-3); }
+.usage-dock .ud-p.passed b { color: var(--muted); font-weight: 500; }
 .usage-dock .ud-today { color: var(--muted); white-space: nowrap; }
 .usage-dock.open { width: min(320px, calc(100vw - 28px)); max-height: min(70vh, 520px); display: flex; flex-direction: column; border: 1px solid var(--border-2); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow-lg); }
 .usage-dock .ud-head { display: flex; align-items: center; gap: 6px; padding: 8px 8px 6px 12px; border-bottom: 1px solid var(--border); }

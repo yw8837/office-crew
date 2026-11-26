@@ -210,7 +210,7 @@ Office Crew は、各サービスのルールの範囲内で使えるように�
 - **サインイン情報は CLI のまま。** Office Crew は CLI のサインイントークン（例：`~/.claude/.credentials.json`、`~/.codex/auth.json`）を読み取ったり、コピー・保存・中継したりしません。`~/.claude.json` からは MCP サーバーの一覧だけを使います。サインインは常にターミナルウィンドウで各社の CLI を使って行います（Office Crew がウィンドウを開くこともできます）。
 - **1 人、1 台の PC。** サブスクリプションでのサインインは、ご自身の PC でご自身が使うためのものです。Office Crew でアカウントを共有したり、他の人へのサービスとして提供したりしないでください。
 - **製品・チーム・無人実行には API キーを。** 他の人向けの製品を作る、会社で使う、無人で動かす場合は、Claude Code と Codex の課金方式を **API キー** に切り替えてください（設定 → AI アカウント → 課金方式）。Anthropic は、承認なしにサードパーティ製品が claude.ai のサインインやサブスクリプションの上限を提供しないよう求めており、OpenAI もプログラムから Codex を使う場合は API キーを推奨しています。
-- **Google：** Gemini CLI の個人向け Google サインイン（Gemini Code Assist for individuals）は使えなくなったため、Office Crew は Gemini API キーを使います。Antigravity は個人アカウントの規約上、サードパーティ製ツールからの利用が認められていないため対応していません。
+- **Google：** Gemini CLI の個人向け Google サインイン（Gemini Code Assist for individuals）は2026-06-18 に終了したため（有料の API キーは引き続き使えます）、Office Crew は Gemini API キーを使います。Antigravity は個人アカウントの規約上、サードパーティ製ツールからの利用が認められていないため対応していません。
 - **Hermes：** Hermes のプロバイダーに Anthropic を選ぶと、Hermes が Claude Code のサインイントークンを流用することがあります。代わりに Anthropic API キーか別のプロバイダーを設定してください。
 - Office Crew は Anthropic、OpenAI、Google、Nous Research とは一切関係ありません。
 

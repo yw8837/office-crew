@@ -81,6 +81,22 @@ export function usageBreakdown(messages, { missionId = null, runIds = null, goal
 // 초기화 시각을 모르는 창의 기록을 믿는 시간: 받은 뒤 30분(server/failover.js 의 avoidUntil 이 다 찬 창을 피하는 시간과 같다). 그보다 오래된 기록은 넘음으로 보지 않는다
 export const UNTIMED_MS = 30 * 60 * 1000;
 
+// 한도 창 하나가 이미 지난 기록인지(화면용. 판단 쪽 overCap·failover 와 같은 기준): 초기화 시각이 지났거나, 초기화 시각을 모르면 받은 뒤 UNTIMED_MS 가 넘었다.
+// 사용률이 숫자가 아니면 보일 값이 없어 지났다고 하지 않는다(그대로 "?"). 받은 시각(observedAt)을 모르면 지났다고 하지 않는다
+export function windowPassed(w, observedAt, now = Date.now()) {
+  if (!w || typeof w.pct !== 'number' || !Number.isFinite(w.pct)) return false;
+  if (w.resetsAt) return w.resetsAt * 1000 <= now;
+  return Number.isFinite(observedAt) && observedAt + UNTIMED_MS <= now;
+}
+
+// 한 AI 의 한도 기록에서 안 지난 창 가운데 가장 찬 사용률(오른쪽 아래 표시). 안 지난 창이 없으면 null
+export function livePeak(limit, now = Date.now()) {
+  const pcts = Object.values(limit?.windows || {})
+    .filter((w) => w && typeof w.pct === 'number' && Number.isFinite(w.pct) && !windowPassed(w, limit.observedAt, now))
+    .map((w) => w.pct);
+  return pcts.length ? Math.max(...pcts) : null;
+}
+
 // 구독 한도 % 상한(결정 0026): 한도 기록 하나에서 사용률이 상한(cap, %) 이상인 창. 사용률이 숫자이고 아직 안 풀린 창만 본다(초기화 시각이 지났으면 풀린 것,
 // 초기화 시각을 모르는 창은 기록을 받은 뒤 UNTIMED_MS 까지만). 사용자가 "지금 다시 쓰기"로 푼 뒤의 옛 기록은 보지 않는다. cap 이 0 이하면 끔.
 // → null(넘은 창 없음) | { windows: [{ key, pct, resetsAt(초) }], until(넘은 창이 모두 풀리는 시각 ms. 초기화 시각을 모르는 창이 하나라도 있으면 0) }

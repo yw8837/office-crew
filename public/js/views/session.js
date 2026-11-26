@@ -14,7 +14,8 @@ import { TeamCard } from './teamdoc.js';
 import { researcherOf, meetingView, boardCards } from '../office/meeting.js';
 import { meetLabel, goalWait } from '../stage-model.js';
 import { FlowStage, StageStrip } from './stage.js';
-import { weighted, rawSum, cacheHit, usageBreakdown, ANSWER_KINDS } from '../usage-numbers.js';
+import { weighted, rawSum, cacheHit, usageBreakdown, windowPassed, ANSWER_KINDS } from '../usage-numbers.js';
+import { recordAge } from '../mission-numbers.js';
 
 export const sessionAgents = (s) => {
   if (!s) return [];
@@ -1053,18 +1054,31 @@ export function RightPanel({ s }) {
 }
 
 export const WIN_LABEL = tmap(() => ({ five_hour: t('5시간'), seven_day: t('주간'), primary: t('기본 창'), secondary: t('보조 창') })); // 목표 카드의 구독 한도 줄도 쓴다(결정 0019)
+// 기록이 몇 분·시간·일 전 것인지(한도 기록 나이. 판단은 recordAge)
+export function agoWords(min) {
+  const a = recordAge(min);
+  if (!a) return '';
+  if (a.unit === 'min') return a.n < 1 ? t('방금') : t('{n}분 전', { n: a.n });
+  return a.unit === 'hour' ? t('{n}시간 전', { n: a.n }) : t('{n}일 전', { n: a.n });
+}
+// 지난 창(초기화 시각이 지났거나, 시각을 모르는 창이 받은 지 30분이 넘음)은 지금 값이 아니다: 막대를 비우고 "—", 밑줄에 마지막으로 본 값과 나이
 export function Limits({ lim }) {
   const entries = Object.entries(lim || {});
   if (!entries.length) return html`<div class="muted small">${t('아직 관측된 한도가 없어. Claude·Codex로 한 번 실행하면 표시돼.')}</div>`;
-  return entries.map(([p, v]) => html`<div style="margin-bottom:6px">
-    <div class="row" style="gap:6px"><${ProviderChip} id=${p} />${v.plan && html`<span class="chip">${v.plan}</span>`}<span class="small muted">${t('관측 {time}', { time: new Date(v.observedAt).toLocaleString(locale(), { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) })}</span></div>
+  const now = Date.now();
+  return entries.map(([p, v]) => {
+    const age = v.observedAt ? agoWords(Math.max(0, Math.floor((now - v.observedAt) / 60000))) : '';
+    return html`<div style="margin-bottom:6px">
+    <div class="row" style="gap:6px"><${ProviderChip} id=${p} />${v.plan && html`<span class="chip">${v.plan}</span>`}<span class="small muted">${t('관측 {time}', { time: new Date(v.observedAt).toLocaleString(locale(), { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) })}${age && ` · ${age}`}</span></div>
     ${Object.entries(v.windows || {}).map(([k, w]) => {
+      const passed = windowPassed(w, v.observedAt, now);
       const pct = w.pct ?? 0;
-      return html`<div class="limit"><div class="lh"><span>${WIN_LABEL[k] || k}</span><b>${w.pct == null ? '?' : `${pct}%`}</b></div>
-        <div class=${`bar${pct >= 90 ? ' high' : pct >= 60 ? ' mid' : ''}`}><i style=${`width:${Math.min(100, pct)}%`}></i></div>
-        <div class="ls">${until(w.resetsAt)}</div></div>`;
+      return html`<div class=${`limit${passed ? ' passed' : ''}`}><div class="lh"><span>${WIN_LABEL[k] || k}</span><b>${passed ? '—' : w.pct == null ? '?' : `${pct}%`}</b></div>
+        <div class=${`bar${passed ? '' : pct >= 90 ? ' high' : pct >= 60 ? ' mid' : ''}`}><i style=${`width:${passed ? 0 : Math.min(100, pct)}%`}></i></div>
+        <div class="ls">${passed ? t('초기화됨 · 마지막으로 본 값 {pct}% ({age})', { pct: w.pct, age }) : until(w.resetsAt)}</div></div>`;
     })}
-  </div>`);
+  </div>`;
+  });
 }
 function until(sec) {
   if (!sec) return '';

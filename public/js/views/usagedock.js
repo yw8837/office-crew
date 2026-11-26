@@ -4,7 +4,7 @@ import { useState } from 'preact/hooks';
 import { html, Icon, ProviderChip, fmtTok, fmtCost } from '../ui.js';
 import { state, go } from '../state.js';
 import { Limits, usageTip } from './session.js';
-import { weighted } from '../usage-numbers.js';
+import { weighted, livePeak } from '../usage-numbers.js';
 import { t } from '../i18n/index.js';
 
 const SHORT = { claude: 'Claude', codex: 'GPT', gemini: 'Gemini', hermes: 'Hermes', openai: 'API', local: 'local', acp: 'ACP' };
@@ -19,15 +19,16 @@ export function UsageDock() {
   // 오늘 토큰은 환산(결정 0026: 새 입력 + 캐시 쓰기 + 출력 + 캐시 읽기÷10). 나눈 값은 도움말에
   const sum = Object.values(today).reduce((a, v) => { for (const k of ['input', 'output', 'cacheRead', 'cacheWrite']) a[k] += v[k] || 0; return a; }, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   const total = weighted(sum);
-  // AI마다 가장 많이 찬 한도 창 하나만 알약에 보인다
+  // AI마다 가장 많이 찬 한도 창 하나만 알약에 보인다. 이미 지난 창은 빼고, 그 AI 의 창이 전부 지났으면 "—"(빨강·노랑 없이)
+  const now = Date.now();
   const peaks = Object.entries(lim)
-    .map(([p, v]) => [p, Math.max(-1, ...Object.values(v.windows || {}).map((w) => (w.pct == null ? -1 : w.pct)))])
-    .filter(([, pct]) => pct >= 0);
+    .map(([p, v]) => [p, livePeak(v, now), Object.values(v.windows || {}).some((w) => typeof w?.pct === 'number')])
+    .filter(([, pct, any]) => pct !== null || any);
 
   if (!open) {
     return html`<button class="usage-dock pill" onClick=${() => toggle(true)} title=${t('사용량 펼치기')} aria-label=${t('사용량 펼치기')}>
       <${Icon} name="chart" />
-      ${peaks.map(([p, pct]) => html`<span class=${`ud-p${level(pct)}`}><i></i>${shortName(p)} <b>${pct}%</b></span>`)}
+      ${peaks.map(([p, pct]) => html`<span class=${`ud-p${pct === null ? ' passed' : level(pct)}`}><i></i>${shortName(p)} <b>${pct === null ? '—' : `${pct}%`}</b></span>`)}
       <span class="ud-today" title=${usageTip(sum)}>${t('오늘 환산 {n}', { n: fmtTok(total) })}</span>
     </button>`;
   }

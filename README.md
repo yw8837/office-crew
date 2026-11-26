@@ -210,7 +210,7 @@ Office Crew is built to stay inside each provider's rules. In short:
 - **Your sign-in stays with the CLI.** Office Crew never reads, copies, stores or relays CLI sign-in tokens (such as `~/.claude/.credentials.json` or `~/.codex/auth.json`). From `~/.claude.json`, only the MCP server list is used. Signing in always happens in the vendor's own CLI, in a terminal window (Office Crew can open one for you).
 - **One person, one computer.** A subscription sign-in is for your own use on your own machine. Don't share an account through Office Crew or offer it as a service to other people.
 - **Products, teams and unattended runs use API keys.** If you build something for others, use it at work or run it unattended, switch Claude Code and Codex to **API key** billing (Settings → AI accounts → Billing). Anthropic asks third-party products not to offer claude.ai sign-in or subscription limits unless approved, and OpenAI recommends API keys for programmatic Codex use.
-- **Google:** personal Google sign-in for Gemini CLI (Gemini Code Assist for individuals) no longer works, so Office Crew uses a Gemini API key. Antigravity isn't supported, because its personal-account terms don't allow use through third-party tools.
+- **Google:** personal Google sign-in for Gemini CLI (Gemini Code Assist for individuals) ended on 2026-06-18 (paid API keys still work), so Office Crew uses a Gemini API key. Antigravity isn't supported, because its personal-account terms don't allow use through third-party tools.
 - **Hermes:** if you choose Anthropic as Hermes' provider, Hermes can reuse Claude Code's sign-in token. Give Hermes an Anthropic API key or another provider instead.
 - Office Crew isn't affiliated with Anthropic, OpenAI, Google or Nous Research.
 

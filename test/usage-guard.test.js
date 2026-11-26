@@ -10,7 +10,7 @@ import { bindLang } from '../server/i18n.js';
 import { meetingSpend } from '../server/orchestrator.js';
 import { researchNote, resumePoint, QUOTA_AUTO } from '../server/mission.js';
 import { LEAN, leanTurns, prevTail, prevNote, noteNote, noteSummary, writeNote } from '../server/savings.js';
-import { weighted, rawSum, split, cacheHit, answerKind, usageBreakdown, overCap, ANSWER_KINDS, UNTIMED_MS } from '../public/js/usage-numbers.js';
+import { weighted, rawSum, split, cacheHit, answerKind, usageBreakdown, overCap, windowPassed, livePeak, ANSWER_KINDS, UNTIMED_MS } from '../public/js/usage-numbers.js';
 import { settleClaude } from '../server/usage.js';
 import { buildReport } from '../server/report.js';
 import { stageModel, holdKind, goalWait } from '../public/js/stage-model.js';
@@ -127,6 +127,25 @@ test('1. 사용량 나눠 보기·환산: 서버의 회의 사용량 상한과 �
   assert.ok(overCap({ windows: { a: { pct: 95 } }, observedAt: now - 10 * 60000 }, 90, now), '10분 전 기록');
   assert.equal(overCap({ windows: { a: { pct: 95 } }, observedAt: now - UNTIMED_MS - 1000 }, 90, now), null, '30분 넘은 기록은 넘음으로 보지 않는다');
   assert.ok(overCap({ windows: { a: { pct: 95, resetsAt: Math.floor(now / 1000) + 3600 } }, observedAt: now - 3 * 3600000 }, 90, now), '초기화 시각을 아는 창은 그 시각까지');
+});
+
+test('1b. 지난 한도 창 판단(화면): 초기화 시각이 지났거나, 시각을 모르면 받은 뒤 30분이 넘은 창 — 사용률이 숫자인 창만', () => {
+  const now = Date.now();
+  const sec = (ms) => Math.floor((now + ms) / 1000);
+  assert.equal(windowPassed({ pct: 90, resetsAt: sec(-5000) }, now - 3600000, now), true, '초기화 시각이 지남');
+  assert.equal(windowPassed({ pct: 90, resetsAt: sec(600000) }, now - 3 * 3600000, now), false, '초기화 시각이 아직 안 지남(기록이 오래돼도)');
+  assert.equal(windowPassed({ pct: 90 }, now - UNTIMED_MS + 60000, now), false, '시각을 모르고 30분 안');
+  assert.equal(windowPassed({ pct: 90 }, now - UNTIMED_MS - 60000, now), true, '시각을 모르고 30분 넘음');
+  assert.equal(windowPassed({ pct: 90 }, undefined, now), false, '받은 시각도 모르면 지났다고 하지 않는다');
+  assert.equal(windowPassed({ pct: null, resetsAt: sec(-5000) }, now, now), false, '사용률이 없으면 보일 값이 없다');
+  assert.equal(windowPassed(null, now, now), false);
+  // 그 AI 의 가장 찬 창(안 지난 것만). 전부 지났거나 사용률이 없으면 null
+  const lim = { observedAt: now - 11 * 86400000, windows: { five_hour: { pct: 20, resetsAt: sec(600000) }, seven_day: { pct: 90, resetsAt: sec(-1000) } } };
+  assert.equal(livePeak(lim, now), 20, '지난 창(90%)은 최고값에서 뺀다');
+  assert.equal(livePeak({ ...lim, windows: { seven_day: { pct: 90, resetsAt: sec(-1000) } } }, now), null, '창이 전부 지남');
+  assert.equal(livePeak({ observedAt: now, windows: { a: { pct: null } } }, now), null, '사용률 없음');
+  assert.equal(livePeak({ observedAt: now, windows: { a: { pct: 0 } } }, now), 0, '0%는 값이다');
+  assert.equal(livePeak(undefined, now), null);
 });
 
 // ── 2. 절약 프로필(순수 함수) ──

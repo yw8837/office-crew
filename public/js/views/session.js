@@ -14,6 +14,7 @@ import { TeamCard } from './teamdoc.js';
 import { researcherOf, meetingView, boardCards } from '../office/meeting.js';
 import { meetLabel, goalWait } from '../stage-model.js';
 import { FlowStage, StageStrip } from './stage.js';
+import { weighted, rawSum, cacheHit, usageBreakdown, USE_KINDS } from '../usage-numbers.js';
 
 export const sessionAgents = (s) => {
   if (!s) return [];
@@ -42,6 +43,9 @@ function agentUsage(s, agentId) {
 const treeTip = (u) => [u.partial && t('하위 에이전트가 쓴 양이 빠졌을 수 있어.'), u.sub > 0 && t('주 에이전트 밖에서 쓴 {n} 토큰 포함(하위 에이전트 등)', { n: fmtTok(u.sub) })].filter(Boolean);
 // 부분 집계 표시(*). 마우스 없이도 알 수 있게 도움말과 같은 글을 화면 낭독기 이름으로 단다
 const partialMark = (u) => (u.partial ? html` <span role="img" aria-label=${treeTip(u).join(' ')}>*</span>` : '');
+// 사용량 한 숫자는 환산(결정 0026: 새 입력 + 캐시 쓰기 + 출력 + 캐시 읽기÷10, 서버의 회의 사용량 상한과 같은 함수). 나눈 값과 1:1 합은 도움말에
+export const usageTip = (u = {}) => [t('새 입력 {i} · 캐시 쓰기 {cw} · 캐시 읽기 {cr} · 출력 {o}', { i: fmtTok(u.input || 0), cw: fmtTok(u.cacheWrite || 0), cr: fmtTok(u.cacheRead || 0), o: fmtTok(u.output || 0) }),
+  t('환산 = 새 입력 + 캐시 쓰기 + 출력 + 캐시 읽기÷10 (네 값을 1:1 로 더하면 {raw})', { raw: fmtTok(rawSum(u)) })].join('\n');
 function sessionUsage(s) {
   const u = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
   for (const m of s?.messages || []) if (m.usage) addUsage(u, m);
@@ -465,7 +469,7 @@ class Message extends Component {
         ${m.error && html`<div class="msg-err">⚠ ${m.error}</div>`}
         <div class="msg-foot">
           ${m.status === 'stopped' && html`<span class="chip warn">${t('중지됨')}</span>`}
-          ${usageTotal(u) > 0 && html`<span title=${[t('입력 {i} · 출력 {o} · 캐시 읽기 {cr} · 캐시 쓰기 {cw}', { i: u.input, o: u.output, cr: u.cacheRead, cw: u.cacheWrite }), ...treeTip(u)].join('\n')}>${t('{n} 토큰', { n: fmtTok(usageTotal(u)) })}${partialMark(u)}</span>`}
+          ${usageTotal(u) > 0 && html`<span title=${[usageTip(u), ...treeTip(u)].join('\n')}>${t('환산 {n} 토큰', { n: fmtTok(weighted(u)) })}${partialMark(u)}</span>`}
           ${!usageTotal(u) && u.estOutput > 0 && html`<span title=${t('CLI가 턴을 끝내면 실제 값으로 바뀌어')}>~${t('{n} 토큰 (작성 중 추정)', { n: fmtTok(u.estOutput) })}</span>`}
           ${u.cost > 0 && html`<span>${fmtCost(u.cost)}</span>`}
           ${u.durationMs > 0 && !streaming && html`<span>${fmtDur(u.durationMs)}</span>`}
@@ -645,7 +649,7 @@ const cardTitles = (s, run, st) => {
 function RunBar({ s, run, stages = true }) {
   const active = run && ['running', 'paused', 'waiting'].includes(run.status) && !run.endedAt;
   const u = sessionUsage(s);
-  const usageText = `${u.estimated ? '~' : ''}${t('{n} 토큰', { n: fmtTok(usageTotal(u)) })} ${fmtCost(u.cost)}`;
+  const usageText = `${u.estimated ? '~' : ''}${t('환산 {n} 토큰', { n: fmtTok(weighted(u)) })} ${fmtCost(u.cost)}`;
   const cls = stages ? 'runbar' : 'runbar thin';
   if (!run) return html`<div class=${cls}>${stages && html`<span class="muted small">${t('아직 실행 없음')}</span>`}<span class="grow"></span><${MemoryBadge} s=${s} /><span class="small muted">${t('세션 사용량 {usage}', { usage: usageText })}</span></div>`;
   const ctl = (action) => post(`/api/sessions/${s.id}/control`, { action }).catch((e) => toast(e.message, 'error'));
@@ -658,7 +662,7 @@ function RunBar({ s, run, stages = true }) {
       ${!active && html`<span class=${`chip ${run.status === 'done' ? 'ok' : run.status === 'error' ? 'err' : 'warn'}`} style="margin-left:6px">${{ done: t('완료'), error: t('오류'), stopped: t('중지됨') }[run.status] || run.status}</span>`}
     </div>` : html`<span class="grow"></span>`}
     <${MemoryBadge} s=${s} />
-    <span class="small muted hide-sm" title=${u.estimated ? t('작성 중인 출력은 글자 수로 추정(~)') : ''}>${t('세션 {usage}', { usage: usageText })}</span>
+    <span class="small muted hide-sm" title=${[usageTip(u), u.estimated ? t('작성 중인 출력은 글자 수로 추정(~)') : ''].filter(Boolean).join('\n')}>${t('세션 {usage}', { usage: usageText })}</span>
     ${active && run.stages[run.stageIndex]?.meetingNow && run.stages[run.stageIndex].meetingNow.phase !== 'conclude' && html`<button class="btn sm" onClick=${() => ctl('conclude')} title=${t('지금까지 나온 의견으로 진행자가 바로 결론을 내')}>${t('회의 끝내기')}</button>`}
     ${active && html`
       ${run.status === 'paused' || run.pauseRequested
@@ -679,7 +683,7 @@ function Gate({ s, run }) {
   }
   if (run.status !== 'waiting' || !hold) return null;
   // 목표의 판정 뒤 묻기·호출 상한(결정 0015)·한도 대기(결정 0019)는 질문 창 모양으로 따로 그린다
-  if (hold.reason === 'mission' || hold.reason === 'cap' || hold.reason === 'quota') return html`<${MissionGate} s=${s} run=${run} key=${hold.at} />`;
+  if (hold.reason === 'mission' || hold.reason === 'cap' || hold.reason === 'quota' || hold.reason === 'limitcap') return html`<${MissionGate} s=${s} run=${run} key=${hold.at} />`; // 구독 한도 상한(결정 0026)도
   const st = run.stages[hold.stageIndex];
   if (hold.reason === 'approve') {
     const next = run.stages[hold.stageIndex + 1];
@@ -927,7 +931,7 @@ function Inspector({ s, agentId }) {
     </div>
     <div class="drawer-body">
       <div class="row" style="margin-bottom:10px"><span class=${`sbadge ${live?.state || 'idle'}`}>${STATE_LABEL[live?.state || 'idle']}</span><span class="small muted ellipsis">${live?.detail || ''}</span></div>
-      <div class="small muted" style="margin-bottom:10px">${t('이 세션 사용량: {tok} 토큰 {cost} · 메시지 {n}개', { tok: fmtTok(usageTotal(u)), cost: fmtCost(u.cost), n: msgs.length })}</div>
+      <div class="small muted" style="margin-bottom:10px" title=${usageTip(u)}>${t('이 세션 사용량: 환산 {tok} 토큰 {cost} · 메시지 {n}개', { tok: fmtTok(weighted(u)), cost: fmtCost(u.cost), n: msgs.length })}</div>
       ${lastMsg ? html`<${Message} m=${lastMsg} panel=${true} />` : html`<div class="muted">${t('아직 이 에이전트의 출력이 없어.')}</div>`}
     </div>
     <div class="drawer-foot">
@@ -939,6 +943,29 @@ function Inspector({ s, agentId }) {
         <button class="btn sm ghost" title=${t('이 화면을 떠나지 않고 모델·노력·권한을 바꿔')} onClick=${() => { state.ui.editAgent = a.id; changed(); }}><${Icon} name="gear" /> ${t('설정')}</button>
       </div>
     </div>
+  </div>`;
+}
+
+// 이 세션에서 어디에 썼는지(결정 0026): 메시지마다 이미 있는 사용량을 종류별(메시지의 표시로)·에이전트별로 묶는다(새로 저장하지 않는다).
+// 목표가 있으면 그 목표의 실행 것만 볼 수 있다. 줄에 마우스를 올리면 나눈 값
+const USE_LABEL = () => ({ normal: t('보통 실행'), goal: t('목표 잡기'), research: t('조사'), meeting: t('회의'), plan: t('계획'), cards: t('일 카드'), review: t('검수') });
+function UseBreakdown({ s }) {
+  const [mine, setMine] = useState(false);
+  const m = s.mission;
+  const runIds = m ? (s.runs || []).filter((r) => r.missionId === m.id).map((r) => r.id) : [];
+  const only = mine && runIds.length > 0;
+  const b = usageBreakdown(s.messages, only ? { runIds } : {});
+  const L = USE_LABEL();
+  const hit = (v) => { const h = cacheHit(v); return h === null ? '—' : `${Math.round(h * 100)}%`; };
+  const row = (label, v, extra = null) => html`<tr title=${usageTip(v)}><td class="ellipsis">${label}</td><td class="num">${fmtTok(weighted(v))}</td>${extra !== null ? html`<td class="num">${extra}</td>` : ''}<td class="num">${v.n}</td></tr>`;
+  return html`<div class="card use-card"><h4>🧾 ${t('어디에 썼는지')}</h4>
+    ${runIds.length > 0 && html`<label class="row small" style="gap:6px;margin-bottom:6px"><input type="checkbox" checked=${only} onChange=${(e) => setMine(e.target.checked)} />${t('이 목표 것만')}</label>`}
+    ${!b.total.n ? html`<div class="muted small">${t('아직 사용량이 없어.')}</div>` : html`
+      <table class="use-table" aria-label=${t('종류별 사용량')}><thead><tr><th>${t('종류')}</th><th class="num">${t('환산')}</th><th class="num">${t('답')}</th></tr></thead>
+        <tbody>${USE_KINDS.filter((k) => b.kinds[k]).map((k) => row(L[k], b.kinds[k]))}</tbody></table>
+      <table class="use-table" aria-label=${t('에이전트별 사용량')}><thead><tr><th>${t('에이전트')}</th><th class="num">${t('환산')}</th><th class="num" title=${t('캐시 적중률: 캐시 읽기 ÷ (새 입력 + 캐시 읽기 + 캐시 쓰기). 캐시 숫자를 주지 않는 AI 는 —')}>${t('캐시')}</th><th class="num">${t('답')}</th></tr></thead>
+        <tbody>${b.agents.map(([id, v]) => row(agentById(id)?.name || t('삭제된 에이전트'), v, hit(v)))}</tbody></table>
+      <div class="hint">${t('메시지마다 적힌 사용량으로 셌어(새로 저장하지 않아). 줄에 마우스를 올리면 나눈 값이 보여.')}</div>`}
   </div>`;
 }
 
@@ -974,23 +1001,27 @@ export function RightPanel({ s }) {
               <div class="sub">${a.role} · ${agentModelText(a, s)}</div>
               <div class="detail">${l?.detail || ' '}</div>
               ${going && l?.state === 'paused' && html`<button type="button" class="btn sm" style="margin:4px 0" title=${t('이 에이전트만 멈추고 다음으로')} onClick=${(e) => skipWait(e, a.id)}><${Icon} name="skip" /> ${t('건너뛰기')}</button>`}
-              ${usageTotal(au) > 0 && html`<div class="sub" title=${treeTip(au).join('\n')}>${t('{n} 토큰', { n: fmtTok(usageTotal(au)) })}${partialMark(au)} ${fmtCost(au.cost)}</div>`}
+              ${usageTotal(au) > 0 && html`<div class="sub" title=${[usageTip(au), ...treeTip(au)].join('\n')}>${t('환산 {n} 토큰', { n: fmtTok(weighted(au)) })}${partialMark(au)} ${fmtCost(au.cost)}</div>`}
             </div>
           </div>`;
         })}
         ${!agents.length && html`<div class="muted small">${t('이 세션에 배치된 에이전트가 없어.')}</div>`}`}
       ${tab === 'usage' && html`
         <div class="card"><h4>📊 ${t('이 세션')}</h4>
-          <div class="stat"><span>${t('입력')}</span><span>${fmtTok(u.input)}</span></div>
+          <div class="stat"><span>${t('새 입력')}</span><span>${fmtTok(u.input)}</span></div>
+          <div class="stat"><span>${t('캐시 쓰기')}</span><span>${fmtTok(u.cacheWrite)}</span></div>
+          <div class="stat"><span>${t('캐시 읽기')}</span><span>${fmtTok(u.cacheRead)}</span></div>
           <div class="stat"><span>${t('출력')}</span><span>${fmtTok(u.output)}</span></div>
-          <div class="stat"><span>${t('캐시 읽기/쓰기')}</span><span>${fmtTok(u.cacheRead)} / ${fmtTok(u.cacheWrite)}</span></div>
+          <div class="stat" title=${t('새 입력 + 캐시 쓰기 + 출력 + 캐시 읽기÷10. 회의 사용량 상한과 같은 셈이고, 요금표와 똑같지는 않아.')}><span><b>${t('환산')}</b></span><span>${fmtTok(weighted(u))}</span></div>
+          <div class="stat muted"><span>${t('네 값을 1:1 로 더한 합')}</span><span>${fmtTok(rawSum(u))}</span></div>
           <div class="stat"><span>${t('비용(추정, API 환산)')}</span><span>${fmtCost(u.cost) || '$0'}</span></div>
         </div>
+        <${UseBreakdown} s=${s} />
         <div class="card"><h4>🔋 ${t('계정 한도')} <span class="small muted">${t('(실행할 때마다 갱신)')}</span></h4>
           <${Limits} lim=${lim} />
         </div>
         <div class="card"><h4>📅 ${t('오늘 (모든 세션)')}</h4>
-          ${Object.entries(today).map(([p, v]) => html`<div class="stat"><span><${ProviderChip} id=${p} /></span><span>${t('{n} 토큰', { n: fmtTok(usageTotal(v)) })} ${fmtCost(v.cost)} · ${t('{n}회', { n: v.calls })}</span></div>`)}
+          ${Object.entries(today).map(([p, v]) => html`<div class="stat" title=${usageTip(v)}><span><${ProviderChip} id=${p} /></span><span>${t('환산 {n} 토큰', { n: fmtTok(weighted(v)) })} ${fmtCost(v.cost)} · ${t('{n}회', { n: v.calls })}</span></div>`)}
           ${!Object.keys(today).length && html`<div class="muted small">${t('오늘 기록 없음')}</div>`}
         </div>`}
       ${tab === 'log' && html`<div class="log">

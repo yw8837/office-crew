@@ -118,6 +118,7 @@ export function RoutingPage() {
     </div>
 
     <${FailoverCard} />
+    <${LimitCapCard} />
     <${BudgetCard} />
 
     <div class="list rtable">
@@ -228,6 +229,21 @@ const restLabel = (c) => {
   if (c.budget) return t('오늘 예산을 다 써서 {time}까지 피하는 중', { time });
   return c.near ? t('사용률이 기준을 넘어 {time}까지 피하는 중', { time }) : t('{time}까지 쉬는 중', { time });
 };
+
+// 구독 한도 % 상한(결정 0026): 목표가 새 일을 시작하기 전에, 그 일을 돌 AI 의 한도 창 중 하나라도 이 % 이상이면 묻는다(기본 90%, 0 이면 끔)
+function LimitCapCard() {
+  const st = state.settings;
+  const n = Number(st.limitCap);
+  const cap = Number.isFinite(n) ? n : 90;
+  const save = (b) => put('/api/settings', b).catch((e) => toast(e.message, 'error'));
+  return html`<div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+    <div style="flex:1;min-width:240px"><b>📊 ${t('구독 한도 상한')}</b>
+      <div class="hint">${t('목표가 새 일(조사·회의·계획·단계·카드·판정)을 시작하기 전에, 그 일을 돌 AI 의 한도 창 중 하나라도 이 % 이상이면 시작하지 않고 물어(계속 · 초기화 뒤 이어서 · 그만). 위의 "미리 피하는 기준"이 다른 AI 로 넘길 수 있으면 그게 먼저야. 사용률을 알려 주는 AI(지금은 Claude·Codex)만 보고, 목표가 아닌 보통 실행은 묻지 않아.')}</div></div>
+    <label class="row small" style="gap:6px">${t('상한')}
+      <select class="select sm" value=${String(cap)} onChange=${(e) => save({ limitCap: Number(e.target.value) })}>
+        ${[...new Set([0, 70, 80, 90, 95, 100, cap])].sort((a, b) => a - b).map((x) => html`<option value=${String(x)}>${x === 0 ? t('끄기') : t('사용률 {n}% 이상', { n: x })}</option>`)}</select></label>
+  </div>`;
+}
 
 // 하루 예산: 주간 한도를 하루 이틀에 다 쓰지 않게 하루 몫을 정한다(기본은 꺼짐)
 function BudgetCard() {

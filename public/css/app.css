@@ -295,6 +295,14 @@ a { color: var(--link); }
 .limit .ls { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
 .stat { display: flex; justify-content: space-between; font-size: 12.5px; padding: 3px 0; }
 .stat span:last-child { font-weight: 700; font-variant-numeric: tabular-nums; }
+/* 세션의 "어디에 썼는지" 표(결정 0026): 종류별·에이전트별 환산 사용량 */
+.use-table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 4px 0 8px; }
+.use-table th { text-align: left; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border); padding: 2px 4px; white-space: nowrap; }
+.use-table td { padding: 2px 4px; border-bottom: 1px solid var(--border); }
+/* 이름 칸이 남는 너비를 갖고 넘치면 말줄임, 숫자 칸은 글자만큼(좁은 창에서 머리말이 겹치지 않게) */
+.use-table th:first-child, .use-table td:first-child { width: 100%; max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.use-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; padding-left: 8px; }
+.use-table td.num { font-weight: 600; }
 .log { font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
 .log .li { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 6px; }
 .log .tm { color: var(--faint); font-variant-numeric: tabular-nums; }

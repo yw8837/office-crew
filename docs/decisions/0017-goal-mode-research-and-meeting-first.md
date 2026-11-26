@@ -8,6 +8,10 @@
 
 When a goal meeting (the pre-work meeting or a team meeting stage in a goal's work run) concludes, the code reads the five lines the conclusion prompt already asks for (decision, reasons, remaining disagreement, dropped options, next steps) into `mission.meetings`; a conclusion without them is kept as it is with empty fields. What the work stages get is unchanged (the whole conclusion as reference), the prompts are unchanged, and what goes into project memory is unchanged: the pre-work meeting's answers stay out (they are marked `prep`), while a team meeting stage's turns and conclusion in a goal's work run go in as before. The goal report, which goes into memory only when the user adds it, shows the decision and the remaining disagreement on its card, not in its memory text.
 
+## Revision (2026-11-26, with [0026](0026-usage-breakdown-limit-cap-and-lean-profile.md))
+
+With the lean profile (`savings: 'lean'`, off by default), an AI with file tools gets the research note as a file in the data folder (`handoff/<session>/research/<goal>/`, answers not cut, the folder opened for that run as in [0008](0008-handoff-to-another-ai.md)) and, in the prompt, only the note's head lines, one line saying so, the path and the first line of each answer; an AI without file tools still gets the note as below. The plan step keeps the whole note. The scan, questions, research and meeting steps also stop before starting when the subscription cap of 0026 is reached.
+
 ## Revision (2026-11-25, with [0022](0022-goal-mode-records-and-block-allow-list.md))
 
 Research during a goal meeting is also turned off when the research agent's set AI is near its usage limit (`check.status: 'near'`, [0022](0022-goal-mode-records-and-block-allow-list.md)), not only when fewer than a quarter of the calls are left.

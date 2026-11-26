@@ -11,10 +11,10 @@ const ACTIVE = new Set(['running', 'paused', 'waiting']);
 // 회의 차례 이름: 의견 1/3, 차례 2/3, 조사 2/3, 판정 2/3, 결론. 그 밖(옛 세션의 'review')은 검토 2/2
 export const meetLabel = (m) => (m.phase === 'conclude' ? t('결론') : m.phase === 'opinion' ? t('의견 {r}/{n}', { r: m.round, n: m.rounds }) : m.phase === 'turn' ? t('차례 {r}/{n}', { r: m.round, n: m.rounds }) : m.phase === 'research' ? t('조사 {r}/{n}', { r: m.round, n: m.rounds }) : m.phase === 'judge' ? t('판정 {r}/{n}', { r: m.round, n: m.rounds }) : t('검토 {r}/{n}', { r: m.round, n: m.rounds }));
 
-// 목표의 판정 뒤 묻기·호출 상한·한도 대기(결정 0015·0019)로 i 단계가 기다리면 그 사유('mission'|'cap'|'quota'), 아니면 ''
-export const holdKind = (run, i) => (run && run.status === 'waiting' && run.hold?.stageIndex === i && ['mission', 'cap', 'quota'].includes(run.hold.reason) ? run.hold.reason : '');
+// 목표의 판정 뒤 묻기·호출 상한·한도 대기·구독 한도 상한(결정 0015·0019·0026)으로 i 단계가 기다리면 그 사유('mission'|'cap'|'quota'|'limitcap'), 아니면 ''
+export const holdKind = (run, i) => (run && run.status === 'waiting' && run.hold?.stageIndex === i && ['mission', 'cap', 'quota', 'limitcap'].includes(run.hold.reason) ? run.hold.reason : '');
 // 단계 띠("사무실 크게" 보기의 진행 바)에 보일 표시. 끝난 판정 단계가 ✓ 로 보여 다 끝난 것처럼 읽히지 않게
-export const goalWait = (run, i) => ({ mission: '🎯', cap: '🔢', quota: '⏳' }[holdKind(run, i)] || '');
+export const goalWait = (run, i) => ({ mission: '🎯', cap: '🔢', quota: '⏳', limitcap: '📊' }[holdKind(run, i)] || '');
 
 // 끝난 목표의 끝 깃발 이름. 완주 보고 카드(결정 0025)도 같은 말을 써서 둘이 어긋나지 않게 한다
 export const goalEndWord = (status) => ({ done: t('통과로 끝'), accepted: t('받아들여 끝'), stopped: t('중지됨') }[status] || '');
@@ -136,6 +136,7 @@ export function stageModel(input = {}) {
   const src = useRun ? run.stages || [] : team?.stages?.length ? team.stages : solo ? [{ label: solo.role || solo.name || '', agentIds: [String(solo.id)] }] : [];
   const cur = useRun && active && Number.isInteger(run.stageIndex) ? run.stageIndex : null;
   const quotaAuto = hold?.reason === 'quota' && !!hold.autoAt;
+  const capAuto = hold?.reason === 'limitcap' && !!hold.autoAt; // 구독 한도 상한에서 자동 이어서를 골랐다(결정 0026): 내 차례가 아니라 한도 대기
   const qs = active ? (questions || []).filter((q) => !q.runId || q.runId === run.id) : [];
   const curStage = cur != null ? src[cur] : null;
   const holdStage = hold && Number.isInteger(hold.stageIndex) ? src[hold.stageIndex] || null : null;
@@ -153,6 +154,8 @@ export function stageModel(input = {}) {
   const ran = !!hold && (hold.ran === true || holdStage?.status === 'error');
   const capInside = hold?.reason === 'cap' && ran;
   const limitInside = hold?.reason === 'mission' && hold.kind === 'limit' && ran;
+  // 구독 한도 상한(결정 0026)도 같은 규칙: 새 일을 시작하기 전이면 그 단계 앞, 이미 돈 단계(막힘 "한 번 더"의 다음 바퀴)면 역 안
+  const limitcapInside = hold?.reason === 'limitcap' && ran;
 
   const stations = src.map((st, i) => {
     const ids = (st.agentIds || []).map(String);
@@ -161,6 +164,7 @@ export function stageModel(input = {}) {
     if (hk === 'mission' && (hold.kind !== 'limit' || limitInside)) state = 'wait'; // 카드 되풀이 상한은 보통 단계를 시작하기 전에 묻는다(그 단계는 아직 돌지 않았다)
     if (hk === 'quota') state = quotaAuto ? 'limit' : 'wait';
     if (hk === 'cap' && capInside) state = 'wait';
+    if (hk === 'limitcap' && limitcapInside) state = capAuto ? 'limit' : 'wait';
     if (cutRun && useRun && state !== 'done' && (st.status === 'stopped' || i === mis.at?.stageIndex)) state = 'cut';
     const isCur = cur === i;
     const showLive = isCur || (!!hold && hold.stageIndex === i);
@@ -186,7 +190,8 @@ export function stageModel(input = {}) {
         p.away = true;
         if (!p.st || p.st === 'idle' || p.st === 'done') Object.assign(p, { st: 'tool', tool: 'search' });
       }
-      if (hold?.reason === 'quota' && hold.stageIndex === i && (hold.who || []).some((w) => String(w.agentId) === id)) {
+      // 한도 대기(0019)에 걸린 사람, 구독 한도 상한(0026)에서 자동 이어서를 기다리는 사람
+      if ((hold?.reason === 'quota' || capAuto) && hold.stageIndex === i && (hold.who || []).some((w) => String(w.agentId) === id)) {
         const until = hold.autoAt || hold.until || 0;
         Object.assign(p, { st: 'limit', tool: null, limitLeft: until > now ? until - now : null });
       }
@@ -249,6 +254,10 @@ export function stageModel(input = {}) {
       ask = { kind: 'cap', icon: 'gauge', cls: 'me', title: hold.kind === 'rate' ? t('카드 시작 수 상한') : t('호출 상한'), short, target: 'gate', ...(capInside ? { station: i } : { gateAfter: i - 1 }) };
     } else if (hold.reason === 'quota' && !quotaAuto) {
       ask = { kind: 'quota', icon: 'hour', cls: 'me', title: t('사용량 한도'), short: (hold.who || []).map((w) => w.name || nameOf(w.agentId)).join(', '), target: 'gate', station: i };
+    } else if (hold.reason === 'limitcap' && !capAuto) {
+      // 구독 한도 상한(결정 0026): 누구의 AI 가 몇 %인지. 문은 그 단계 앞(이미 돈 단계면 역 안)
+      const short = (hold.who || []).map((w) => `${w.name || nameOf(w.agentId)} ${Math.max(...(w.windows || []).map((x) => Number(x.pct) || 0), 0)}%`).join(', ');
+      ask = { kind: 'limitcap', icon: 'gauge', cls: 'me', title: t('구독 한도 상한'), short, target: 'gate', ...(limitcapInside ? { station: i } : { gateAfter: i - 1 }) };
     }
   } else if (qs.length) {
     const q = qs[0];
@@ -269,7 +278,7 @@ export function stageModel(input = {}) {
 
   // ── 한도 대기(내 차례 아님): 자동 이어서가 걸린 한도 대기, 한도가 곧 풀려 기다리는 사람(결정 0019) ──
   const waiting = Object.entries(live || {}).filter(([id, l]) => l?.state === 'paused' && inRun.has(String(id))).map(([id]) => id);
-  const limit = quotaAuto ? { until: hold.autoAt, names: (hold.who || []).map((w) => w.name || nameOf(w.agentId)) }
+  const limit = quotaAuto || capAuto ? { until: hold.autoAt, names: (hold.who || []).map((w) => w.name || nameOf(w.agentId)) }
     : active && waiting.length ? { until: null, names: waiting.map(nameOf) } : null;
 
   // ── 목표 줄 ──

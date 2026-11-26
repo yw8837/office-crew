@@ -374,6 +374,18 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     bus.emit('teams', store.all('teams'));
     return { ok: true };
   });
+  // 에이전트 편집 화면의 "새 대화마다 보내는 고정 글"(결정 0026): 저장 전에 고친 값으로 센 시스템 지시 글자 수와 스킬 본문 몫(화면에는 스킬 본문을 보내지 않고 숫자만)
+  route('POST', '/api/agents/fixed-text', async (req) => {
+    const b = await readJson(req);
+    const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
+    const saved = typeof b.id === 'string' ? store.get('agents', b.id) : null;
+    const agent = {
+      ...(saved || {}), name: str(b.name, 200), role: str(b.role, 200), systemPrompt: str(b.systemPrompt, 100000),
+      provider: str(b.provider, 60) || saved?.provider || 'claude', permission: str(b.permission, 20) || saved?.permission || 'default',
+      skills: Array.isArray(b.skills) ? b.skills.filter((x) => typeof x === 'string').slice(0, 100) : [],
+    };
+    return orch.fixedText(agent);
+  });
 
   // 역할 노트(결정 0013): 에이전트마다 하는 일과 항목. 사용자 항목만 바로 확정이고, 에이전트·바깥 자료 항목은 초안으로 들어와 받아야 다음 일에 들어간다.
   // 형식 오류는 notes.js 가 400(이유), 없는 항목·기록은 404, 되돌릴 수 없는 변경은 409 로 던진다
@@ -743,6 +755,9 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
     if ('failoverThreshold' in b) b.failoverThreshold = Math.min(100, Math.max(50, Math.round(Number(b.failoverThreshold) || 95)));
     if ('failover' in b) b.failover = b.failover !== false;
     if ('waitForResetMin' in b) b.waitForResetMin = Math.min(30, Math.max(0, Math.round(Number(b.waitForResetMin) || 0)));
+    // 구독 한도 % 상한(0 = 끔, 숫자가 아니면 기본 90)과 절약 프로필(결정 0026)
+    if ('limitCap' in b) { const n = Number(b.limitCap); b.limitCap = b.limitCap !== null && b.limitCap !== '' && Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : 90; }
+    if ('savings' in b) b.savings = b.savings === 'lean' ? 'lean' : 'normal';
     if ('autoHandoff' in b) b.autoHandoff = b.autoHandoff === true;
     if ('agentAsks' in b) b.agentAsks = b.agentAsks !== false;
     if ('stallMinutes' in b) b.stallMinutes = Math.min(1440, Math.max(0, Math.round(Number(b.stallMinutes) || 0)));

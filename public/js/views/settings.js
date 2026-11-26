@@ -1,11 +1,12 @@
 // 설정(AI 계정 로그인·API 키·화면/사무실 스킨·기본값) + 사용량 화면
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { html, Icon, Modal, Toggle, ProviderChip, providerColor, fmtTok, fmtCost, usageTotal, officeMod, EFFORT_LABEL, imageFileToDataURL } from '../ui.js';
+import { html, Icon, Modal, Toggle, ProviderChip, providerColor, fmtTok, fmtCost, officeMod, EFFORT_LABEL, imageFileToDataURL } from '../ui.js';
 import { state, changed, toast, applyTheme, applyLang, agentById, askNotifyPermission } from '../state.js';
 import { get, post, put, patch, del } from '../api.js';
 import { PageHead } from './manage.js';
-import { Limits } from './session.js';
-import { t, LANGS, getLang } from '../i18n/index.js';
+import { Limits, usageTip } from './session.js';
+import { t, LANGS, getLang, locale } from '../i18n/index.js';
+import { weighted, cacheHit } from '../usage-numbers.js';
 
 async function saveSettings(patch) {
   try { state.settings = await put('/api/settings', patch); applyTheme(); applyLang(); changed(); return true; } catch (e) { toast(e.message, 'error'); return false; }
@@ -345,6 +346,15 @@ function Defaults() {
         <div class="field"><label>${t('멈춘 실행으로 볼 시간(분)')}</label><input class="input" type="number" min="0" max="1440" value=${s.stallMinutes ?? 30} onChange=${(e) => saveSettings({ stallMinutes: Number(e.target.value) })} /><div class="hint">${t('출력이 이만큼 없으면 CLI를 끄고 오류로 돌려. 도구가 도는 중엔 4배까지 기다려. 0이면 끄기.')}</div></div>
         <div class="field"><label>${t('보내기 키')}</label><div class="seg"><button class=${s.sendOnEnter !== false ? 'on' : ''} onClick=${() => saveSettings({ sendOnEnter: true })}>Enter</button><button class=${s.sendOnEnter === false ? 'on' : ''} onClick=${() => saveSettings({ sendOnEnter: false })}>Ctrl+Enter</button></div></div>
       </div>
+      <div class="field" style="margin-top:14px"><label id="savings-label">${t('넘겨주는 글의 양')}</label>
+        <div class="seg" role="group" aria-labelledby="savings-label" style="align-self:flex-start"><button class=${s.savings !== 'lean' ? 'on' : ''} aria-pressed=${s.savings !== 'lean'} onClick=${() => saveSettings({ savings: 'normal' })}>${t('보통')}</button><button class=${s.savings === 'lean' ? 'on' : ''} aria-pressed=${s.savings === 'lean'} onClick=${() => saveSettings({ savings: 'lean' })}>${t('절약')}</button></div>
+        <div class="hint">${t('보통은 지금대로 넘겨. 절약을 고르면 아래 셋이 한 번에 바뀌어:')}
+          <ul class="small" style="margin:4px 0">
+            <li>${t('처음 맡는 에이전트에게 주는 최근 대화를 위 설정의 절반(올림, 최소 1)만')}</li>
+            <li>${t('목표의 조사 노트는 파일로 두고, 파일을 읽을 수 있는 AI 에는 질문마다 첫 줄과 파일 경로만(파일을 못 읽는 AI 에는 지금처럼 전문)')}</li>
+            <li>${t('앞 단계 결과는 바로 앞 단계만 전문, 그보다 앞 단계는 끝부분 {n}자만', { n: (1500).toLocaleString(locale()) })}</li>
+          </ul>
+          ${t('기준 판정(검수) 자료는 줄이지 않아. 줄인 곳은 에이전트에게 한 줄로 알려. 넘겨받는 글이 줄어서 답의 질이 떨어질 수 있어.')}</div></div>
       <div class="row" style="margin-top:14px"><${Toggle} checked=${s.autoHandoff === true} onChange=${(v) => saveSettings({ autoHandoff: v })} title=${t('인수인계 메모 자동 작성')} /><b>${t('인수인계 메모 자동 작성')}</b></div>
       <div class="hint">${t('다른 AI가 세션을 처음 이어받기 전에, 그 세션을 맡던 AI가 지금까지 한 일을 메모로 먼저 정리해. 그때마다 AI를 한 번 더 불러서 사용량이 들어. 꺼 두면 최근 대화, 앞 대화에서 고른 부분, 대화 전체 파일만 건네(AI 호출 없음).')}</div>
       <div class="row" style="margin-top:14px"><${Toggle} checked=${s.agentAsks !== false} onChange=${(v) => saveSettings({ agentAsks: v })} title=${t('에이전트가 묻기')} /><b>${t('에이전트가 묻기')}</b></div>
@@ -405,24 +415,28 @@ export function UsagePage() {
   const real = ([p]) => p !== 'mock';
   const byP = Object.entries(u.byProvider || {}).filter(real);
   const today = Object.entries(u.today || {}).filter(real);
-  const byA = Object.entries(u.byAgent || {}).sort((a, b) => usageTotal(b[1]) - usageTotal(a[1]));
-  const max = Math.max(1, ...byA.map(([, v]) => usageTotal(v)));
+  // 한 숫자는 환산(결정 0026: 새 입력 + 캐시 쓰기 + 출력 + 캐시 읽기÷10). 네 값은 따로 보이고, 에이전트별 줄에는 캐시 적중률(캐시 숫자를 주는 AI 만)
+  const byA = Object.entries(u.byAgent || {}).sort((a, b) => weighted(b[1]) - weighted(a[1]));
+  const max = Math.max(1, ...byA.map(([, v]) => weighted(v)));
+  const parts = (v) => t('새 입력 {i} · 캐시 쓰기 {cw} · 캐시 읽기 {cr} · 출력 {o}', { i: fmtTok(v.input), cw: fmtTok(v.cacheWrite), cr: fmtTok(v.cacheRead), o: fmtTok(v.output) });
   return html`<div class="page"><div class="page-inner">
     <${PageHead} title=${t('사용량')} desc=${t('토큰·비용은 실행마다 실시간으로 쌓여. 계정 한도(%)는 Claude·Codex가 실행 때 알려주는 값이야.')} />
+    <div class="hint" style="margin:-4px 0 12px">${t('한 숫자로 볼 때는 "환산"이야: 새 입력 + 캐시 쓰기 + 출력 + 캐시 읽기÷10. 캐시에서 다시 읽은 글은 싸고 빨라서 10분의 1로 셌어(회의 사용량 상한과 같은 셈, 요금표와 똑같지는 않아). 네 값을 1:1 로 더하면 캐시 읽기가 많은 실행이 실제보다 커 보여.')}</div>
     <div class="grid2" style="gap:14px">
       <div class="card"><h4>🔋 ${t('계정 한도')}</h4><${Limits} lim=${u.limits} /></div>
       <div class="card"><h4>📅 ${t('오늘')}</h4>
-        ${today.map(([p, v]) => html`<div class="stat"><span><${ProviderChip} id=${p} /></span><span>${t('{n} 토큰', { n: fmtTok(usageTotal(v)) })} ${fmtCost(v.cost)} · ${t('{n}회', { n: v.calls })}</span></div>`)}
+        ${today.map(([p, v]) => html`<div class="stat" title=${usageTip(v)}><span><${ProviderChip} id=${p} /></span><span>${t('환산 {n} 토큰', { n: fmtTok(weighted(v)) })} ${fmtCost(v.cost)} · ${t('{n}회', { n: v.calls })}</span></div>`)}
         ${!today.length && html`<div class="muted small">${t('오늘 기록 없음')}</div>`}
       </div>
     </div>
     <div class="section">${t('AI별 누적')}</div>
-    <div class="list">${byP.map(([p, v]) => html`<div class="li-row"><${ProviderChip} id=${p} /><div class="grow small">${t('입력 {i} · 출력 {o} · 캐시 {c}', { i: fmtTok(v.input), o: fmtTok(v.output), c: fmtTok(v.cacheRead + v.cacheWrite) })}</div><b>${fmtTok(usageTotal(v))}</b><span class="muted small">${fmtCost(v.cost)} · ${t('{n}회', { n: v.calls })}</span></div>`)}
+    <div class="list">${byP.map(([p, v]) => html`<div class="li-row" title=${usageTip(v)}><${ProviderChip} id=${p} /><div class="grow small">${parts(v)}</div><b>${t('환산 {n}', { n: fmtTok(weighted(v)) })}</b><span class="muted small">${fmtCost(v.cost)} · ${t('{n}회', { n: v.calls })}</span></div>`)}
       ${!byP.length && html`<div class="li-row muted">${t('아직 기록이 없어.')}</div>`}</div>
     <div class="section">${t('에이전트별 누적')}</div>
     <div class="list">${byA.map(([id, v]) => {
       const a = agentById(id);
-      return html`<div class="li-row"><div style="width:140px" class="ellipsis"><b>${a?.name || t('삭제된 에이전트')}</b></div><div class="grow"><div class="bar"><i style=${`width:${(usageTotal(v) / max) * 100}%;background:${providerColor(a?.provider)}`}></i></div></div><b>${fmtTok(usageTotal(v))}</b><span class="muted small">${fmtCost(v.cost)}</span></div>`;
+      const hit = cacheHit(v); // 캐시 숫자를 주지 않는 AI 는 안 보인다
+      return html`<div class="li-row" title=${usageTip(v)}><div style="width:140px" class="ellipsis"><b>${a?.name || t('삭제된 에이전트')}</b></div><div class="grow"><div class="bar"><i style=${`width:${(weighted(v) / max) * 100}%;background:${providerColor(a?.provider)}`}></i></div></div><b>${t('환산 {n}', { n: fmtTok(weighted(v)) })}</b>${hit !== null ? html`<span class="small" title=${t('캐시 적중률: 캐시 읽기 ÷ (새 입력 + 캐시 읽기 + 캐시 쓰기)')}>${t('캐시 적중 {n}%', { n: Math.round(hit * 100) })}</span>` : ''}<span class="muted small">${fmtCost(v.cost)}</span></div>`;
     })}${!byA.length && html`<div class="li-row muted">${t('아직 기록이 없어.')}</div>`}</div>
   </div></div>`;
 }

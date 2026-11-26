@@ -30,5 +30,8 @@ export function unverifiedLines(t, r) {
   return out;
 }
 
+// 윗등급에게 넘긴 카드 한 줄(결정 0027): "윗등급에게 넘긴 카드 2장: k1 하급 → 중급 · k2 중급 → 상급"(없으면 '')
+export const raisedWords = (t, raised) => (raised?.length ? t('윗등급에게 넘긴 카드 {n}장: {list}', { n: raised.length, list: raised.map((x) => `${x.id} ${(x.chain || []).join(' → ')}`).join(' · ') }) : '');
+
 // 실패 종류 한 줄: "검수에서 걸림 2 · 원인 모름 1"(없으면 '')
 export const failWords = (t, fails) => Object.entries(fails || {}).map(([k, n]) => `${failName(t, k)} ${n}`).join(' · ');

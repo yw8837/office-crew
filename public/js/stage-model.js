@@ -111,6 +111,21 @@ export function critFold(review, max = MAX_CRIT) {
   return list.length <= max ? { shown: list, hidden: [] } : { shown: list.slice(0, max - 1), hidden: list.slice(max - 1) };
 }
 
+// 되풀이 상한·막힘 질문의 윗등급에게 넘기기 보기(결정 0027): 서버가 보낸 항목을 보기(opt)마다 묶는다(최대 둘, 같은 프로바이더 후보가 먼저).
+// → [{ picks: 그 보기의 항목, to: 고를 때 보낼 { 카드 id: 후보 id } }]
+export function raiseChoices(hold) {
+  const list = hold?.reason === 'mission' && Array.isArray(hold.raise) ? hold.raise : [];
+  return [...new Set(list.map((r) => r.opt ?? 0))].sort().map((k) => {
+    const picks = list.filter((r) => (r.opt ?? 0) === k);
+    return { picks, to: Object.fromEntries(picks.map((r) => [r.card, r.to])) };
+  });
+}
+// 막힘·카드 되풀이 상한 질문 창의 번호 키(보기 순서 그대로): 1 받아들이기 · 2 한 번 더 · 3·4 윗등급에게 넘기기 보기. → [[동작, 덧붙일 값]] 또는 null(그 질문이 아님)
+export function gateKeys(hold) {
+  if (hold?.reason !== 'mission' || (hold.kind !== 'blocked' && hold.kind !== 'limit')) return null;
+  return [['accept', {}], ['more', {}], ...raiseChoices(hold).map((o) => ['raise', { to: o.to }])];
+}
+
 /**
  * 흐름 무대의 모델.
  * run: 세션의 마지막 실행(없으면 null), live: 에이전트 id → 실시간 상태(agentState), mission: 세션의 목표(없으면 null),
@@ -240,10 +255,13 @@ export function stageModel(input = {}) {
     else if (hold.reason === 'mission') {
       const k = hold.kind;
       const title = k === 'notes' ? t('추가 지시 반영') : k === 'blocked' ? t('막힘') : k === 'limit' ? t('카드 되풀이 상한') : t('목표 판정');
-      const short = k === 'notes' ? t('반영 안 한 추가 지시 {n}개', { n: Number(hold.notes) || 0 })
+      const base = k === 'notes' ? t('반영 안 한 추가 지시 {n}개', { n: Number(hold.notes) || 0 })
         : k === 'blocked' ? (hold.blocked || []).map((b) => b.name).filter(Boolean).join(', ')
           : k === 'limit' ? (hold.cards || []).map((c) => c.id).join(', ')
             : t('남은 기준 {n}개', { n: (hold.left || []).length });
+      // 사다리 팀의 되풀이 상한·막힘 질문에 윗등급에게 넘기기 보기가 있으면(결정 0027) 문 문구에 그 후보. 대기 종류는 그대로 limit·blocked
+      const up = (k === 'limit' || k === 'blocked') && Array.isArray(hold.raise) ? [...new Set(hold.raise.map((r) => r.name || nameOf(r.to)).filter(Boolean))] : [];
+      const short = up.length ? [base, t('윗등급 {names}에게 넘길 수 있어', { names: up.join(', ') })].filter(Boolean).join(' · ') : base;
       // 판정·추가 지시는 판정 역 뒤, 막힘은 막힌 일 단계 뒤, 카드 되풀이 상한은 그 카드 단계를 시작하기 전(앞). 이미 돈 단계에서 묻는 되풀이 상한은 역 안(limitInside)
       ask = { kind: k === 'limit' ? 'limit' : k === 'blocked' ? 'blocked' : k === 'notes' ? 'notes' : 'verdict', icon: k === 'limit' ? 'gauge' : 'target', cls: 'me', title, short, target: 'gate', ...(limitInside ? { station: i } : { gateAfter: k === 'limit' ? i - 1 : i }) };
     } else if (hold.reason === 'cap') {

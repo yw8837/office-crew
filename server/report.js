@@ -3,7 +3,7 @@
 // 에이전트가 쓴 글(기준의 근거, 회의 결론의 결정·남은 이견)은 따로 표시를 달고 길이 상한까지만. 바뀐 파일 목록은 오케스트레이터가 git 으로 채운다.
 // 글 판(reportText)은 사용자가 "기억에 넣기"를 누를 때 프로젝트 기억에 넣는 글이다: 코드가 모은 사실과 기준별 결과만(회의 결론·조사 노트는 넣지 않는다)
 import { tr } from './i18n.js';
-import { verdictWord, answerNames, durationWords, unverifiedLines, failWords } from '../public/js/report-lines.js'; // 화면과 같은 글줄
+import { verdictWord, answerNames, durationWords, unverifiedLines, failWords, raisedWords } from '../public/js/report-lines.js'; // 화면과 같은 글줄
 import { answerKind } from '../public/js/usage-numbers.js'; // 답의 종류는 세션의 "어디에 썼는지"와 같은 함수(결정 0026)
 
 export const REPORT_EVIDENCE = 200; // 보고에 싣는 기준 근거(에이전트가 씀) 하나의 최대 글자
@@ -24,8 +24,8 @@ export function reportLocal({ m, messages = [], runs = [] }) {
   return !!m.requestMsgId && messages.some((x) => x.id === m.requestMsgId && x.role === 'user' && x.local === true);
 }
 
-// 완주 보고 값(메시지에 그대로 싣는다). m: 끝난 목표, messages·runs: 세션의 것, now: 끝난 시각
-export function buildReport({ m, messages = [], runs = [], now = Date.now() }) {
+// 완주 보고 값(메시지에 그대로 싣는다). m: 끝난 목표, messages·runs: 세션의 것, now: 끝난 시각, nameOf: 에이전트 id → 이름(보고를 만들 때의 이름으로 적는다)
+export function buildReport({ m, messages = [], runs = [], now = Date.now(), nameOf = (id) => id }) {
   const mine = runsOf(m, runs);
   const ids = new Set(mine.map((r) => r.id));
   // 종류별 답 수는 오류·중지로 끝난 답도 센다(그 답에도 호출이 들었다). 그중 끝나지 못한 답의 수는 따로(answerFails)
@@ -69,6 +69,8 @@ export function buildReport({ m, messages = [], runs = [], now = Date.now() }) {
       quota: log.filter((x) => x.kind === 'quota').length,
     },
     fails, routes: log.filter((x) => x.kind === 'route').length,
+    // 윗등급에게 넘긴 카드(결정 0027): 카드 기록(raised)에서 카드마다 처음 담당 → 넘겨받은 담당들(이름)
+    raised: (m.cards || []).filter((c) => c.raised?.length).map((c) => ({ id: c.id, chain: [c.raised[0].from, ...c.raised.map((r) => r.to)].map((id) => String(nameOf(id) || id)) })),
     logCut: log[0]?.kind === 'skip' ? Number(log[0].n) || 0 : 0,
     meetings: [...meet.values()].map((x) => ({ ...(x.prep ? { prep: true } : { stageIndex: x.stageIndex, label: String(lastWork?.stages?.[x.stageIndex]?.label || '') }), msgId: x.msgId, decision: x.decision || '', dissent: [...(x.dissent || [])] })),
   };
@@ -100,6 +102,8 @@ export function reportText(r, { missionId = '' } = {}) {
   const f = failWords(tr, r.fails);
   if (f) lines.push(`${tr('실패 종류')}: ${f}`);
   if (r.routes) lines.push(tr('배정이 평소와 달랐던 답: {n}개', { n: r.routes }));
+  const up = raisedWords(tr, r.raised);
+  if (up) lines.push(up);
   if (r.files?.list?.length) lines.push(`${tr('바뀐 파일(git)')}: ${r.files.list.slice(0, 20).join(', ')}${r.files.list.length > 20 || r.files.more ? ` ${tr('…(그 밖에 {n}개)', { n: r.files.list.length - Math.min(20, r.files.list.length) + (r.files.more || 0) })}` : ''}`);
   const text = [...lines.join('\n')];
   return text.length > REPORT_TEXT_MAX ? text.slice(0, REPORT_TEXT_MAX).join('') : text.join('');

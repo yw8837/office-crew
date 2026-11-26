@@ -106,7 +106,7 @@ export function routeTip(route, { t = (s) => s, label = (p) => p } = {}) {
   const why = Array.isArray(route.why) ? route.why : [];
   if (a.provider === r.provider && a.model === r.model && a.effort === r.effort && !why.length) return '';
   const ai = (x) => (x.provider === 'auto' ? t('자동 라우팅') : [label(x.provider), x.model, x.effort].filter(Boolean).join(' · '));
-  const W = { auto: t('자동 라우팅'), 'near-limit': t('한도 임박'), 'daily-budget': t('하루 예산 다 씀'), 'daily-pace': t('하루 예산 속도'), takeover: t('이어받기'), 'wait-reset': t('한도 풀림 기다림'), 'account-gone': t('지운 계정') };
+  const W = { auto: t('자동 라우팅'), 'near-limit': t('한도 임박'), 'daily-budget': t('하루 예산 다 씀'), 'daily-pace': t('하루 예산 속도'), takeover: t('이어받기'), 'wait-reset': t('한도 풀림 기다림'), 'account-gone': t('지운 계정'), raised: t('윗등급에게 넘김') };
   return [t('요청: {ai}', { ai: ai(a) }), t('이유: {why}', { why: why.length ? why.map((w) => W[w] || w).join(', ') : t('기록된 이유 없음') })].join('\n');
 }
 

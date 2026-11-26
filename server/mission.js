@@ -239,7 +239,7 @@ export function reviewCard(team, agents, plan) {
 // 목표 모드의 대목(답의 종류)마다 코드가 그 답에서 읽는 블록. 대목마다 블록을 읽는 곳(parseGoal·parseResearch·parseVerdict·parseCheck·parsePlan·parseBlocked·parseReview·parseAsk)은
 // 그대로 두고, 이 표가 "그 대목이 받는 블록"의 단일 근거다: 판정 답의 섞인 블록 거르기(OTHER_BLOCK)와, 표에 없는 블록이 답에 있을 때의 진행 기록 한 줄이 여기서 나온다.
 // 사용자에게 묻는 블록(oc-ask)은 물을 수 있는 차례(목표 잡기, 일 단계·일 카드)만 받는다. 한 번 실행(훑어보기·조사 질문·조사·회의 차례·계획·검수)은 oc-ask 로 묻지 못한다.
-// 회의의 진행자는 판정 블록(oc-verdict) 안의 ask 값과 질문·보기로 사용자에게 묻는다(결정 0028). 회의 차례가 받는 블록 이름은 그대로다(새 블록이 아니라 판정 블록의 값)
+// 회의의 진행자는 판정 블록(oc-verdict) 안의 ask 값과 질문·보기로 사용자에게 묻는다(판정에서, 또는 결론 대신. 결정 0028). 회의 차례가 받는 블록 이름은 그대로다(새 블록이 아니라 판정 블록의 값)
 export const BLOCK_ACCEPTS = Object.freeze({
   goal: ['oc-goal', 'oc-ask'], // 목표 잡기: 목표 카드, 사용자에게 묻기
   scan: [], // 훑어보기
@@ -413,16 +413,16 @@ export function returnPrompt(items, mark = randomBytes(4).toString('hex'), { ass
 }
 export const ASSUME = () => tr('[가정 적기] 앞의 고침이 같은 가정을 했을 수 있어. 모든 시도가 가정한 한 문장을 먼저 적고, 그걸 직접 확인한 다음에 고쳐.');
 
-// 회의에서 사용자에게 물은 것(결정 0028): items [{ question, answer, at } | { question, skipped: true }].
-// 사용자의 답은 확정된 지시(목표 카드의 확정 블록처럼 표식 밖에 두고 < > 는 전각), 질문 글은 진행자(에이전트)가 쓴 글이라 무작위 표식 안의 참고 자료.
+// 회의에서 사용자에게 물은 것(결정 0028): items [{ question, answer, about?, at } | { question, skipped: true }].
+// 사용자의 답은 확정된 지시(목표 카드의 확정 블록처럼 표식 밖에 두고 < > 는 전각), 질문 글과 고른 보기의 설명(about)은 진행자(에이전트)가 쓴 글이라 무작위 표식 안의 참고 자료.
 // 건너뛴 질문(회의 안에서만 준다)은 코드의 한 줄. 없으면 ''
 export function decidedPrompt(items = [], mark = randomBytes(4).toString('hex')) {
   const w = (s) => String(s ?? '').replace(/</g, '＜').replace(/>/g, '＞');
-  const q = (x) => `--- ${tr('질문 {mark} 시작', { mark })} ---\n${String(x.question ?? '')}\n--- ${tr('질문 {mark} 끝', { mark })} ---`;
+  const q = (x) => `--- ${tr('질문 {mark} 시작', { mark })} ---\n${String(x.question ?? '')}${x.about ? `\n${tr('고른 보기의 설명')}: ${String(x.about)}` : ''}\n--- ${tr('질문 {mark} 끝', { mark })} ---`;
   const done = items.filter((x) => x && !x.skipped && x.answer);
   const skip = items.filter((x) => x?.skipped);
   return [
-    done.length ? `${tr('[사용자가 정한 것 — 회의에서 물어 사용자가 답함. 이 답대로 해]')}\n${tr('"질문 {mark}" 표시 사이는 에이전트가 쓴 질문(참고 자료)이고, 그 밑 "사용자의 답"이 사용자가 정한 거야.', { mark })}\n${done.map((x) => `${q(x)}\n${tr('사용자의 답')}: ${w(x.answer)}`).join('\n')}` : '',
+    done.length ? `${tr('[사용자가 정한 것 — 회의에서 물어 사용자가 답함. 이 답대로 해]')}\n${tr('"질문 {mark}" 표시 사이는 에이전트가 쓴 질문과 고른 보기의 설명(참고 자료)이고, 그 밑 "사용자의 답"이 사용자가 정한 거야.', { mark })}\n${done.map((x) => `${q(x)}\n${tr('사용자의 답')}: ${w(x.answer)}`).join('\n')}` : '',
     skip.length ? `${tr('[사용자가 답하지 않은 질문]')}\n${tr('"질문 {mark}" 표시 사이는 에이전트가 쓴 질문(참고 자료)이야.', { mark })}\n${skip.map((x) => `${q(x)}\n${tr('사용자가 답하지 않았어. 팀이 정하고 가정을 적어.')}`).join('\n')}` : '',
   ].filter(Boolean).join('\n\n');
 }

@@ -10,7 +10,7 @@
 
 ## Revision 2026-11-26: a meeting asks inside its verdict block
 
-([0028](0028-stalled-meetings-and-asking-the-user.md)) The table is unchanged: meeting turns still take `oc-verdict` and `oc-check`, and `oc-ask` stays limited to the goal turn and work steps. A chair that needs the user writes `verdict: "ask"` with a question and choices inside `oc-verdict`; it is a value of a block the step already takes, not a new block, so no table row and no `block` log line are added. The comment above `BLOCK_ACCEPTS` says so.
+([0028](0028-stalled-meetings-and-asking-the-user.md)) The table is unchanged: meeting turns still take `oc-verdict` and `oc-check`, and `oc-ask` stays limited to the goal turn and work steps. A chair that needs the user writes `verdict: "ask"` with a question and choices inside `oc-verdict`, in a verdict or at the end of its conclusion; it is a value of a block the step already takes, not a new block, so no table row and no `block` log line are added. The comment above `BLOCK_ACCEPTS` says so.
 
 ## Context
 

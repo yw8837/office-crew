@@ -979,7 +979,7 @@ test('22. 다른 AI의 조사 차례: Codex 는 read-only 샌드박스, Gemini �
   assert.deepEqual(gs, { textOnly: [{ name: '이름x', ai: 'AIhermes' }], noTools: [{ name: '이름y', ai: 'AIopenai' }] });
 });
 
-test('23. 목표 실행의 회의: 1바퀴 의견에는 입장 줄(서로 안 보고 쓰니 이견 문장은 없다), 차례에는 [네가 앞에서 한 말]을 따로 두고 이견을 숨기지 말라는 말, 반대편은 가장 강한 주장을 근거로 반박. 경고 문장은 내 말도 같은 표시 안이라고 한다. 목표가 아닌 회의는 그대로', async () => {
+test('23. 목표 실행의 회의: 1바퀴 의견에는 입장 줄(서로 안 보고 쓰니 이견 문장은 없다), 차례에는 [네가 앞에서 한 말]을 따로 두고 이견을 숨기지 말라는 말, 반대편은 가장 강한 주장을 근거로 반박. 경고 문장은 내 말도 같은 표시 안이라고 한다. 목표가 아닌 회의는 1바퀴 의견의 입장 줄(결정 0028)만 같고 나머지는 그대로', async () => {
   await app();
   const a = await mk('입장진행', '분석', { permission: 'edit' });
   const b = await mk('입장참석', '정리', { permission: 'edit' });
@@ -1009,8 +1009,10 @@ test('23. 목표 실행의 회의: 1바퀴 의견에는 입장 줄(서로 안 �
   assert.deepEqual(count(agentMsgs(S(plain), (x) => x.meeting).map((x) => x.meeting.phase)), { opinion: 3, turn: 2, conclude: 1 });
   const pp = meetCalls(from).map((x) => x.texts[0]);
   assert.ok(pp.every((p) => !p.includes('[네가 앞에서 한 말]') && !p.includes('동의하지 못하는 점이 있으면 숨기지 말고') && !p.includes('(다른 참석자의 말과 네가 앞에서 한 말)')));
-  // 보통 회의의 1바퀴 의견에도 입장 줄 형식이 들어간다(결정 0028: 2바퀴 차례의 입장과 견줘 정체를 본다)
-  assert.ok(pp.filter((p) => p.includes('[회의 — 의견 내기')).every((p) => p.includes('- 입장: 지금 미는 안 한 줄(맨 끝 줄로)')));
+  // 보통 회의의 1바퀴 의견에도 입장 줄 형식이 들어간다(결정 0028: 2바퀴 차례의 입장과 견줘 정체를 본다). 목록이 비어도 참이 되지 않게 수를 먼저 본다
+  const plainOps = pp.filter((p) => p.includes('[회의 — 의견 내기'));
+  assert.equal(plainOps.length, 3, '참석자 셋의 의견 프롬프트');
+  assert.ok(plainOps.every((p) => p.includes('- 입장: 지금 미는 안 한 줄(맨 끝 줄로)')));
   assert.ok(pp.some((p) => p.includes('지금 가장 힘을 받는 안의 약점')), '반대편 말은 지금 그대로');
 });
 

@@ -1,6 +1,6 @@
 // 회의 차례 정하기와 판정 읽기: 반대편 고르기, 차례 순서, 진행자 답 끝의 ```oc-verdict 블록 읽기(질문 블록 oc-ask 와 같은 규칙).
 // 회의 중 조사: 차례 답 끝의 ```oc-check 블록 읽기, 조사하러 갈 사람 고르기
-// 회의 정체(결정 0028): 차례 답의 "입장:" 줄 읽기, 반대편을 뺀 차례 발언자의 입장이 앞 바퀴와 그대로인지
+// 회의 정체(결정 0028): 차례 답의 "입장:" 줄 읽기, 반대편을 뺀 차례 발언자의 입장이 앞 바퀴와 그대로인지(그 바퀴에 조사 답이 왔으면 정체가 아니다)
 import { tr } from './i18n.js';
 import { roleKind } from './routing.js';
 
@@ -60,23 +60,31 @@ export function parseVerdict(text) {
 
 // 입장 줄의 머리(네 언어. 회의 프롬프트의 "입장: …" 형식 줄을 각 언어로 옮긴 말). 줄 맨 앞의 목록 기호·번호·굵게 표시는 건너뛴다
 const POSITION = /^\s*(?:[-*+•]\s+|\d+[.)]\s+)?(?:\*\*|__)?\s*(?:입장|position|立场|立場)\s*(?:\*\*|__)?\s*:\s*(?:\*\*|__)?\s*(.*)$/i;
-// 차례 답에서 입장 값: "입장:" 머리로 시작하는 마지막 줄의 값을 NFKC 로 정규화(전각 글자·쌍점·공백)하고 공백을 펴고 소문자로. 없거나 값이 비면 null(지어내지 않는다)
+const FENCE = /^ {0,3}(?:```|~~~)/; // 코드 펜스를 여닫는 줄
+const INDENTED = /^(?: {2,}|\t)/; // 두 칸 이상(또는 탭) 들여 쓴 줄: 하위 목록·코드
+// 차례 답에서 입장 값: "입장:" 머리로 시작하는 마지막 줄의 값을 NFKC 로 정규화(전각 글자·쌍점·공백)하고 공백을 펴고 소문자로. 없거나 값이 비면 null(지어내지 않는다).
+// 코드 펜스 안의 줄(css 의 position: absolute;, YAML 의 position: 3)과 두 칸 이상 들여 쓴 줄(하위 목록)은 입장 줄로 읽지 않는다
 export function positionOf(text) {
   const lines = String(text ?? '').normalize('NFKC').split(/\r?\n/);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const m = lines[i].match(POSITION);
-    if (!m) continue;
-    const v = m[1].replace(/\s+/g, ' ').trim().toLowerCase();
-    return v || null;
+  let fenced = false;
+  let found = null;
+  for (const l of lines) {
+    if (FENCE.test(l)) { fenced = !fenced; continue; }
+    if (fenced || INDENTED.test(l)) continue;
+    const m = l.match(POSITION);
+    if (m) found = m[1];
   }
-  return null;
+  if (found === null) return null;
+  return found.replace(/\s+/g, ' ').trim().toLowerCase() || null;
 }
 
 // 정체(결정 0028): round 바퀴의 차례 발언자 ids(반대편을 뺀. 진행자는 차례 발언을 하지 않는다)가 둘 이상이고, 모두 이번 바퀴와 앞 바퀴(2바퀴면 1바퀴 의견)에
 // 입장 줄이 있고, 사람마다 앞 바퀴와 같으면 true. 서로 달라도 각자 그대로면 정체다(더 얘기해도 안 바뀐다). 입장 줄이 없거나 이번 바퀴에 말하지 못한 사람이 있으면 false.
-// said: 회의에서 나온 말 [{ agent: { id }, text, round, phase }]
+// 그 바퀴에 답이 온 조사(answered)가 하나라도 있으면 false: 새 사실을 진행자가 판정에서 보게 한다(결정 0011). 답을 못 받은 조사는 새 사실이 아니라 보지 않는다.
+// said: 회의에서 나온 말 [{ agent: { id }, text, round, phase, answered? }]
 export function stalled({ said = [], round = 0, ids = [] } = {}) {
   if (round < 2 || ids.length < 2) return false;
+  if (said.some((s) => s.round === round && s.phase === 'research' && s.answered)) return false;
   const pos = (id, r, phase) => { const x = said.findLast((s) => s.agent?.id === id && s.round === r && s.phase === phase); return x ? positionOf(x.text) : null; };
   return ids.every((id) => {
     const now = pos(id, round, 'turn');

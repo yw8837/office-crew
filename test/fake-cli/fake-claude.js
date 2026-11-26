@@ -249,7 +249,10 @@ async function pump() {
     : req.includes('JUDGEQBAD') ? { verdict: 'ask', reason: '가짜', question: 'JUDGEQBAD 보기 하나', options: ['하나'] }
       : req.includes('JUDGEQ5') ? { verdict: 'ask', reason: '가짜', question: 'JUDGEQ5 보기 다섯', options: ['1', '2', '3', '4', '5'] }
         : req.includes('JUDGEQMORE') || (req.includes('JUDGEQ') && !askedBefore) ? { verdict: 'ask', reason: '가짜: 팀이 아니라 사용자가 정할 일', question: 'JUDGEQ 어느 안으로 갈까?', options: ['A안 (추천)', { label: 'B안', description: '느리지만 싸다' }] } : null;
-  const chunks = teamChunks || goalChunks || reviewChunks || prepChunks || planChunks || cardChunks || workBlock || fakeWork || foreignWork || concludeChunks || (koItems ? ['```json\n', JSON.stringify(Object.fromEntries(koItems.map((x) => [String(x.i), `가짜 한글 설명 ${x.i}`]))), '\n```']
+  // 결론에서 묻기(결정 0028): CONCLUDEQ 는 아직 사용자 답(또는 답하지 않은 질문) 블록이 없을 때 결론 대신 ask 판정 블록으로 답한다(결론 프롬프트에 묻기 안내가 없어도.
+  // 안내가 없는 결론에서는 앱이 그 블록을 읽지 않는지 보려고)
+  const concludeAsk = text.includes('[회의 — 결론 내기]') && req.includes('CONCLUDEQ') && !askedBefore ? ['이건 사용자가 정할 일이야.\n\n', '```oc-verdict\n' + JSON.stringify({ verdict: 'ask', reason: '가짜: 결론을 바꿀 사용자 결정', question: 'CONCLUDEQ 어느 쪽으로 정할까?', options: [{ label: 'A안 (추천)', description: '빠르다' }, { label: 'B안', description: '느리지만 싸다' }] }) + '\n```'] : null;
+  const chunks = teamChunks || goalChunks || reviewChunks || prepChunks || planChunks || cardChunks || workBlock || fakeWork || foreignWork || concludeAsk || concludeChunks || (koItems ? ['```json\n', JSON.stringify(Object.fromEntries(koItems.map((x) => [String(x.i), `가짜 한글 설명 ${x.i}`]))), '\n```']
     : judgeAsk ? ['물어볼게.\n\n', '```oc-verdict\n' + JSON.stringify(judgeAsk) + '\n```']
     // 회의 판정 차례: 판정 블록으로 답한다. AGREEFAST 는 합의, BADVERDICT 는 틀린 형식, 그 밖은 계속.
     // 목표 회의의 1바퀴 뒤 판정("1바퀴 의견만 보고")은 신호어 대신 프롬프트에 든 "입장: …" 줄(반대편 포함 모두)이 둘 이상이고 모두 같을 때만 합의
@@ -275,7 +278,12 @@ async function pump() {
   if (text.includes('[회의 — 의견 내기') && text.includes('- 입장: 지금 미는 안 한 줄(맨 끝 줄로)') && (text.includes('[확정된 목표와 합격 기준') || posSignal)) chunks.push(`\n입장: ${stance}`);
   // 회의 차례 발언의 입장 줄(결정 0028): POSSAME 은 바퀴마다 같은 입장, POSMOVE 는 바퀴마다 바뀌는 입장, POSNONE:<이름> 은 그 사람만 입장 줄을 빼먹는다
   const turnRound = Number(text.match(/\[회의 — 차례 발언 \((\d+)\//)?.[1] || 0);
-  if (turnRound && posSignal && !(myName && req.includes(`POSNONE:${myName}`))) chunks.push(`\n- 입장: ${req.includes('POSMOVE') ? `${stance} ${turnRound}바퀴` : stance}`);
+  // 질문 블록(CHECKME)은 답 맨 끝이어야 읽히니 입장 줄은 그 블록 앞에 넣는다
+  if (turnRound && posSignal && !(myName && req.includes(`POSNONE:${myName}`))) {
+    const pos = `\n- 입장: ${req.includes('POSMOVE') ? `${stance} ${turnRound}바퀴` : stance}`;
+    const at = chunks.findIndex((c) => c.includes('```oc-check'));
+    if (at >= 0) chunks.splice(at, 0, pos); else chunks.push(pos);
+  }
   for (const ch of chunks) {
     out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: ch } } });
     await sleep(20);

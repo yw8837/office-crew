@@ -676,7 +676,7 @@ function RunBar({ s, run, stages = true }) {
     </div>` : html`<span class="grow"></span>`}
     <${MemoryBadge} s=${s} />
     <span class="small muted hide-sm" title=${[usageTip(u), u.estimated ? t('작성 중인 출력은 글자 수로 추정(~)') : ''].filter(Boolean).join('\n')}>${t('세션 {usage}', { usage: usageText })}</span>
-    ${active && run.stages[run.stageIndex]?.meetingNow && run.stages[run.stageIndex].meetingNow.phase !== 'conclude' && html`<button class="btn sm" onClick=${() => ctl('conclude')} title=${t('지금까지 나온 의견으로 진행자가 바로 결론을 내')}>${t('회의 끝내기')}</button>`}
+    ${active && run.stages[run.stageIndex]?.meetingNow && run.stages[run.stageIndex].meetingNow.phase !== 'conclude' && !run.stages[run.stageIndex].meetingNow.again && html`<button class="btn sm" onClick=${() => ctl('conclude')} title=${t('지금까지 나온 의견으로 진행자가 바로 결론을 내')}>${t('회의 끝내기')}</button>`}
     ${active && html`
       ${run.status === 'paused' || run.pauseRequested
         ? html`<button class="btn sm" onClick=${() => ctl('resume')} title=${t('다시 진행')}><${Icon} name="play" /> ${t('재개')}</button>`

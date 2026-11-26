@@ -12,7 +12,7 @@ import { Cooldown, isQuotaError, nearLimit, avoidUntil, resetTime, resetFromText
 import { nextMidnight, lowerEffort } from './budget.js';
 import { settleClaude, tokenSum } from './usage.js';
 import { tr } from './i18n.js';
-import { ASK_MAX, parseAsk, cleanAnswers, answered, answerPrompt, answerRecord, askNote, stripAsks, answerText } from './ask.js';
+import { ASK_MAX, parseAsk, cleanAnswers, answered, answerPrompt, answerRecord, askNote, stripAsks, answerText, answerAbout } from './ask.js';
 import { pickOpposer, turnOrder, parseVerdict, verdictBlock, CHECK_MAX, parseCheck, checkBlock, pickResearcher, stalled, MEET_ASK_MAX } from './meeting.js';
 import { writeConversation, readImported, saveImported, pickEarlier, toolNames, handoffRequest, NOTE_MAX } from './handoff.js';
 import { readTranscript } from './importer.js';
@@ -2811,11 +2811,12 @@ export class Orchestrator {
       if (ctx.stopped) return 'stopped';
       if (got.stop) ctx.skipped.delete(chair); // 진행자 건너뛰기·회의 끝내기로 닫힌 질문은 넘긴 것으로 본다(다음 진행자 차례는 그대로)
       const answer = got.answers ? answerText({ questions }, got.answers) : '';
+      const about = got.answers ? answerAbout({ questions }, got.answers) : ''; // 고른 보기의 설명(에이전트가 쓴 글. 프롬프트에는 질문과 같이 표식 안에)
       const rec = `\n\n${answerRecord({ questions }, got.answers || null)}`;
       jm.text += rec;
       this.bus.emit('message', { sessionId: s.id, message: jm });
       if (answer) {
-        const item = { question: q0.question, answer, at: Date.now() };
+        const item = { question: q0.question, answer, ...(about ? { about } : {}), at: Date.now() };
         if (goalM) {
           (goalM.decided ||= []).push({ ...item, ...(isPrep(st) ? { prep: true } : { stageIndex: stageIdx }) });
           userLine(goalM, 'answer', tr('회의 질문에 답했어: {q} → {a}', { q: q0.question, a: answer }), jm.id);
@@ -2850,14 +2851,17 @@ export class Orchestrator {
         return null;
       }
       if (!v) return null;
-      // 읽은 블록은 글에서 지우고 판정으로 남긴다
-      jm.verdict = { verdict: v.verdict, reason: v.reason, ...(v.ask ? { question: v.ask.questions[0].question } : {}) };
+      // 읽은 블록은 글에서 지우고 판정으로 남긴다. ask 는 실제로 물을 때만 ask 로 남긴다: 물을 수 없거나 상한을 넘어 "계속"으로 다루면 판정 값도 continue
+      // (진행자가 물으려 했다는 것과 질문 글은 알림에 남는다)
+      const asking = v.verdict === 'ask' && left > 0;
+      jm.verdict = { verdict: v.verdict === 'ask' && !asking ? 'continue' : v.verdict, reason: v.reason, ...(asking ? { question: v.ask.questions[0].question } : {}) };
       jm.text = `${jm.text.slice(0, v.from)}${jm.text.slice(v.to)}`.trimEnd();
       this.bus.emit('message', { sessionId: s.id, message: jm });
       this.store.saveSession(s, 100);
       if (v.verdict !== 'ask') return v.verdict;
-      if (!left) {
-        this.#notice(s, jm, canAsk ? tr('회의 질문 상한({n}번)을 넘어서 진행자의 질문을 "계속"으로 봤어.', { n: MEET_ASK_MAX }) : tr('이 실행은 사용자에게 물을 수 없어서 진행자의 질문을 "계속"으로 봤어.'));
+      if (!asking) {
+        const q = v.ask.questions[0].question;
+        this.#notice(s, jm, canAsk ? tr('회의 질문 상한({n}번)을 넘어서 진행자의 질문을 "계속"으로 봤어. 질문: {q}', { n: MEET_ASK_MAX, q }) : tr('이 실행은 사용자에게 물을 수 없어서 진행자의 질문을 "계속"으로 봤어. 질문: {q}', { q }));
         if (goalM) { logLine(goalM, 'note', canAsk ? tr('"{label}" 단계: 회의 질문 상한({n}번)을 넘어서 진행자의 질문을 "계속"으로 봤어.', { label: st.label, n: MEET_ASK_MAX }) : tr('"{label}" 단계: 이 실행은 사용자에게 물을 수 없어서 진행자의 질문을 "계속"으로 봤어.', { label: st.label }), jm.id); this.emitMission(s); }
         this.store.saveSession(s, 100);
         return 'continue';
@@ -2877,8 +2881,9 @@ export class Orchestrator {
         const jm0 = s.messages.find((m) => m.id === pend.msgId && m.role === 'agent');
         if (jm0 && Array.isArray(pend.questions) && pend.questions.length) {
           logLine(goalM, 'resume', tr('이어서: 끊기기 전에 회의에서 묻던 질문을 다시 띄워(AI 호출 없음).'), jm0.id);
-          ctx.meet.set(chair, { phase: 'judge', round: pend.round || 1, rounds, chair, opposerId: opposer, said: [] });
-          progress({ phase: 'judge', round: pend.round || 1, rounds });
+          // again: 이 회의에서 아직 나온 의견이 없다(회의 끝내기를 받지 않고 화면도 그 버튼을 감춘다. 끝낼 결론이 없다)
+          ctx.meet.set(chair, { phase: 'judge', round: pend.round || 1, rounds, chair, opposerId: opposer, said: [], again: true });
+          progress({ phase: 'judge', round: pend.round || 1, rounds, again: true });
           if ((await meetAsk(jm0, { questions: pend.questions }, pend.round || 1, true)) === 'stopped') return [];
           ctx.meet.clear();
         } else delete goalM.meetAsk;
@@ -2979,7 +2984,8 @@ export class Orchestrator {
         // 끊겼거나, 이번 바퀴에 아무도 말하지 못했거나, 마지막 바퀴였으면 판정 없이 결론으로
         if (!open || said.length === before || r === rounds || !(await go(true))) break;
         // 정체(결정 0028): 반대편을 뺀 차례 발언자(진행자는 차례 발언을 하지 않는다)가 둘 이상이고 모두 앞 바퀴와 같은 입장이면 더 얘기해도 안 바뀐다고 보고
-        // 판정 호출 없이 결론으로 간다. 바퀴 상한·사용량 상한·회의 끝내기·중지는 위에서 먼저 봤다. 팀 설정에서 끈 회의(meeting.stall === false)는 보지 않는다
+        // 판정 호출 없이 결론으로 간다. 바퀴 상한·사용량 상한·회의 끝내기·중지는 위에서 먼저 봤다. 팀 설정에서 끈 회의(meeting.stall === false)는 보지 않는다.
+        // 그 바퀴에 답이 온 조사가 있으면 정체로 보지 않는다(stalled): 회의 중 조사 결과는 진행자가 판정에서 본다(결정 0011)
         if (st.meeting.stall !== false && stalled({ said, round: r, ids: order.filter((id) => id !== opposer) })) {
           stall = { round: r };
           st.stall = { ...stall };
@@ -2994,11 +3000,45 @@ export class Orchestrator {
       }
       if (ctx.stopped) return last || [];
       if (!said.length) return [{ agent: this.store.get('agents', chair), error: tr('회의에서 나온 의견이 없어.') }];
-      ctx.meet.clear();
-      ctx.meet.set(chair, { phase: 'conclude', rounds, chair, opposerId: opposer, said, ...(stall ? { stall } : {}) });
-      ctx.concludeNow = false;
-      progress({ phase: 'conclude', round: said.at(-1).round, rounds, ...(stall ? { stall: true } : {}) });
-      const [conclusion] = await this.#together(ctx, stageIdx, [chair], feedback);
+      // 결론. 결론에서 묻기(결정 0028): 물을 수 있는 실행이고 이 회의에 남은 질문이 있으면 결론 프롬프트에 한 줄(asksLeft). 진행자가 결론 대신 ask 판정 블록을 쓰면
+      // 그 답은 판정(ask) 메시지로 바꾸고 질문 창으로 묻고, 답했든 넘겼든 결론 차례를 한 번 다시 돈다(회의당 한 번. 다시 도는 결론에는 묻기를 알려 주지 않는다)
+      const conclude = async (asksLeft) => {
+        ctx.meet.clear();
+        ctx.meet.set(chair, { phase: 'conclude', rounds, chair, opposerId: opposer, said, asksLeft, ...(stall ? { stall } : {}) });
+        ctx.concludeNow = false;
+        progress({ phase: 'conclude', round: said.at(-1).round, rounds, ...(stall ? { stall: true } : {}) });
+        return (await this.#together(ctx, stageIdx, [chair], feedback))[0];
+      };
+      const cleft = canAsk ? Math.max(0, MEET_ASK_MAX - asked()) : 0;
+      const cmark = s.messages.length;
+      let conclusion = await conclude(cleft);
+      const cm = cleft && !ctx.stopped && !conclusion.error && !conclusion.stopped
+        ? s.messages.slice(cmark).find((m) => m.runId === run.id && m.stageIndex === stageIdx && m.agentId === chair && m.meeting?.phase === 'conclude') : null;
+      const cv = cm ? parseVerdict(cm.text) : null;
+      if (cv?.verdict === 'ask') {
+        const r = said.at(-1).round;
+        // 결론 대신 물은 답은 결론이 아니다: 판정(ask) 메시지로 바꾼다. 결론을 읽는 곳(다음 단계, 목표의 회의 기록 mission.meetings(결정 0025), 끊긴 자리의 끝낸 답,
+        // 마을 게시판, 이어서 할 때 앞 단계 결과)이 이 글을 결론으로 보지 않게. 정체 표시는 다시 쓰는 결론에 남는다
+        cm.meeting = { ...cm.meeting, phase: 'judge', round: r };
+        delete cm.stall;
+        cm.verdict = { verdict: 'ask', reason: cv.reason, question: cv.ask.questions[0].question };
+        cm.text = `${cm.text.slice(0, cv.from)}${cm.text.slice(cv.to)}`.trimEnd();
+        if (goalM) {
+          goalM.meetings = (goalM.meetings || []).filter((x) => x.msgId !== cm.id);
+          if (goalM.at?.finished) goalM.at.finished = goalM.at.finished.filter((x) => x !== cm.id);
+          logLine(goalM, 'note', tr('"{label}" 단계: 결론 차례에서 진행자가 사용자에게 물었어. 답을 넣고 결론을 다시 써.', { label: st.label }), cm.id);
+        }
+        this.bus.emit('message', { sessionId: s.id, message: cm });
+        this.store.saveSession(s, 100);
+        // 묻는 동안은 판정에서 물을 때와 같다(회의 끝내기 = 넘기고 결론으로)
+        ctx.meet.clear();
+        ctx.meet.set(chair, { phase: 'judge', round: r, rounds, chair, opposerId: opposer, said: said.slice() });
+        progress({ phase: 'judge', round: r, rounds });
+        if ((await meetAsk(cm, cv.ask, r)) === 'stopped') return [conclusion];
+        await go(false); // 그사이 일시정지를 눌렀으면 풀릴 때까지 기다린다
+        if (ctx.stopped) return [conclusion];
+        conclusion = await conclude(0);
+      }
       if (!ctx.stopped && !conclusion.error && !conclusion.stopped) for (const id of ids) this.#state(s.id, id, 'done', tr('회의 끝'));
       return [conclusion];
     } finally {
@@ -3104,6 +3144,8 @@ export class Orchestrator {
       `## ${tr('회의 결론')}\n- ${tr('결정: 하나를 고름 / 합침 / 전부 버림 / 새 안 중 무엇인지와 그 내용')}\n- ${tr('근거: 어느 의견의 어떤 점 때문인지')}\n- ${tr('남은 이견: 없으면 "없음"')}\n- ${tr('버린 안: 무엇을 왜 버렸는지(없으면 "없음")')}\n- ${tr('다음 할 일: 누가 무엇을')}`,
       meet.stall ? tr('입장이 두 바퀴째 그대로야. 지금 나온 것으로 정하고, 남은 이견을 그대로 적어.') : '', // 정체로 결론에 왔을 때만(결정 0028, 코드가 쓴 줄)
       meet.said.some((x) => x.answered) ? tr('조사 결과에서 온 사실은 출처와 함께 근거에 적어.') : '', // 조사가 실제로 답해 온 것이 있을 때만
+      // 결론에서 묻기(결정 0028): 물을 수 있는 실행이고 이 회의에 남은 질문이 있을 때만(다시 쓰는 결론에는 없다)
+      meet.asksLeft > 0 ? `${tr('사용자만 정할 일(취향·범위·돈·되돌릴 수 없는 일)이 남아 팀이 결론을 낼 수 없으면, 결론 대신 이유 한두 문장을 쓰고 답 맨 끝에 아래 블록 하나만 써(보기 2~4개). 남은 질문: {n}번.', { n: meet.asksLeft })}\n\`\`\`oc-verdict\n{"verdict":"ask","reason":"…","question":"…","options":["…","…"]}\n\`\`\`` : '',
       tr('다음 단계 담당은 이 결론만 보고 일해. 결론만 읽어도 알 수 있게 써.'),
       noEdit,
     ].filter(Boolean).join('\n');
@@ -4849,6 +4891,8 @@ export class Orchestrator {
         const turn = ctx.meet && [...ctx.meet.values()][0];
         if (!turn) return { ok: false, reason: tr('지금은 회의 중이 아니야.') };
         if (turn.phase === 'conclude') return { ok: false, reason: tr('이미 결론을 쓰는 중이야.') };
+        // 끊긴 목표를 이어서 회의 시작 전에 다시 띄운 질문(결정 0028): 아직 나온 의견이 없어 결론을 낼 수 없다. 질문은 그대로 두고 거절한다(화면은 버튼을 감춘다)
+        if (turn.again) return { ok: false, reason: tr('이 회의는 아직 나온 의견이 없어서 끝낼 수 없어. 질문에 답하거나 넘기면 1바퀴부터 시작해.') };
         ctx.concludeNow = true;
         for (const [id, h] of ctx.handles) { ctx.skipped.add(id); h.handle.stop(); }
         for (const w of [...ctx.asks.values()]) if (w.ask?.meeting) w.done({ stop: true }); // 회의가 사용자에게 묻던 질문은 넘긴 것으로 닫고 결론으로(결정 0028)

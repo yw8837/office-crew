@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { stageModel, openQuestions, requestOf, personInfo, stationInfo, meetLabel, goalWait, holdKind, fmtClock, critFold, ANSWER_BOX, MAX_STATIONS, MAX_PEOPLE, MAX_CRIT } from '../public/js/stage-model.js';
+import { stageModel, openQuestions, requestOf, personInfo, stationInfo, meetLabel, goalWait, holdKind, fmtClock, critFold, raiseChoices, gateKeys, ANSWER_BOX, MAX_STATIONS, MAX_PEOPLE, MAX_CRIT } from '../public/js/stage-model.js';
 import en from '../public/js/i18n/en.js';
 import zh from '../public/js/i18n/zh.js';
 import ja from '../public/js/i18n/ja.js';
@@ -675,4 +675,22 @@ test('윗등급에게 넘기기 보기(결정 0027): 대기 종류는 limit·blo
   assert.equal(model(hold({ reason: 'mission', kind: 'limit', cards: [{ id: 'k1' }] })).ask.short, 'k1');
   // 판정 질문에는 붙지 않는다(넘기기는 카드 질문만)
   assert.equal(model(hold({ reason: 'mission', kind: 'verdict', left: [{ id: 'c2' }], raise: [{ card: 'k1', to: 'w' }] })).ask.short, '남은 기준 1개');
+  // 보기 둘(같은 프로바이더 후보가 opt 0): 문 문구에는 두 이름
+  const two = model(hold({ reason: 'mission', kind: 'limit', cards: [{ id: 'k1' }], raise: [{ opt: 0, card: 'k1', to: 'w', name: '기록' }, { opt: 1, card: 'k1', to: 'x', name: '코덱스' }] }));
+  assert.equal(two.ask.short, 'k1 · 윗등급 기록, 코덱스에게 넘길 수 있어');
+});
+
+test('넘기기 보기·번호 키(결정 0027): 서버 항목을 보기마다 묶고(opt 없으면 첫 보기), 번호 키는 1 받아들이기 · 2 한 번 더 · 3·4 넘기기 보기(보낼 { 카드: 후보 }). 다른 질문에는 번호 키가 없다', () => {
+  const limit = { reason: 'mission', kind: 'limit', cards: [{ id: 'k1' }, { id: 'k2' }],
+    raise: [{ opt: 0, card: 'k1', to: 'm1' }, { opt: 0, card: 'k2', to: 'h' }, { opt: 1, card: 'k1', to: 'm2' }, { opt: 1, card: 'k2', to: 'h' }] };
+  assert.deepEqual(raiseChoices(limit).map((o) => o.to), [{ k1: 'm1', k2: 'h' }, { k1: 'm2', k2: 'h' }]);
+  assert.deepEqual(gateKeys(limit), [['accept', {}], ['more', {}], ['raise', { to: { k1: 'm1', k2: 'h' } }], ['raise', { to: { k1: 'm2', k2: 'h' } }]]);
+  // 예전 모양(opt 없음)은 첫 보기 하나
+  assert.deepEqual(gateKeys({ reason: 'mission', kind: 'blocked', raise: [{ card: 'k1', to: 'w' }] }), [['accept', {}], ['more', {}], ['raise', { to: { k1: 'w' } }]]);
+  // 보기 없는 막힘 질문: 1·2 만
+  assert.deepEqual(gateKeys({ reason: 'mission', kind: 'blocked', blocked: [] }), [['accept', {}], ['more', {}]]);
+  // 판정 질문·호출 상한 질문에는 이 번호 키가 없다
+  assert.equal(gateKeys({ reason: 'mission', kind: 'verdict', raise: [{ card: 'k1', to: 'w' }] }), null);
+  assert.equal(gateKeys({ reason: 'cap' }), null);
+  assert.deepEqual(raiseChoices({ reason: 'cap', raise: [{ card: 'k1', to: 'w' }] }), []);
 });

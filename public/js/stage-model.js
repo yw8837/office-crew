@@ -111,6 +111,21 @@ export function critFold(review, max = MAX_CRIT) {
   return list.length <= max ? { shown: list, hidden: [] } : { shown: list.slice(0, max - 1), hidden: list.slice(max - 1) };
 }
 
+// 되풀이 상한·막힘 질문의 윗등급에게 넘기기 보기(결정 0027): 서버가 보낸 항목을 보기(opt)마다 묶는다(최대 둘, 같은 프로바이더 후보가 먼저).
+// → [{ picks: 그 보기의 항목, to: 고를 때 보낼 { 카드 id: 후보 id } }]
+export function raiseChoices(hold) {
+  const list = hold?.reason === 'mission' && Array.isArray(hold.raise) ? hold.raise : [];
+  return [...new Set(list.map((r) => r.opt ?? 0))].sort().map((k) => {
+    const picks = list.filter((r) => (r.opt ?? 0) === k);
+    return { picks, to: Object.fromEntries(picks.map((r) => [r.card, r.to])) };
+  });
+}
+// 막힘·카드 되풀이 상한 질문 창의 번호 키(보기 순서 그대로): 1 받아들이기 · 2 한 번 더 · 3·4 윗등급에게 넘기기 보기. → [[동작, 덧붙일 값]] 또는 null(그 질문이 아님)
+export function gateKeys(hold) {
+  if (hold?.reason !== 'mission' || (hold.kind !== 'blocked' && hold.kind !== 'limit')) return null;
+  return [['accept', {}], ['more', {}], ...raiseChoices(hold).map((o) => ['raise', { to: o.to }])];
+}
+
 /**
  * 흐름 무대의 모델.
  * run: 세션의 마지막 실행(없으면 null), live: 에이전트 id → 실시간 상태(agentState), mission: 세션의 목표(없으면 null),

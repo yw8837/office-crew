@@ -173,6 +173,9 @@ async function pump() {
     // PLANCHECKLAST: k1(만들기) 뒤에 k2(확인)가 기다린다(마지막 카드 단계에 확인 카드만)
     if (g('PLANCHECKLAST')) cards = [{ ...cards[0], kind: 'build', files: ['src/a.js'] }, { ...cards[1], kind: 'check', needs: ['k1'], files: [] }];
     if (g('PLANMANY')) cards = Array.from({ length: 8 }, (_, k) => ({ title: `카드 ${k + 1}`, owner: k % 2 ? b : a, kind: 'write', needs: [], files: [`docs/f${k + 1}.md`], not: '', done: `f${k + 1} 가 있다` }));
+    // PLAN3: 명단 앞 세 사람에게 서로 기다리지 않는 카드 셋(파일이 달라서 한 물결). PLANBUILD1: k1 을 src/k1.js 를 맡는 만들기 카드로(바꾼 파일 대조, 결정 0025·0027)
+    if (g('PLAN3')) cards = [0, 1, 2].map((k) => ({ title: `카드 ${k + 1}`, owner: roster[k] || roster[0] || '?', kind: 'build', needs: [], files: [`src/k${k + 1}.js`], not: '', done: `k${k + 1} 가 있다` }));
+    if (g('PLANBUILD1')) cards[0] = { ...cards[0], kind: 'build', files: ['src/k1.js'] };
     return ['PLANANSWER 계획을 세웠어.\n\n', '```oc-cards\n' + JSON.stringify({ cards }) + '\n```'];
   })();
   const tailFor = (id) => `\n\n바꾼 파일: src/${id}.js\n다음 카드가 알아야 할 것: ${id} 꼬리 메모`;
@@ -182,8 +185,9 @@ async function pump() {
   // BLOCKKIND:<값>: 막힘 블록(CARDBLOCK·WORKBLOCK)에 그 종류(kind)를 적는다(결정 0022). 없으면 kind 칸 없이(지금 형식)
   const blockKind = goalLine.match(/BLOCKKIND:(\S+)/)?.[1] || '';
   const blockedJson = (reason) => '```oc-blocked\n' + JSON.stringify({ reason, ...(blockKind ? { kind: blockKind } : {}) }) + '\n```';
-  // 윗등급에게 넘기기(결정 0027): BLOCKBY:<이름>(그 에이전트가 맡은 카드는 늘 막힘 블록으로 끝남). FAILBY:<이름>·SLOWBY:<이름> 은 아래(오류·3초 늦게)
-  const by = (w) => !!cardId && !!myName && goalLine.includes(`${w}:${myName}`) && !tailRetry;
+  // 윗등급에게 넘기기(결정 0027): BLOCKBY:<이름>(그 에이전트가 맡은 카드는 늘 막힘 블록으로 끝남). FAILBY:<이름>·SLOWBY:<이름> 은 아래(오류·3초 늦게).
+  // <이름>@<카드>로 쓰면 그 에이전트가 그 카드를 맡았을 때만(예: BLOCKBY:가@k1)
+  const by = (w) => !!cardId && !!myName && !tailRetry && goalLine.split(/\s+/).some((x) => x === `${w}:${myName}` || x === `${w}:${myName}@${cardId}`);
   const cardChunks = !cardId ? null
     : by('BLOCKBY') ? [`CARDANSWER-${cardId} ${myName} 해 보니 안 돼.\n\n`, blockedJson(`가짜 막힘: ${myName}은 이 카드를 못 해`)]
     : goalLine.includes('TAILBLOCK') && cardId === 'k1' ? (tailRetry ? ['다시 보니 안 돼.\n\n', '```oc-blocked\n{"reason":"가짜 막힘: 꼬리 쓰다 막힘"}\n```'] : [`CARDANSWER-${cardId} 카드 일 했어.`])
@@ -256,7 +260,8 @@ async function pump() {
     await sleep(20);
   }
   // CARDWRITE: 카드 차례가 끝의 두 칸에 적은 파일(src/<카드>.js)을 작업 폴더에 실제로 쓴다(바꾼 파일 대조, 결정 0025). NOWRITEK2: k2 는 적기만 하고 안 쓴다
-  if (cardId && !tailRetry && goalLine.includes('CARDWRITE') && !(cardId === 'k2' && goalLine.includes('NOWRITEK2'))) {
+  // NOWRITEK1BY:<이름>: 그 에이전트가 맡은 k1 은 적기만 하고 안 쓴다(넘겨받은 카드의 대조, 결정 0027)
+  if (cardId && !tailRetry && goalLine.includes('CARDWRITE') && !(cardId === 'k2' && goalLine.includes('NOWRITEK2')) && !(cardId === 'k1' && myName && goalLine.split(/\s+/).includes(`NOWRITEK1BY:${myName}`))) {
     fs.mkdirSync('src', { recursive: true });
     fs.writeFileSync(`src/${cardId}.js`, `// ${cardId} ${Date.now()}\n`);
   }

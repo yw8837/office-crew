@@ -6,7 +6,7 @@
 
 ## Revision (2026-11-26, with [0027](0027-ask-before-raising-a-stuck-card.md))
 
-`tier`, `ladder` and `escalateAfter` are now used: a ladder team asks before handing a stuck task card to a higher-tier agent. Agents and teams not made from a document can set them in the agent and team editors; `cleanAgent` and `cleanTeam` now check and keep them (tier 1 to 4, `escalateAfter` 1 to 5). The sentence in Consequences that says they are stored for a later step describes the state before this.
+`tier`, `ladder` and `escalateAfter` are now used: a ladder team asks before handing a stuck task card to a higher-tier agent. Agents and teams not made from a document can set them in the agent and team editors; `cleanAgent` and `cleanTeam` now check and keep them (tier 1 to 4, `escalateAfter` 1 to 5). The sentence in Consequences that says they are stored for a later step describes the state before this. The meaning of `tier` is fixed as a difficulty grade across the whole team (1 simple chores … 4 the hardest work), and several agents, also on different AIs, can share a grade; the draft prompt said "a ladder within the same AI" and now says this, and so does the agent editor's hint.
 
 ## Context
 

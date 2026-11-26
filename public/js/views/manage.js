@@ -169,7 +169,7 @@ export function AgentEditor({ agent, onClose, focusNotes = false }) {
           <select id="agent-tier" class="select" value=${a.tier ?? ''} onChange=${(e) => set('tier', e.target.value ? Number(e.target.value) : '')}>
             <option value="">${t('없음')}</option>${[1, 2, 3, 4].map((n) => html`<option value=${n}>${t('{n}등급', { n })}</option>`)}
           </select>
-          <div class="hint">${t('같은 팀 안의 등급이야(1 가장 싸고 단순한 일 ~ 4 가장 비싸고 어려운 일). 사다리 팀에서 막힌 일 카드를 이보다 높은 등급에게 넘길지 물을 때 써.')}</div></div>
+          <div class="hint">${t('팀 전체의 난이도 등급이야(1 단순 잡무 ~ 4 가장 어려운 일). 같은 등급에 여러 AI 가 있어도 돼. 사다리 팀에서 막힌 일 카드를 바로 윗 등급에게 넘길지 물을 때 써.')}</div></div>
         ${a.routing !== 'auto' && a.provider === 'openai' && html`<div class="field"><label>${t('API 프로필')}</label>
           <select class="select" value=${a.apiProfile} onChange=${(e) => { const p = profiles.find((x) => x.id === e.target.value); setA((x) => ({ ...x, apiProfile: e.target.value, model: p?.model || x.model })); }}>
             <option value="">${t('(키가 있는 첫 프로필)')}</option>

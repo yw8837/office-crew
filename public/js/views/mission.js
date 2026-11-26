@@ -7,8 +7,8 @@ import { post, put } from '../api.js';
 import { t, locale } from '../i18n/index.js';
 import { sumEstimate, limitRows, recordAge } from '../mission-numbers.js';
 import { WIN_LABEL } from './session.js'; // 한도 창 이름(세션 화면의 계정 한도와 같은 이름)
-import { answerNames, durationWords, unverifiedLines, failWords } from '../report-lines.js'; // 완주 보고의 글줄(서버가 기억에 넣는 글 판과 같은 함수, 결정 0025)
-import { goalEndWord } from '../stage-model.js'; // 끝 상태 이름(흐름 무대의 끝 깃발과 같은 말)
+import { answerNames, durationWords, unverifiedLines, failWords, raisedWords } from '../report-lines.js'; // 완주 보고의 글줄(서버가 기억에 넣는 글 판과 같은 함수, 결정 0025)
+import { goalEndWord, raiseChoices, gateKeys } from '../stage-model.js'; // 끝 상태 이름(흐름 무대의 끝 깃발과 같은 말), 넘기기 보기·번호 키(결정 0027)
 
 const CRIT_COUNT = 7; // 서버와 같은 상한(server/mission.js)
 const lines = (text) => String(text || '').split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
@@ -318,6 +318,9 @@ export function ReportCard({ m }) {
         <div class="small">${calls} · ${t('상한 {cap}번', { cap: m.calls?.cap ?? 0 })}</div>
         <div class="small">${t('종류별 답 수')}: ${Object.keys(names).map((k) => `${names[k]} ${m.answers?.[k] || 0}`).join(' · ')}${m.answerFails > 0 ? ` ${t('(오류·중지로 끝난 답 {n}개 포함)', { n: m.answerFails })}` : ''}</div>
         <div class="small muted">${t('메시지 표시로 센 답 수야(오류·중지로 끝난 답도 들어가). 다시 요청·이어받기는 한 답 안에서 호출이 더 들 수 있어.')}</div></div>
+      ${m.raised?.length > 0 && html`<div class="goal-sec"><div class="small muted"><b>${t('윗등급에게 넘긴 카드')}</b></div>
+        <div class="small">${raisedWords(t, m.raised)}</div>
+        <div class="small muted">${t('카드 기록에서 코드가 모았어(넘기기는 질문 창에서 고른 것).')}</div></div>`}
       <div class="goal-sec"><div class="small muted"><b>${t('기준별 최종 판정')}</b></div>
         ${crit.length ? html`<div class="crit-table" role="list" aria-label=${t('기준별 최종 판정')}>${crit.map((c, i) => html`<${CritRow} c=${c} n=${i + 1} />`)}</div>` : html`<div class="small muted">${t('없음')}</div>`}</div>
       <div class="goal-sec"><div class="small muted"><b>${t('사용자가 확정한 것')}</b></div>
@@ -525,21 +528,23 @@ export function GoalCard({ m }) {
 export function MissionGate({ s, run }) {
   const hold = run.hold;
   const [busy, setBusy] = useState(false);
-  const ctl = async (action) => {
+  const ctl = async (action, extra = {}) => {
     if (busy) return;
     setBusy(true);
     try {
-      const r = await post(`/api/sessions/${s.id}/control`, { action });
+      const r = await post(`/api/sessions/${s.id}/control`, { action, ...extra });
       if (r && r.ok === false) toast(t('이미 지나간 대기야.'), 'warn');
     } catch (e) { toast(e.message, 'error'); }
     setBusy(false);
   };
-  const row = (k, label, desc, action) => html`<button type="button" class="ask-row" disabled=${busy} onClick=${() => ctl(action)}>
+  const row = (k, label, desc, action, extra = {}) => html`<button type="button" class="ask-row" disabled=${busy} onClick=${() => ctl(action, extra)}>
     <span class="ask-num" aria-hidden="true">${k}</span><span class="ask-row-text"><b>${label}</b>${desc && html`<span>${desc}</span>`}</span><span class="ask-go" aria-hidden="true">→</span>
   </button>`;
-  // 막힘·카드 되풀이 상한 질문은 번호 키로도 고른다(윗등급에게 넘기기 보기와 같이, 결정 0027). 보기 순서 그대로: 1 받아들이기 · 2 한 번 더 · 3 윗등급에게 넘기기.
+  // 윗등급에게 넘기기 보기(결정 0027): 서버가 보낸 항목을 보기마다 묶은 것(최대 둘, 같은 프로바이더 후보가 먼저)
+  const raiseOpts = raiseChoices(hold);
+  // 막힘·카드 되풀이 상한 질문은 번호 키로도 고른다(윗등급에게 넘기기 보기와 같이, 결정 0027). 보기 순서 그대로: 1 받아들이기 · 2 한 번 더 · 3·4 윗등급에게 넘기기.
   // 글을 쓰는 중(입력칸)이거나 다른 창·에이전트의 질문 창이 떠 있으면 건드리지 않는다(에이전트 질문 창의 번호 키와 같은 규칙)
-  const keys = hold.reason === 'mission' && (hold.kind === 'blocked' || hold.kind === 'limit') ? ['accept', 'more', ...(hold.raise?.length ? ['raise'] : [])] : null;
+  const keys = gateKeys(hold);
   useEffect(() => {
     if (!keys) return undefined;
     const onKey = (e) => {
@@ -547,10 +552,10 @@ export function MissionGate({ s, run }) {
       const el = e.target;
       if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
       if (document.querySelector('.backdrop, .ctx-menu, [role="dialog"], [role="menu"], .ask-panel:not(.mission-gate)')) return;
-      const action = /^[1-9]$/.test(e.key) ? keys[Number(e.key) - 1] : null;
-      if (!action) return;
+      const pick = /^[1-9]$/.test(e.key) ? keys[Number(e.key) - 1] : null;
+      if (!pick) return;
       e.preventDefault();
-      ctl(action);
+      ctl(pick[0], pick[1]);
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -631,21 +636,27 @@ export function MissionGate({ s, run }) {
   // 막힘(oc-blocked)과 일 카드의 되풀이 상한(결정 0018)
   if (hold.kind === 'blocked' || hold.kind === 'limit') {
     const blocked = hold.kind === 'blocked';
-    // 사다리 팀의 윗등급 후보(결정 0027): 카드마다 이름(AI·모델·세기). 카드가 여럿이면 카드 번호와 같이
-    const up = hold.raise || [];
-    const who = up.length === 1 ? t('{name} ({ai})', { name: up[0].name, ai: up[0].ai }) : up.map((r) => `${r.card}: ${t('{name} ({ai})', { name: r.name, ai: r.ai })}`).join(' · ');
-    const q = up.length ? (blocked ? t('기준을 지킬 수 없다는 답이 또 왔어(시작 상한에 닿음). 기준 판정으로 넘기지 않고 멈췄어. 윗등급에게 넘길까?') : t('카드 {ids}를 시작한 횟수가 상한에 닿았어. 윗등급에게 넘길까?', { ids: (hold.cards || []).map((c) => c.id).join(', ') }))
+    // 사다리 팀의 윗등급 후보(결정 0027): 보기마다 이름(AI·모델·세기). 카드가 여럿이면 "카드 → 이름", 후보가 없는 카드는 "나머지는 한 번 더"로 보기 글에
+    const up = raiseOpts;
+    const rest = hold.raiseRest || [];
+    const optLabel = (o) => {
+      const who = o.picks.length === 1 && !rest.length ? t('{name} ({ai})', { name: o.picks[0].name, ai: o.picks[0].ai }) : o.picks.map((r) => `${r.card} → ${t('{name} ({ai})', { name: r.name, ai: r.ai })}`).join(' · ');
+      return rest.length ? t('윗등급에게 넘기기 — {who} · 나머지 {ids}는 한 번 더', { who, ids: rest.join(', ') }) : t('윗등급에게 넘기기 — {who}', { who });
+    };
+    // 막힌 카드의 시작 횟수(사실 그대로. 처음 막혔어도 escalateAfter 1 이거나 앞 시작이 오류였으면 이미 상한일 수 있다)
+    const cardNow = (id) => (s.mission?.cards || []).find((c) => c.id === id);
+    const q = up.length ? (blocked ? t('기준을 지킬 수 없다는 답이 왔어. 기준 판정으로 넘기지 않고 멈췄어. 시작 상한에 닿은 카드는 윗등급에게 넘길 수 있어.') : t('카드 {ids}를 시작한 횟수가 상한에 닿았어. 윗등급에게 넘길까?', { ids: (hold.cards || []).map((c) => c.id).join(', ') }))
       : blocked ? t('기준을 지킬 수 없다는 답이 왔어. 기준 판정으로 넘기지 않고 멈췄어. 어떻게 할까?')
         : t('카드 {ids}를 시작한 횟수가 상한에 닿았어. 어떻게 할까?', { ids: (hold.cards || []).map((c) => c.id).join(', ') });
     return html`<div class="ask-panel mission-gate" role="group" aria-label=${blocked ? t('막힘') : t('카드 되풀이 상한')}>
       <div class="ask-head"><span class="ask-who">${blocked ? `⛔ ${t('막힘')}` : `🔁 ${t('카드 되풀이 상한')}`}</span></div>
       <div class="ask-question">${q}</div>
-      ${blocked ? html`<ul class="small">${(hold.blocked || []).map((b) => html`<li><b>${b.card ? `${b.card} · ${b.name}` : b.name}</b>: ${b.reason} <span class="muted">· ${t('에이전트가 씀 · 사용자 확인 안 함')}</span></li>`)}</ul>`
+      ${blocked ? html`<ul class="small">${(hold.blocked || []).map((b) => html`<li><b>${b.card ? `${b.card} · ${b.name}` : b.name}</b>: ${b.reason} <span class="muted">· ${t('에이전트가 씀 · 사용자 확인 안 함')}</span>${up.length > 0 && b.card && cardNow(b.card) ? html` <span class="muted">(${t('{n}번 시작함 · 상한 {cap}번', { n: cardNow(b.card).starts, cap: cardNow(b.card).cap })})</span>` : ''}</li>`)}</ul>`
         : html`<ul class="small">${(hold.cards || []).map((c) => html`<li><b>${c.id}</b> · ${c.title} <span class="muted">(${t('{n}번 시작함 · 상한 {cap}번', { n: c.starts, cap: c.cap })})</span></li>`)}</ul>`}
       <div class="ask-rows">
         ${row(1, t('받아들이기'), blocked ? t('막힌 일만 빼고 나머지 결과로 기준 판정까지 가(막힌 카드는 구멍으로 적어).') : t('그 카드는 다시 돌리지 않고 지금 결과로 이어 가.'), 'accept')}
         ${row(2, t('한 번 더'), blocked ? t('막힌 일만 한 번 더 해.') : t('그 카드를 한 번 더 시작해.'), 'more')}
-        ${up.length > 0 && row(3, t('윗등급에게 넘기기 — {who}', { who }), t('그 카드를 윗등급 담당이 새 대화로 맡아(시작 상한 +1). 앞 담당의 마지막 답은 참고 자료로 넘겨. 새 담당이 같은 단계에 다른 카드를 쥐고 있으면 그 카드가 끝난 뒤에 돌아.'), 'raise')}
+        ${up.map((o, k) => row(3 + k, optLabel(o), t('그 카드를 윗등급 담당이 그 카드만의 새 대화로 맡아(시작 상한 +1, 새 담당의 원래 대화는 그대로). 앞 담당의 마지막 답은 참고 자료로 넘겨. 새 담당이 같은 단계에 다른 카드를 쥐고 있으면 그 카드가 끝난 뒤에 돌아.'), 'raise', { to: o.to }))}
       </div>
       ${up.length > 0 && html`<div class="small muted">${t('사다리 팀이라 묻는 거야. 저절로 올리지 않아.')}</div>`}
       <div class="ask-foot"><span class="grow"></span><button type="button" class="btn sm danger" disabled=${busy} onClick=${() => ctl('stop')}>${t('그만')}</button></div>

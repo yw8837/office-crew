@@ -196,7 +196,14 @@ async function pump() {
   // 윗등급에게 넘기기(결정 0027): BLOCKBY:<이름>(그 에이전트가 맡은 카드는 늘 막힘 블록으로 끝남). FAILBY:<이름>·SLOWBY:<이름> 은 아래(오류·3초 늦게).
   // <이름>@<카드>로 쓰면 그 에이전트가 그 카드를 맡았을 때만(예: BLOCKBY:가@k1)
   const by = (w) => !!cardId && !!myName && !tailRetry && goalLine.split(/\s+/).some((x) => x === `${w}:${myName}` || x === `${w}:${myName}@${cardId}`);
+  // 진행자에게 질문(결정 0031): LEADQ:<이름>(그 에이전트의 카드가 처음 한 번 oc-lead 로 묻는다) · LEADQMORE:<이름>(이어 쓰기에서도 또 묻는다: 상한).
+  // 이어 쓰기 차례는 "[진행자의 답 — 카드 k1" 머리 줄로 시작하고, 표식 안에 처음 물은 질문이 다시 실려 오니 그 글자(LEADQMORE)로 또 물을지 정한다(이어 가는 대화에는 목표 줄이 없다)
+  const leadAsk = (q) => [`CARDANSWER-${cardId || leadCont} 하다가 진행자에게 물어볼 게 있어.\n\n`, '```oc-lead\n' + JSON.stringify({ question: `${q} 어떻게 할까?`, context: '가짜 맥락: 두 방법이 있어' }) + '\n```'];
+  const leadCont = text.match(/^\[진행자의 답 — 카드 (k\d+)/m)?.[1] || '';
+  const leadContChunks = !leadCont ? null : text.includes('LEADQMORE') ? leadAsk('LEADQMORE') : [`LEADCONT-${leadCont} 진행자 답을 보고 이어서 했어.`, tailFor(leadCont)];
   const cardChunks = !cardId ? null
+    : by('LEADQMORE') ? leadAsk('LEADQMORE')
+    : by('LEADQ') ? leadAsk('LEADQ')
     : by('BLOCKBY') ? [`CARDANSWER-${cardId} ${myName} 해 보니 안 돼.\n\n`, blockedJson(`가짜 막힘: ${myName}은 이 카드를 못 해`)]
     : goalLine.includes('TAILBLOCK') && cardId === 'k1' ? (tailRetry ? ['다시 보니 안 돼.\n\n', '```oc-blocked\n{"reason":"가짜 막힘: 꼬리 쓰다 막힘"}\n```'] : [`CARDANSWER-${cardId} 카드 일 했어.`])
     : goalLine.includes('K2NOTAIL') && cardId === 'k2' ? (tailRetry ? ['여전히 안 적어.'] : [`CARDANSWER-${cardId} p${process.pid} 카드 일 했어.`])
@@ -253,7 +260,24 @@ async function pump() {
   // 결론에서 묻기(결정 0028): CONCLUDEQ 는 아직 사용자 답(또는 답하지 않은 질문) 블록이 없을 때 결론 대신 ask 판정 블록으로 답한다(결론 프롬프트에 묻기 안내가 없어도.
   // 안내가 없는 결론에서는 앱이 그 블록을 읽지 않는지 보려고)
   const concludeAsk = text.includes('[회의 — 결론 내기]') && req.includes('CONCLUDEQ') && !askedBefore ? ['이건 사용자가 정할 일이야.\n\n', '```oc-verdict\n' + JSON.stringify({ verdict: 'ask', reason: '가짜: 결론을 바꿀 사용자 결정', question: 'CONCLUDEQ 어느 쪽으로 정할까?', options: [{ label: 'A안 (추천)', description: '빠르다' }, { label: 'B안', description: '느리지만 싸다' }] }) + '\n```'] : null;
-  const chunks = teamChunks || goalChunks || reviewChunks || prepChunks || planChunks || cardChunks || workBlock || fakeWork || foreignWork || concludeAsk || concludeChunks || (koItems ? ['```json\n', JSON.stringify(Object.fromEntries(koItems.map((x) => [String(x.i), `가짜 한글 설명 ${x.i}`]))), '\n```']
+  // 두 갈래의 한 장 요약(머리 줄 "[두 갈래 — 안 A 한 장 요약]"): 네 줄 형식으로 답한다. 신호어는 확정 목표 줄에서:
+  // FORKBLOCK(요약 끝에 그 차례가 받지 않는 질문 블록) · FORKFAIL:<이름>(그 에이전트의 요약만 오류) · FORKSLOW:<이름>(그 에이전트의 요약만 3초 늦게, 끊김 흉내용)
+  const forkKey = text.match(/^\[두 갈래 — 안 ([A-Z]) 한 장 요약\]$/m)?.[1] || '';
+  const forkChunks = !forkKey ? null : [`- 무엇을: 가짜 안 ${forkKey}의 할 일\n`, `- 왜: 가짜 안 ${forkKey}의 이유\n`, `- 치르는 값: 가짜 안 ${forkKey}의 값\n`, `- 되돌릴 수 있는지: 가짜 안 ${forkKey}는 되돌릴 수 있어`,
+    ...(goalLine.includes('FORKBLOCK') ? ['\n\n```oc-ask\n{"questions":[{"question":"FORKBLOCK 섞인 질문","options":["예","아니오"]}]}\n```'] : [])];
+  // 진행자 답 차례(머리 줄 "[진행자에게 온 질문 — 카드 k1]"): 기본은 짧은 답. 신호어는 확정 목표 줄에서: LEADASK(사람이 정할 일이라 질문 블록) · LEADMEET(작은 회의 블록:
+  // 프롬프트의 팀 명단 앞 두 사람) · LEADMEETBAD(참석자 이름이 없는 작은 회의 블록) · LEADSLOW(3초 늦게, 아래). 작은 회의: "[작은 회의 — 의견]"·"[작은 회의 — 결론]" 머리 줄
+  const leadTurn = /^\[진행자에게 온 질문 — 카드 (k\d+)\]$/m.test(text);
+  const meetRoster = leadTurn ? (text.split('[팀 명단 — 작은 회의 참석자는 이 이름 그대로]\n')[1] || '').split('\n\n')[0].split('\n').map((l) => l.match(/^- (.+) \([^()]*\)$/)?.[1]).filter(Boolean) : [];
+  const leadChunks = !leadTurn ? null
+    : goalLine.includes('LEADASK') ? ['사람이 정할 일이야.\n\n', '```oc-ask\n{"questions":[{"question":"LEADASK 어느 쪽으로 할까?","options":[{"label":"가 (추천)","description":"빠른 쪽"},{"label":"나","description":"싼 쪽"}]}]}\n```']
+      : goalLine.includes('LEADMEETBAD') ? ['같이 정하자.\n\n', '```oc-meet\n' + JSON.stringify({ topic: '가짜 주제', people: ['없는사람'] }) + '\n```']
+        : goalLine.includes('LEADMEET') ? ['같이 정하자.\n\n', '```oc-meet\n' + JSON.stringify({ topic: '가짜 주제: 어느 방법으로?', people: meetRoster.slice(0, 2) }) + '\n```']
+          : ['LEADANSWER 진행자 답: 첫 번째 방법으로 해.'];
+  const smallChunks = /^\[작은 회의 — 의견\]$/m.test(text) ? [`SMALLOP ${myName} 의견: 첫 번째 방법.`] : /^\[작은 회의 — 결론\]$/m.test(text) ? ['SMALLCON 결론: 첫 번째 방법으로 간다.'] : null;
+  // WORKLEAD: 단계표 방식 목표의 일 단계가 oc-lead 로 끝남(그 대목은 받지 않는다)
+  const workLead = !cardId && !planTurn && !reviewTurn && !goalTurn && !leadTurn && goalLine.includes('WORKLEAD') && text.includes('[팀 작업]') && !text.includes('[회의 — ') ? ['작업했어.\n\n', '```oc-lead\n{"question":"WORKLEAD 물어봐도 돼?"}\n```'] : null;
+  const chunks = forkChunks || leadChunks || smallChunks || leadContChunks || workLead || teamChunks || goalChunks || reviewChunks || prepChunks || planChunks || cardChunks || workBlock || fakeWork || foreignWork || concludeAsk || concludeChunks || (koItems ? ['```json\n', JSON.stringify(Object.fromEntries(koItems.map((x) => [String(x.i), `가짜 한글 설명 ${x.i}`]))), '\n```']
     : judgeAsk ? ['물어볼게.\n\n', '```oc-verdict\n' + JSON.stringify(judgeAsk) + '\n```']
     // 회의 판정 차례: 판정 블록으로 답한다. AGREEFAST 는 합의, BADVERDICT 는 틀린 형식, 그 밖은 계속.
     // 목표 회의의 1바퀴 뒤 판정("1바퀴 의견만 보고")은 신호어 대신 프롬프트에 든 "입장: …" 줄(반대편 포함 모두)이 둘 이상이고 모두 같을 때만 합의
@@ -319,6 +343,9 @@ async function pump() {
   if ((planTurn && goalLine.includes('SLOWPLAN')) || (cardId === 'k2' && goalLine.includes('SLOWK2')) || (cardId === 'k1' && goalLine.includes('SLOWK1') && !tailRetry)
     || (cardId === 'k1' && tailRetry && goalLine.includes('SLOWTAIL')) || by('SLOWBY')) await sleep(3000);
   if ((scanTurn && goalLine.includes('SLOWSCAN')) || (qTurn && goalLine.includes('SLOWQ')) || (rn === 2 && goalLine.includes('SLOWR2')) || (prepMeet && goalLine.includes('SLOWMEET'))) await sleep(3000);
+  const forkBy = (w) => !!forkKey && !!myName && goalLine.split(/\s+/).includes(`${w}:${myName}`);
+  if (forkBy('FORKSLOW')) await sleep(3000);
+  if (leadTurn && goalLine.includes('LEADSLOW')) await sleep(3000);
   // 목표의 일 단계 한도(결정 0019): 일 단계("[팀 작업]")·카드 차례가 사용량 한도 오류로 끝난다. 신호어는 확정 목표 줄에서:
   // WORKQUOTA(거절 이벤트에 1시간 뒤 초기화 시각) · WORKQUOTAIN(이벤트 없이 오류 문구에 "2시간 뒤") · WORKQUOTANT(시각 없음) · WORKQUOTAK2(k2 카드만, 시각 있음) ·
   // BACKQUOTA(되돌림 차례만, 시각 있음) · MIXQUOTA:<이름>(그 에이전트만 한도, 시각 있음. MIXFAIL:<이름> 은 그 에이전트만 보통 오류).
@@ -391,7 +418,7 @@ async function pump() {
     // 초기화 시각 없는 거절 이벤트가 연달아 온 뒤 정상 종료(쉬는 목록 알림이 매번 나가면 안 됨)
     for (let k = 0; k < 5; k++) { out({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour' } }); await sleep(5); }
     out({ type: 'result', subtype: 'success', is_error: false, session_id: sid, usage: { input_tokens: 1, output_tokens: 1 } });
-  } else if (req.includes('FAILME') || (workTurn && myName && goalLine.includes(`MIXFAIL:${myName}`)) || (research && req.includes('RESEARCHFAIL')) || (rn === 1 && goalLine.includes('RFAIL')) || (cardId === 'k1' && goalLine.includes('CARDFAIL')) || (cardId === 'k1' && goalLine.includes('BACKFAIL') && text.includes('[지난 검수에서 걸린 것')) || by('FAILBY')) {
+  } else if (req.includes('FAILME') || forkBy('FORKFAIL') || (workTurn && myName && goalLine.includes(`MIXFAIL:${myName}`)) || (research && req.includes('RESEARCHFAIL')) || (rn === 1 && goalLine.includes('RFAIL')) || (cardId === 'k1' && goalLine.includes('CARDFAIL')) || (cardId === 'k1' && goalLine.includes('BACKFAIL') && text.includes('[지난 검수에서 걸린 것')) || by('FAILBY')) {
     out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: '가짜 실패', session_id: sid, usage: {} });
   } else if (req.includes('ZEROCRASH')) {
     // 충돌 흉내: 값이 모두 0인 오류 결과를 내고 누적을 저장하지 않은 채 끝난다

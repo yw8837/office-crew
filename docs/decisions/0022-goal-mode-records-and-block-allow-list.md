@@ -8,6 +8,10 @@
 
 The code names one more failure kind it can tell from the error text: `transient` (a temporary outage, [0030](0030-goal-run-records-retry-and-flow-map.md)). The error lines before the error wait use it before `input`, and the line written when such a failure is retried by itself carries it; a usage limit is still `outside`. Lines `kind: 'transient'` without `fail` say why an outage was not retried.
 
+## Revision (2026-11-26, with [0031](0031-two-options-and-asking-the-lead.md))
+
+The table gains three steps and two names: task cards also take `oc-lead` (asking the goal's lead; stage-list work stages don't); `fork` (a one-page summary of one option) takes nothing; `lead` (the lead's answer to a card) takes `oc-ask` and `oc-meet`; `meet` (a small meeting's opinions and conclusion) takes nothing. `blockPart` reads them from `prep.kind`. A block a step doesn't take still gets one `block` log line and isn't read. The criteria check's mixed-block rule now also refuses `oc-lead` and `oc-meet`. The fork card's summaries and positions, the lead's answers and small meeting messages are marked as written by agents.
+
 ## Revision (2026-11-26, with [0027](0027-ask-before-raising-a-stuck-card.md))
 
 `route.why` gains `raised`: the first turn of a task card's new owner after the user handed the card to a higher tier. That reason alone doesn't add a `route` log line, because the `raise` line written when the card was handed over already says it; with other reasons the line names it too.

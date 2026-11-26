@@ -12,9 +12,10 @@ const ACTIVE = new Set(['running', 'paused', 'waiting']);
 export const meetLabel = (m) => (m.phase === 'conclude' ? t('결론') : m.phase === 'opinion' ? t('의견 {r}/{n}', { r: m.round, n: m.rounds }) : m.phase === 'turn' ? t('차례 {r}/{n}', { r: m.round, n: m.rounds }) : m.phase === 'research' ? t('조사 {r}/{n}', { r: m.round, n: m.rounds }) : m.phase === 'judge' ? t('판정 {r}/{n}', { r: m.round, n: m.rounds }) : t('검토 {r}/{n}', { r: m.round, n: m.rounds }));
 
 // 목표의 판정 뒤 묻기·호출 상한·한도 대기·구독 한도 상한(결정 0015·0019·0026)으로 i 단계가 기다리면 그 사유('mission'|'cap'|'quota'|'limitcap'), 아니면 ''
-export const holdKind = (run, i) => (run && run.status === 'waiting' && run.hold?.stageIndex === i && ['mission', 'cap', 'quota', 'limitcap'].includes(run.hold.reason) ? run.hold.reason : '');
+// 두 갈래(결정 0031)도: 회의 결론 뒤 그 회의 역에서 기다린다
+export const holdKind = (run, i) => (run && run.status === 'waiting' && run.hold?.stageIndex === i && ['mission', 'cap', 'quota', 'limitcap', 'fork'].includes(run.hold.reason) ? run.hold.reason : '');
 // 단계 띠("사무실 크게" 보기의 진행 바)에 보일 표시. 끝난 판정 단계가 ✓ 로 보여 다 끝난 것처럼 읽히지 않게
-export const goalWait = (run, i) => ({ mission: '🎯', cap: '🔢', quota: '⏳', limitcap: '📊' }[holdKind(run, i)] || '');
+export const goalWait = (run, i) => ({ mission: '🎯', cap: '🔢', quota: '⏳', limitcap: '📊', fork: '🔀' }[holdKind(run, i)] || '');
 
 // 끝난 목표의 끝 깃발 이름. 완주 보고 카드(결정 0025)도 같은 말을 써서 둘이 어긋나지 않게 한다
 export const goalEndWord = (status) => ({ done: t('통과로 끝'), accepted: t('받아들여 끝'), stopped: t('중지됨') }[status] || '');
@@ -40,6 +41,7 @@ export function personInfo(p) {
     case 'tool': return { cls: 'tool', ...({ search: { icon: 'search', text: t('검색 중') }, read: { icon: 'book', text: t('자료 읽는 중') }, run: { icon: 'term', text: t('실행 중') }, edit: { icon: 'edit', text: t('편집 중') } }[p.tool] || { icon: 'tool', text: t('도구 사용') }) };
     case 'meet': return { cls: 'meet', icon: 'chat', text: p.speaker ? t('말하는 중') : t('회의 중') };
     case 'wait': return { cls: 'wait', icon: 'alert', text: t('내 답 기다림') };
+    case 'lead': return { cls: 'wait', icon: 'chat', text: t('진행자 답 기다림') }; // 일 카드가 진행자에게 묻는 중(결정 0031)
     case 'limit': return { cls: 'limit', icon: 'hour', text: t('한도 대기') };
     case 'error': return { cls: 'error', icon: 'alert', text: t('오류') };
     case 'done': return { cls: 'done', icon: 'check', text: t('완료') };
@@ -182,6 +184,7 @@ export function stageModel(input = {}) {
     if (hk === 'quota') state = quotaAuto ? 'limit' : 'wait';
     if (hk === 'cap' && capInside) state = 'wait';
     if (hk === 'limitcap' && limitcapInside) state = capAuto ? 'limit' : 'wait';
+    if (hk === 'fork') state = 'wait'; // 두 갈래(결정 0031): 회의는 결론까지 돌았고 그 역에서 내 고르기를 기다린다
     if (cutRun && useRun && state !== 'done' && (st.status === 'stopped' || i === mis.at?.stageIndex)) state = 'cut';
     const isCur = cur === i;
     const showLive = isCur || (!!hold && hold.stageIndex === i);
@@ -189,6 +192,8 @@ export function stageModel(input = {}) {
     const chairId = st.meeting ? String(st.meeting.chairId || ids[0] || '') : null;
     const mv = meet ? meetingView(meet, chairId) : null;
     const asking = new Set(qs.filter((q) => (q.stageIndex ?? cur) === i).map((q) => q.agentId));
+    // 진행자에게 묻는 중인 일 카드의 담당(결정 0031): 그 단계의 카드에 lead 표시가 있을 때(살아 있는 실행에서만)
+    const leadAsk = new Set(active && st.mission === 'cards' && mis ? (mis.cards || []).filter((c) => (st.cardIds || []).includes(c.id) && c.lead).map((c) => String(c.ownerId)) : []);
     const working = ['run', 'wait', 'error', 'limit'].includes(state);
     // 되돌림에서 회의 단계를 고치는 사람: 서버와 같이 진행자(목표의 leadId)가 그 단계에 있으면 그 사람, 없으면 첫 에이전트
     const fixer = back && st.meeting && i === mis.at.stageIndex ? (ids.includes(String(mis.leadId)) ? String(mis.leadId) : ids[0]) : null;
@@ -213,6 +218,7 @@ export function stageModel(input = {}) {
         Object.assign(p, { st: 'limit', tool: null, limitLeft: until > now ? until - now : null });
       }
       if (asking.has(id)) Object.assign(p, { st: 'wait', tool: null });
+      else if (leadAsk.has(id)) Object.assign(p, { st: 'lead', tool: null });
       if (state === 'cut') Object.assign(p, { st: 'off', tool: null });
       // 일감 카드: 지금 단계에서 일을 맡은 사람(회의는 진행자, 회의 단계의 되돌림은 고치는 사람). 병렬 단계는 먼저 끝낸 사람도 두 몫이 합쳐질 때까지 쥐고 있다
       p.held = isCur && working && (fixer ? id === fixer : st.meeting ? id === chairId : true);
@@ -224,7 +230,7 @@ export function stageModel(input = {}) {
     const shown = people.map((p, k) => [p, k]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([p]) => p);
     const parallel = Number(st.count) || (ids.length > 1 && !st.meeting ? ids.length : 0);
     const ret = back && i === mis.at.stageIndex ? { n: Math.max(1, Number(mis.returns) || 1), of: Math.max(1, Number(mis.returnCap) || 1, Number(mis.returns) || 1) } : null;
-    const cards = st.mission === 'cards' && mis && Array.isArray(st.cardIds) ? st.cardIds.map((id) => ({ id, title: String((mis.cards || []).find((c) => c.id === id)?.title || '') })) : null;
+    const cards = st.mission === 'cards' && mis && Array.isArray(st.cardIds) ? st.cardIds.map((id) => { const c = (mis.cards || []).find((x) => x.id === id); return { id, title: String(c?.title || ''), ...(active && c?.lead ? { lead: true } : {}) }; }) : null;
     const speakerP = mv && mv.phase !== 'opinion' ? people.find((p) => p.speaker) || null : null;
     return {
       i, label: String(st.label || ''), state, cur: isCur,
@@ -275,6 +281,9 @@ export function stageModel(input = {}) {
       ask = { kind: 'cap', icon: 'gauge', cls: 'me', title: hold.kind === 'rate' ? t('카드 시작 수 상한') : t('호출 상한'), short, target: 'gate', ...(capInside ? { station: i } : { gateAfter: i - 1 }) };
     } else if (hold.reason === 'quota' && !quotaAuto) {
       ask = { kind: 'quota', icon: 'hour', cls: 'me', title: t('사용량 한도'), short: (hold.who || []).map((w) => w.name || nameOf(w.agentId)).join(', '), target: 'gate', station: i };
+    } else if (hold.reason === 'fork') {
+      // 두 갈래(결정 0031): 회의 역 안. 답 창은 채팅의 두 갈래 카드(그 메시지로 내려 카드에 초점)
+      ask = { kind: 'fork', icon: 'ask', cls: 'me', title: t('두 갈래'), short: hold.step === 'offer' ? t('"{label}" 회의가 두 안으로 갈렸어 · 요약을 받을까?', { label }) : t('"{label}" 회의의 두 안 중 하나를 골라 줘', { label }), target: 'card', msgId: hold.msgId || null, station: i };
     } else if (hold.reason === 'limitcap' && !capAuto) {
       // 구독 한도 상한(결정 0026): 누구의 AI 가 몇 %인지. 문은 그 단계 앞(이미 돈 단계면 역 안)
       const short = (hold.who || []).map((w) => `${w.name || nameOf(w.agentId)} ${Math.max(...(w.windows || []).map((x) => Number(x.pct) || 0), 0)}%`).join(', ');

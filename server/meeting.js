@@ -63,8 +63,9 @@ const POSITION = /^\s*(?:[-*+•]\s+|\d+[.)]\s+)?(?:\*\*|__)?\s*(?:입장|positi
 const FENCE = /^ {0,3}(?:```|~~~)/; // 코드 펜스를 여닫는 줄
 const INDENTED = /^(?: {2,}|\t)/; // 두 칸 이상(또는 탭) 들여 쓴 줄: 하위 목록·코드
 // 차례 답에서 입장 값: "입장:" 머리로 시작하는 마지막 줄의 값을 NFKC 로 정규화(전각 글자·쌍점·공백)하고 공백을 펴고 소문자로. 없거나 값이 비면 null(지어내지 않는다).
-// 코드 펜스 안의 줄(css 의 position: absolute;, YAML 의 position: 3)과 두 칸 이상 들여 쓴 줄(하위 목록)은 입장 줄로 읽지 않는다
-export function positionOf(text) {
+// 코드 펜스 안의 줄(css 의 position: absolute;, YAML 의 position: 3)과 두 칸 이상 들여 쓴 줄(하위 목록)은 입장 줄로 읽지 않는다.
+// raw: 소문자로 바꾸지 않은 값(두 갈래 카드에 보일 글, 결정 0031)
+export function positionOf(text, raw = false) {
   const lines = String(text ?? '').normalize('NFKC').split(/\r?\n/);
   let fenced = false;
   let found = null;
@@ -75,7 +76,8 @@ export function positionOf(text) {
     if (m) found = m[1];
   }
   if (found === null) return null;
-  return found.replace(/\s+/g, ' ').trim().toLowerCase() || null;
+  const v = found.replace(/\s+/g, ' ').trim();
+  return (raw ? v : v.toLowerCase()) || null;
 }
 
 // 정체(결정 0028): round 바퀴의 차례 발언자 ids(반대편을 뺀. 진행자는 차례 발언을 하지 않는다)가 둘 이상이고, 모두 이번 바퀴와 앞 바퀴(2바퀴면 1바퀴 의견)에

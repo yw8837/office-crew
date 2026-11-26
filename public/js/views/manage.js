@@ -298,6 +298,12 @@ function TeamEditor({ team, onClose }) {
       ${tm.ladder && html`<label class="small" style="display:flex;align-items:center;gap:6px;margin-top:6px">${t('몇 번 실패하면 묻나')}
         <select class="select" style="width:auto" value=${tm.escalateAfter || 2} onChange=${(e) => setT({ ...tm, escalateAfter: Number(e.target.value) })}>${[1, 2, 3, 4, 5].map((n) => html`<option value=${n}>${t('{n}번', { n })}</option>`)}</select></label>`}
     </div>
+    <div class="field">
+      <label for=${`fork-${tm.id || 'new'}`}>${t('목표 모드에서 회의가 두 안으로 갈리면')}</label>
+      <select id=${`fork-${tm.id || 'new'}`} class="select" style="width:auto" value=${tm.fork || 'ask'} onChange=${(e) => setT({ ...tm, fork: e.target.value === 'ask' ? undefined : e.target.value })}>
+        <option value="ask">${t('묻고 요약 받기')}</option><option value="auto">${t('바로 요약 받기')}</option><option value="off">${t('두 갈래 안 함')}</option></select>
+      <div class="hint">${t('정체로 끝났거나 결론에 남은 이견이 있고, 진행자·반대편을 뺀 참석자의 입장이 정확히 두 안이면 안마다 한 장 요약을 받아 네가 고르게 해(요약 한 번에 호출 1번씩, 참석자 넷 이상인 회의만). 목표 카드에서 목표마다 바꿀 수 있어.')}</div>
+    </div>
     <div class="pipeline-editor">
       ${tm.stages.map((st, i) => html`<div class="stage-row">
         <div class="stage-num">${i + 1}</div>

@@ -92,7 +92,7 @@ test('1. 사용량 나눠 보기·환산: 서버의 회의 사용량 상한과 �
     K({ meeting: { phase: 'research' }, checkOf: 'x' }), K({ meeting: { phase: 'turn' } }), K({ prep: { kind: 'plan' } }), K({ card: { id: 'k1' } }), K({ card: { id: 'k1' }, cardTail: true }), K({ review: { round: 1 } }),
     K({ handoff: true }), K({ prep: { kind: 'team' }, once: true }), K({ missionId: 'G' }), K({ missionId: 'G', stageIndex: 1 }), K({}, { goal: true })],
   ['normal', 'goal', 'research', 'research', 'research', 'meeting', 'research', 'meeting', 'plan', 'cards', 'cards', 'review', 'handoff', 'team', 'work', 'work', 'work']);
-  assert.deepEqual(ANSWER_KINDS, ['normal', 'goal', 'research', 'meeting', 'plan', 'work', 'cards', 'review', 'team', 'handoff']);
+  assert.deepEqual(ANSWER_KINDS, ['normal', 'goal', 'research', 'meeting', 'plan', 'work', 'cards', 'review', 'team', 'handoff', 'fork', 'lead']); // 갈래 요약·진행자 답(결정 0031)
   const U = (n) => ({ input: n, output: 1, cacheRead: 10 * n, cacheWrite: 0, cost: 0.01 });
   const msgs = [
     { role: 'user', text: 'x' },

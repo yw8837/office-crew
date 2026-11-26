@@ -27,6 +27,8 @@ import { parseGoal, goalBlock, goalWarn, newMission, toCriteria, cardOf, sameCar
   BLOCK_ACCEPTS, foreignBlocks, blockPart, partName, outsideRule, resumeSent, recordMeeting, planEstimate, tailClaims, userLine, decidedPrompt, sameFails } from './mission.js';
 import { ladderOf, cardCap, raiseTargets, raisedPrompt } from './mission.js'; // 윗등급에게 넘길지 묻기(결정 0027)
 import { failKey, pickFails, failuresPrompt, envError, unsafeTools, transientSent } from './mission.js'; // 반복 실패 줄·일시 장애 자동 다시(결정 0030)
+import { FORK_CALLS, FORK_TEXT_MAX, forkMode, forkOptions, forkHash, forkPrompt, forkDecided, meetingRecord } from './mission.js'; // 두 갈래(결정 0031)
+import { LEAD_MAX, SMALL_MEET_MAX, parseLead, parseMeet, leadPrompt, leadRule, leadReply, smallMeetCalls, smallOpinionPrompt, smallConcludePrompt } from './mission.js'; // 진행자에게 질문(결정 0031)
 import { execFile } from 'node:child_process';
 import { gitState, gitDiffNames, changedSet, proofCheck, PROOF_KINDS, PROOF_TIMEOUT } from './proof.js';
 import { buildReport, reportText, reportLocal } from './report.js';
@@ -377,6 +379,7 @@ export class Orchestrator {
       const seenPv = new Set();
       const providers = (team?.stages || []).flatMap((x) => x.agentIds || []).map((id) => agents.find((a) => String(a.id) === String(id)))
         .filter((a) => a && a.routing !== 'auto' && a.provider).map((a) => a.provider).filter((pv) => !seenPv.has(pv) && seenPv.add(pv));
+      const est = estimateParts(team, agents, { lead, spent: m.calls.used, cap: m.calls.cap });
       const card = {
         id: newId('m'), role: 'proposal', kind: 'goal', status: 'open', text: '', missionId: m.id, leadId: lead, draftMsgId: got?.msg.id || null,
         goal: draft.goal, criteria: draft.criteria, outOfScope: draft.outOfScope, userDecides: draft.userDecides,
@@ -385,7 +388,9 @@ export class Orchestrator {
         reviewerReadOnly: !!rpNow.reviewerId && this.store.get('agents', rpNow.reviewerId)?.permission === 'plan',
         prep: prepCard(team, agents, lead, got?.p.raw?.direct === true),
         work: workCard(team, agents),
-        estimate: estimateParts(team, agents, { lead, spent: m.calls.used, cap: m.calls.cap }), providers,
+        // 두 갈래 줄(결정 0031): 기본값은 팀 설정, 갈릴 수 있는 회의가 있는지(진행자·반대편 빼고 참석자 둘 이상), 한 번에 드는 추가 호출
+        fork: { mode: forkMode(team?.fork), can: !!(est.fork.prep || est.fork.stages), calls: FORK_CALLS },
+        estimate: est, providers,
         ...(warn ? { warn } : {}), ...(got ? {} : { fallback: true }), createdAt: Date.now(),
       };
       s.messages.push(card);
@@ -466,7 +471,10 @@ export class Orchestrator {
     const edited = !sameCard(final, draft);
     // 호출 어림(결정 0019): 확인 시점에 고른 값으로(카드가 보여 준 것과 같은 함수). 끝난 뒤 실제 호출 수 옆에 보인다
     const spentCalls = Number.isFinite(m.calls?.used) ? m.calls.used : 0;
-    const estimate = estimateCalls(team, agents, { work, prep, keep, lead: m.leadId, spent: spentCalls, cap: Number.isFinite(m.calls?.cap) ? m.calls.cap : MISSION_CALL_CAP });
+    // 두 갈래(결정 0031): 화면이 고른 값(없으면 팀 설정). 어림에는 화면이 보낸 값만 넣는다(보내지 않는 옛 화면의 어림과 같게)
+    const forkSent = body.fork !== undefined && body.fork !== null;
+    const fork = forkMode(forkSent ? body.fork : team?.fork);
+    const estimate = estimateCalls(team, agents, { work, prep, keep, lead: m.leadId, spent: spentCalls, cap: Number.isFinite(m.calls?.cap) ? m.calls.cap : MISSION_CALL_CAP, ...(forkSent ? { fork } : {}) });
     // 화면이 보여 주던 어림(estimate: { min, max })이 지금 팀으로 다시 센 값과 다르면 409 와 지금 조각(위의 대조에 안 걸리는 팀 변경: 단계에 사람이 늘거나 회의 바퀴 수가 바뀜 등).
     // estimate 가 없는 요청(옛 화면)은 그대로 통과한다
     if (body.estimate !== undefined && body.estimate !== null) {
@@ -490,8 +498,11 @@ export class Orchestrator {
       prep, research: null, meetingMsgId: null,
       // 호출 어림(확인 시점에 고른 값으로 더한 값)과 한도 대기에서 자동 이어서를 쓴 횟수(결정 0019)
       estimate, quota: { autos: 0 },
+      // 두 갈래(결정 0031): 이 목표의 값(묻고 시작 ask · 바로 auto · 끔 off), 고른 기록, 묻던 자리
+      forkMode: fork, forks: [], forkAt: undefined,
     });
-    Object.assign(card, { status: 'confirmed', confirmed: { ...final }, edited, prepChosen: { research: prep.research, meeting: prep.meeting }, ...(body.work !== undefined ? { workChosen: work } : {}), resolvedAt: Date.now() });
+    Object.assign(card, { status: 'confirmed', confirmed: { ...final }, edited, prepChosen: { research: prep.research, meeting: prep.meeting }, ...(body.work !== undefined ? { workChosen: work } : {}), ...(forkSent ? { forkChosen: fork } : {}), resolvedAt: Date.now() });
+    if (forkSent && fork !== forkMode(team?.fork)) userLine(m, 'confirm', tr('회의가 두 안으로 갈리면: {mode}', { mode: { ask: tr('묻고 요약 받기'), auto: tr('바로 요약 받기'), off: tr('두 갈래 안 함') }[fork] }), card.id);
     userLine(m, 'confirm', edited ? tr('사용자가 고쳐서 확인했어(기준 {n}개).', { n: final.criteria.length }) : tr('사용자가 목표를 확인했어(기준 {n}개).', { n: final.criteria.length }), card.id);
     logLine(m, 'confirm', rp.reviewerId ? tr('검수: {name}이(가) 기준마다 판정해.', { name: this.store.get('agents', rp.reviewerId)?.name || rp.reviewerId }) : tr('검수할 다른 팀원이 없어서 판정 없이 끝나고 네게 물어.'));
     if (m.dropped.length) userLine(m, 'confirm', tr('기준 판정으로 대신해서 건너뛰는 단계: {labels}', { labels: m.dropped.join(', ') }));
@@ -527,6 +538,10 @@ export class Orchestrator {
     m.status = 'cancelled';
     delete m.cutNotice; // 다시 켤 때 남길 끊김 알림이 아직 남아 있었으면 지운다(버린 목표라 알릴 필요가 없다)
     logLine(m, 'cancel', tr('끊긴 목표를 버렸어.'), m.cardMsgId);
+    // 두 갈래 카드에서 끊겼으면(결정 0031) 그 카드도 닫는다(더 기다리지 않는다)
+    const fc = m.forkAt ? s.messages.find((x) => x.id === m.forkAt.msgId && x.kind === 'fork') : null;
+    if (fc && ['offer', 'writing', 'open'].includes(fc.status)) { fc.status = 'cancelled'; fc.resolvedAt = Date.now(); this.bus.emit('message', { sessionId: s.id, message: fc }); }
+    delete m.forkAt;
     dropNotes(this.dirs.handoff, s.id, m.id); // 조사 노트 파일(결정 0026)
     this.emitMission(s, true);
     return { ok: true };
@@ -633,7 +648,7 @@ export class Orchestrator {
     const keepStatus = (k) => (['done', 'skipped'].includes(cutRun.stages[k]?.status) ? cutRun.stages[k].status : isPrep(plan.stages[k]) || outputs[k]?.length ? 'done' : 'skipped');
     const statuses = plan.stages.map((x, k) => (k < upto ? keepStatus(k) : k === rv && at.wait?.reason === 'mission' && at.phase === 'review' ? (cutRun.stages[k]?.status === 'skipped' ? 'skipped' : 'done') : 'pending'));
     // 일 카드: 끊길 때 하던 카드는 다시 기다림으로(이어서 돌 때 다시 센다). 이미 끝낸 카드는 그대로
-    for (const c of m.cards || []) if (c.status === 'running') c.status = 'waiting';
+    for (const c of m.cards || []) { if (c.status === 'running') c.status = 'waiting'; delete c.lead; } // 진행자에게 묻던 카드(결정 0031)는 새로 시작한다(쓴 질문 수는 남는다)
     // CLI 를 띄운 채 끊긴 에이전트는 저장된 CLI 대화를 버리고 새 대화로 시작한다(새 대화라 앞 대화는 [이전 대화]로 다시 받는다).
     // 대기에서 끊겼으면 일하던 사람이 없다. 기준 판정·준비 대목·목표 실행의 회의 차례(회의 중 조사 포함)는 원래 대화를 읽지도 쓰지도 않는 한 번 실행이라 건드리지 않는다(결정 0017).
     // 그래서 끊긴 회의 단계는 1바퀴부터 다시 할 뿐, 참석자·조사 담당의 저장된 대화는 그대로 두고 "[이어서]" 줄도 붙이지 않는다(회의 발언에는 작업 폴더를 확인하라는 말이 맞지 않는다)
@@ -652,12 +667,15 @@ export class Orchestrator {
     m.phase = at.phase;
     delete m.cutNotice;
     const open = (m.research?.questions || []).filter((q) => !Q_FINAL.includes(q.status)).length;
-    userLine(m, 'resume', at.wait ? tr('이어서: 끊기기 전에 묻던 질문을 다시 띄워(AI 호출 없음).') : at.phase === 'review' && rv < 0 ? tr('이어서: 검수할 다른 팀원이 없어서 판정 없이 바로 물어.')
+    // 두 갈래 카드에서 끊긴 회의(결정 0031): 회의는 다시 돌지 않고 같은 카드부터(쓴 요약은 그대로)
+    const forkCard = m.forkAt && m.forkAt.stageIndex === at.stageIndex && !at.back ? s.messages.find((x) => x.id === m.forkAt.msgId && x.kind === 'fork' && ['offer', 'writing', 'open'].includes(x.status)) : null;
+    userLine(m, 'resume', forkCard ? (forkCard.status === 'writing' ? tr('이어서: 회의가 두 갈래로 갈린 자리부터. 쓰지 못한 요약만 다시 쓰고 카드를 다시 띄워(회의는 다시 안 해).') : tr('이어서: 회의가 두 갈래로 갈려 묻던 카드를 다시 띄워(AI 호출 없음, 회의는 다시 안 해).'))
+      : at.wait ? tr('이어서: 끊기기 전에 묻던 질문을 다시 띄워(AI 호출 없음).') : at.phase === 'review' && rv < 0 ? tr('이어서: 검수할 다른 팀원이 없어서 판정 없이 바로 물어.')
       : at.phase === 'research' ? tr('이어서: 조사에서 끝나지 않은 질문 {n}개만 다시 해(끝난 질문은 그대로 써).', { n: open })
         : at.phase === 'meeting' ? tr('이어서: 일하기 전 회의를 1바퀴부터 다시 해.')
           : at.phase === 'plan' ? tr('이어서: 일 계획을 처음부터 다시 써.')
           : at.back ? tr('이어서: "{label}" 단계의 되돌림부터.', { label }) : tr('이어서: "{label}" 단계부터.', { label }), m.cardMsgId);
-    if (meetingRedo) logLine(m, 'resume', tr('회의 단계 "{label}"는 1바퀴부터 다시 해. 회의 차례는 늘 새 대화라 참석자의 저장된 대화는 그대로 둬.', { label }));
+    if (meetingRedo && !forkCard) logLine(m, 'resume', tr('회의 단계 "{label}"는 1바퀴부터 다시 해. 회의 차례는 늘 새 대화라 참석자의 저장된 대화는 그대로 둬.', { label }));
     else if (fresh.length) logLine(m, 'resume', tr('끊긴 단계 담당({names})은 새 대화로 시작해.', { names: fresh.map(name).join(', ') }));
     if (stage?.ids && doneIds.size) logLine(m, 'resume', tr('"{label}" 단계에서 이미 끝낸 {names}의 답은 다시 돌지 않고 그대로 써.', { label, names: [...doneIds].map(name).join(', ') }));
     // 정상으로 건너뛴 단계는 못 찾은 것으로 세지 않는다. 준비 대목은 모으는 단계가 아니다(조사 노트·회의 결론은 목표에 적어 둔 메시지에서 다시 만든다)
@@ -731,6 +749,7 @@ export class Orchestrator {
       // 일 카드(결정 0018): 목표가 끝났는데 하는 중·기다림으로 남은 카드는 건너뜀으로(그만·받아들이기 뒤에 칩이 남지 않게)
       const open = (m.cards || []).filter((c) => c.status === 'running' || c.status === 'waiting');
       for (const c of open) c.status = 'skipped';
+      for (const c of m.cards || []) delete c.lead; // 진행자에게 묻던 표시(결정 0031)
       if (open.length) logLine(m, 'card', tr('목표가 끝나서 돌지 않은 카드 {ids}는 건너뜀으로 적었어.', { ids: open.map((c) => c.id).join(', ') }));
       // 완주 보고(결정 0025): 끝 상태가 정해진 뒤에 코드만으로. 실행의 끝 처리 안이라 던져도 세션 저장·대기열의 다음 말이 건너뛰어지지 않게 감싸고 대화에 한 줄
       try { this.#report(ctx); } catch { this.#systemNote(s, tr('완주 보고를 만들지 못했어. 목표는 끝난 그대로야.')); }
@@ -1548,14 +1567,19 @@ export class Orchestrator {
     const m = ctx.mission;
     const st = run.stages[i];
     const name = (id) => this.store.get('agents', id)?.name || id;
-    if (!(await this.#capCheck(ctx, i, meetingCalls(st.agentIds.length, st.meeting?.rounds), 'meeting'))) return;
-    if (!(await this.#limitCheck(ctx, i, this.#meetIds(run, st), { phase: 'meeting' }))) return; // 회의 중 조사 담당의 AI 도(조사 한 번이 호출 한 번)
+    // 두 갈래 카드에서 끊긴 회의(결정 0031)는 회의를 다시 돌지 않으니 회의 호출 수로 묻지 않는다(요약을 쓸 때 그 수로 따로 본다)
+    const forkWait = this.#forkPend(ctx, i);
+    if (!(await this.#capCheck(ctx, i, forkWait ? 0 : meetingCalls(st.agentIds.length, st.meeting?.rounds), 'meeting'))) return;
+    if (!(await this.#limitCheck(ctx, i, forkWait ? [] : this.#meetIds(run, st), { phase: 'meeting' }))) return; // 회의 중 조사 담당의 AI 도(조사 한 번이 호출 한 번)
     m.meetingMsgId = null;
     this.#prepRefs(ctx);
     this.#prepBegin(ctx, i, tr('회의: {names}이(가) 무엇을 해야 목표를 채우는지 정해(진행자 {chair}).', { names: st.agentIds.map(name).join(', '), chair: name(st.meeting?.chairId || st.agentIds[0]) }));
     await this.#runStage(ctx, i);
     if (ctx.stopped) return;
-    const c = s.messages.findLast((x) => x.role === 'agent' && x.runId === run.id && x.stageIndex === i && x.meeting?.phase === 'conclude' && x.status === 'done' && x.text.trim());
+    // 두 갈래 카드에서 끊겼다 이어서 하면(결정 0031) 회의를 다시 돌지 않고 끊기 전 실행의 결론을 그대로 쓴다(그 메시지 id 는 단계 결과에 있다)
+    const kept = (ctx.outputs[i] || []).find((o) => o.msgId && !o.error);
+    const c = (kept && s.messages.find((x) => x.id === kept.msgId && x.role === 'agent' && x.meeting?.phase === 'conclude' && x.status === 'done' && x.text.trim()))
+      || s.messages.findLast((x) => x.role === 'agent' && x.runId === run.id && x.stageIndex === i && x.meeting?.phase === 'conclude' && x.status === 'done' && x.text.trim());
     m.meetingMsgId = st.status === 'done' && c ? c.id : null;
     logLine(m, 'prep', m.meetingMsgId ? tr('회의 끝: 결론이 나왔어. 일 단계에 참고 자료로 넘겨.') : tr('회의가 결론 없이 끝났어. 결론 없이 일해.'), m.meetingMsgId);
     this.emitMission(s);
@@ -2260,12 +2284,14 @@ export class Orchestrator {
         first = { ids: gate.ids, keep: [...(first?.keep || []), ...gate.keep] };
       }
       // 호출 상한은 그 단계가 쓸 호출 수로 본다: 보통 단계는 인원, 회의를 여는 단계는 회의 호출 수 식(결정 0017. 준비 회의와 같다). 이어서 하는 첫 바퀴는 다시 돌릴 사람 수
-      const need = first?.ids ? first.ids.length : st.meeting && !ids ? meetingCalls(st.agentIds.length, st.meeting.rounds) : (ids || st.agentIds).length;
+      // 두 갈래 카드에서 끊긴 회의 단계(결정 0031)는 회의를 다시 돌지 않는다(요약을 쓸 때 그 수로 따로 본다)
+      const forkWait = !first && !ids && st.meeting && this.#forkPend(ctx, i);
+      const need = forkWait ? 0 : first?.ids ? first.ids.length : st.meeting && !ids ? meetingCalls(st.agentIds.length, st.meeting.rounds) : (ids || st.agentIds).length;
       // 이 단계에서 이미 끝내 그대로 쓰는 답(이어서 한 첫 바퀴·막힘 "한 번 더"의 다음 바퀴): 상한 질문에서 끊겨도 끊긴 자리에 남겨 그 사람은 다시 돌지 않는다(결정 0019 와 같다)
       const kept = (first?.keep || []).flatMap((o) => [o.msgId, o.tailMsgId]).filter(Boolean);
       if (!first?.wait && !(await this.#capCheck(ctx, i, need, 'work', back, first?.quota ? first.ids : null, pass > 0, kept))) return;
       // 구독 한도 상한(결정 0026): 이번에 돌 사람의 AI(회의 단계면 회의 중 조사 담당도). 끊긴 대기부터·한도 대기 뒤 다시 하기 앞(first.quota, 한도 대기에서 이미 물었다)이면 보지 않는다
-      const capIds = first?.ids || ids || (st.meeting ? this.#meetIds(run, st) : st.agentIds);
+      const capIds = forkWait ? [] : first?.ids || ids || (st.meeting ? this.#meetIds(run, st) : st.agentIds);
       if (!first?.wait && !first?.quota && !(await this.#limitCheck(ctx, i, capIds, { phase: 'work', back, ran: pass > 0, finished: kept }))) return;
       gate?.commit();
       if (st.mission === 'cards' && first?.quota) for (const c of (m.cards || []).filter((x) => (st.cardIds || []).includes(x.id) && first.ids.includes(x.ownerId))) c.status = 'running';
@@ -2958,8 +2984,19 @@ export class Orchestrator {
     // 건너뛸 차례가 판정 한 번보다 많이 들 때만 한다(firstJudge). 목표가 아닌 회의는 지금 그대로
     let agreed = false;
     let stall = null; // 정체로 결론에 가면 { round }(결정 0028)
-    delete st.stall; // 다시 시도로 회의를 다시 돌면 앞 시도의 정체 표시를 지운다
+    const since = Date.now(); // 이번 시도의 시작(두 갈래 요약에 넣을 회의 말을 이어서 할 때 메시지에서 다시 모으려고, 결정 0031)
     try {
+      // 끊긴 목표를 이어서(결정 0031): 끊기기 전에 이 회의가 두 갈래 카드로 묻던 중이면 회의를 다시 돌지 않고 같은 카드부터(쓴 요약은 다시 쓰지 않는다).
+      // 그 회의의 결론(끊기 전 실행의 메시지)을 그대로 이 단계의 결과로 쓴다
+      const fk = goalM ? this.#forkPend(ctx, stageIdx) : null;
+      if (fk) {
+        ctx.meet.clear();
+        await this.#forkRun(ctx, stageIdx, fk.card, true);
+        if (ctx.stopped) return [];
+        for (const id of ids) this.#state(s.id, id, 'done', tr('회의 끝'));
+        return [{ agent: this.store.get('agents', fk.conclusion.agentId), text: fk.conclusion.text, msgId: fk.conclusion.id }];
+      }
+      delete st.stall; // 다시 시도로 회의를 다시 돌면 앞 시도의 정체 표시를 지운다
       // 끊긴 목표를 이어서(결정 0016·0028): 끊기기 전에 이 회의가 사용자에게 묻던 질문이 있으면 호출 없이 같은 질문부터 다시 묻는다.
       // 답한 것은 mission.decided 에 남아 1바퀴부터 다시 도는 회의의 프롬프트에 들어간다
       const pend = goalM?.meetAsk && goalM.meetAsk.stageIndex === stageIdx ? goalM.meetAsk : null;
@@ -3125,6 +3162,16 @@ export class Orchestrator {
         if (ctx.stopped) return [conclusion];
         conclusion = await conclude(0);
       }
+      // 두 갈래(결정 0031): 목표의 회의가 정체로 끝났거나 결론에 남은 이견이 있고, 진행자·반대편을 뺀 참석자의 입장이 정확히 두 안이면
+      // 안마다 요약을 받아 사용자가 고른다. 결론은 그대로 이 단계의 결과다(고른 안은 사용자가 정한 것으로 뒤 차례에 간다)
+      const cmF = goalM && !ctx.stopped && !conclusion.error && !conclusion.stopped && conclusion.msgId ? s.messages.find((x) => x.id === conclusion.msgId) : null;
+      if (cmF) {
+        ctx.meet.clear();
+        st.meetingNow = null;
+        this.#emitRun(ctx);
+        await this.#forkAfter(ctx, stageIdx, { chair, opposer, ids, stall, cm: cmF, said, since });
+        if (ctx.stopped) return [conclusion];
+      }
       if (!ctx.stopped && !conclusion.error && !conclusion.stopped) for (const id of ids) this.#state(s.id, id, 'done', tr('회의 끝'));
       return [conclusion];
     } finally {
@@ -3235,6 +3282,331 @@ export class Orchestrator {
       tr('다음 단계 담당은 이 결론만 보고 일해. 결론만 읽어도 알 수 있게 써.'),
       noEdit,
     ].filter(Boolean).join('\n');
+  }
+
+  // ── 두 갈래(결정 0031) ──
+  // 이 목표에서 i 단계 회의가 두 갈래 카드로 묻던 중인가(끊긴 뒤 이어서): { card, conclusion } 또는 null. 카드·결론을 못 찾거나 끝난 카드면 적어 둔 자리를 지운다
+  #forkPend(ctx, i) {
+    const m = ctx.mission;
+    const fk = ctx.missionTurn === 'work' && m && ctx.s.mission === m ? m.forkAt : null;
+    if (!fk || fk.stageIndex !== i) return null;
+    const card = ctx.s.messages.find((x) => x.id === fk.msgId && x.role === 'proposal' && x.kind === 'fork');
+    const conclusion = ctx.s.messages.find((x) => x.id === fk.conclusionId && x.role === 'agent' && x.status === 'done');
+    if (card && conclusion && ['offer', 'writing', 'open'].includes(card.status)) return { card, conclusion };
+    delete m.forkAt;
+    return null;
+  }
+
+  // 요약을 쓸 수 있는가: 남은 호출이 쓸 사람 수보다 적거나(호출 상한, 결정 0015), 쓸 사람이 실제로 돌 AI 가 구독 한도 상한을 넘었으면(결정 0026) 쓰지 않는다.
+  // 묻지 않는다(갈래는 덤이라 상한 질문을 하나 더 만들지 않는다). → null | { why: 'cap', need } | { why: 'limit', ais }
+  async #extraLimits(ctx, i, writers, need = writers.length) {
+    const m = ctx.mission;
+    const c = m.calls;
+    if (c && c.cap - c.used < need) return { why: 'cap', need };
+    const cap = Number(this.store.settings.limitCap);
+    if (!(cap > 0)) return null;
+    const ok = new Set(m.capOk || []);
+    const over = [];
+    for (const id of writers) {
+      const pv = await this.#capTarget(ctx, i, id, null);
+      if (this.#capOver(pv, cap, ok)) over.push(PROVIDERS[pv]?.label || pv);
+    }
+    return over.length ? { why: 'limit', ais: [...new Set(over)].join(', ') } : null;
+  }
+  #forkWhy(st, lim) {
+    return lim.why === 'cap' ? tr('"{label}" 회의의 두 갈래: 남은 호출이 {n}번보다 적어서(호출 상한) 요약 없이 진행자 결론대로 가.', { label: st.label, n: lim.need })
+      : tr('"{label}" 회의의 두 갈래: 요약을 쓸 AI({ais})가 구독 한도 상한을 넘어서 요약 없이 진행자 결론대로 가.', { label: st.label, ais: lim.ais });
+  }
+
+  // 회의 결론 뒤(#meeting): 열지 정하고 카드를 만든 뒤 #forkRun 으로. 정체가 아니고 결론의 남은 이견도 비었으면 보지 않는다.
+  // 진행자(결론을 쓰는 사람)와 반대편(반대하는 게 일)을 뺀 참석자의 입장 줄을 묶어 정확히 두 안일 때만(셋 이상·하나·입장 줄이 없는 사람이 있으면 지금처럼)
+  async #forkAfter(ctx, i, { chair, opposer, ids, stall, cm, said, since }) {
+    const { s, run } = ctx;
+    const m = ctx.mission;
+    const st = run.stages[i];
+    const mode = forkMode(m.forkMode);
+    if (mode === 'off') return;
+    if (!stall && !meetingRecord(cm.text).dissent.length) return;
+    const people = ids.filter((id) => id !== chair && id !== opposer);
+    const opts = people.length >= 2 ? forkOptions(said, people) : null;
+    if (!opts || opts.length !== 2) {
+      if (opts && opts.length > 2) { logLine(m, 'fork', tr('"{label}" 회의가 갈렸지만 입장이 {n}가지라 두 갈래는 열지 않았어(두 안일 때만).', { label: st.label, n: opts.length }), cm.id); this.emitMission(s); }
+      return;
+    }
+    const options = opts.map((o) => ({ key: o.key, position: o.position, agentIds: o.agentIds, writerId: o.agentIds[0], state: 'pending', summary: '', msgId: null }));
+    const lim = await this.#extraLimits(ctx, i, options.map((o) => o.writerId));
+    if (lim) { logLine(m, 'fork', this.#forkWhy(st, lim), cm.id); this.emitMission(s); return; }
+    const card = {
+      id: newId('m'), role: 'proposal', kind: 'fork', status: mode === 'ask' ? 'offer' : 'writing', text: '', missionId: m.id, stageIndex: i, ...(isPrep(st) ? { prep: true } : {}),
+      label: String(st.label || ''), conclusionId: cm.id, runId: run.id, since, mode, calls: FORK_CALLS, spent: 0, ...(stall ? { stall: true } : {}), options, createdAt: Date.now(),
+    };
+    s.messages.push(card);
+    m.forkAt = { msgId: card.id, stageIndex: i, conclusionId: cm.id, runId: run.id };
+    logLine(m, 'fork', tr('"{label}" 회의가 두 안으로 갈렸어: 안 A({a}) · 안 B({b}).', { label: st.label, a: options[0].position, b: options[1].position }), card.id);
+    this.bus.emit('message', { sessionId: s.id, message: card });
+    this.emitMission(s);
+    this.store.saveSessionNow(s);
+    await this.#forkRun(ctx, i, card);
+  }
+
+  // 카드 상태대로 이어 간다: offer(묻기) → writing(요약) → open(고르기). 끊긴 뒤 이어서도 같은 곳에서(쓴 요약은 다시 쓰지 않는다, again: 이어서 다시 띄움)
+  async #forkRun(ctx, i, card, again = false) {
+    const { s } = ctx;
+    const m = ctx.mission;
+    const st = ctx.run.stages[i];
+    const publish = () => { this.bus.emit('message', { sessionId: s.id, message: card }); this.emitMission(s); this.store.saveSessionNow(s); };
+    const where = card.prep ? { prep: true } : { stageIndex: i };
+    const end = (status, line = '', user = false) => {
+      card.status = status;
+      card.resolvedAt = Date.now();
+      delete m.forkAt;
+      if (line) (user ? userLine : logLine)(m, 'fork', line, card.id);
+      publish();
+    };
+    const teamPick = () => {
+      (m.forks ||= []).push({ ...where, label: card.label, msgId: card.id, picked: 'team', chosen: '', dropped: [], at: Date.now() });
+      card.picked = 'team';
+      end('team', tr('두 갈래에서 고르지 않고 팀이 정하게 했어(진행자 결론대로).'), true);
+    };
+    if (card.status === 'offer') {
+      const d = await this.#forkHold(ctx, i, card, 'offer');
+      if (!d) return;
+      if (d.pick === 'team') { teamPick(); return; }
+      userLine(m, 'fork', tr('두 갈래: 안마다 요약을 받아 보기로 했어(추가 호출 약 {n}번).', { n: card.calls }), card.id);
+      const lim = await this.#extraLimits(ctx, i, card.options.map((o) => o.writerId));
+      if (lim) { end('skipped', this.#forkWhy(st, lim)); return; }
+      card.status = 'writing';
+      publish();
+    } else if (card.status === 'writing' && again) {
+      // 이어서: 쓰지 못한 요약만 다시. 그 수로 상한을 다시 본다
+      const lim = await this.#extraLimits(ctx, i, card.options.filter((o) => o.state !== 'done').map((o) => o.writerId));
+      if (lim) { end('skipped', this.#forkWhy(st, lim)); return; }
+    }
+    if (card.status === 'writing') {
+      const before = m.calls?.used || 0;
+      await Promise.all(card.options.filter((o) => o.state !== 'done').map((o) => this.#forkWrite(ctx, i, card, o)));
+      card.spent = (card.spent || 0) + Math.max(0, (m.calls?.used || 0) - before);
+      if (ctx.stopped) { if (!this.closing) end('cancelled', tr('두 갈래 요약을 쓰는 중에 멈췄어.')); else publish(); return; }
+      if (card.options.some((o) => o.state !== 'done')) { end('failed', tr('"{label}" 회의의 두 갈래: 요약을 받지 못해서 진행자 결론대로 가.', { label: st.label })); return; }
+      card.status = 'open';
+      card.hash = forkHash(card.options);
+      logLine(m, 'fork', tr('두 갈래 요약이 나왔어(추가 호출 {n}번). 골라 줘.', { n: card.spent }), card.id);
+      publish();
+    }
+    if (card.status === 'open') {
+      const d = await this.#forkHold(ctx, i, card, 'pick');
+      if (!d) return;
+      if (d.pick === 'team') { teamPick(); return; }
+      const o = card.options.find((x) => x.key === d.pick);
+      const other = card.options.filter((x) => x !== o).map((x) => x.position);
+      (m.decided ||= []).push({ ...forkDecided({ label: card.label, key: o.key.toUpperCase(), position: o.position, summary: o.summary }), ...where, at: Date.now() });
+      (m.forks ||= []).push({ ...where, label: card.label, msgId: card.id, picked: o.key, chosen: o.position, dropped: other, at: Date.now() });
+      card.picked = o.key;
+      end('picked', tr('두 갈래에서 안 {key}({position})를 골랐어. 버린 안: {dropped}', { key: o.key.toUpperCase(), position: o.position, dropped: other.join(', ') }), true);
+    }
+  }
+
+  // 두 갈래 대기(묻기 step 'offer' · 고르기 step 'pick'). 그만이면 null(앱을 끄는 중이면 카드와 적어 둔 자리는 그대로: 이어서 할 때 다시 띄운다)
+  async #forkHold(ctx, i, card, step) {
+    const m = ctx.mission;
+    m.status = 'waiting';
+    this.emitMission(ctx.s);
+    const d = await this.#hold(ctx, 'waiting', { reason: 'fork', step, stageIndex: i, msgId: card.id, ...(card.prep ? { prep: true } : {}) });
+    if (ctx.stopped || d.action === 'stop') {
+      ctx.stopped = true;
+      if (!this.closing) {
+        card.status = 'cancelled';
+        card.resolvedAt = Date.now();
+        delete m.forkAt;
+        userLine(m, 'fork', tr('두 갈래 질문에서 그만을 골랐어.'), card.id);
+        this.bus.emit('message', { sessionId: ctx.s.id, message: card });
+      }
+      return null;
+    }
+    m.status = 'active';
+    this.emitMission(ctx.s);
+    return d;
+  }
+
+  // 안 하나의 한 장 요약: 그 안을 민 사람이 한 번 실행(읽기 전용, prep 'fork'). 요약 글은 블록을 떼고 FORK_TEXT_MAX 자까지
+  async #forkWrite(ctx, i, card, o) {
+    const { s } = ctx;
+    const other = card.options.find((x) => x !== o);
+    o.state = 'writing';
+    this.bus.emit('message', { sessionId: s.id, message: card });
+    const prompt = forkPrompt({ head: this.#goalCardPrompt(ctx.goalCard), label: card.label, key: o.key.toUpperCase(), mine: o.position, other: other?.position || '', talk: this.#forkTalk(s, card, i) });
+    const { r, msg } = await this.#prepOnce(ctx, i, o.writerId, prompt, { kind: 'fork', key: o.key });
+    const text = msg ? String(msg.text || '').replace(/```oc-[a-z0-9-]*[^\n]*\n[\s\S]*?```/g, '').trim() : '';
+    if (r && !r.error && !r.stopped && text) Object.assign(o, { state: 'done', summary: [...text].slice(0, FORK_TEXT_MAX).join(''), msgId: msg.id });
+    else o.state = ctx.stopped ? 'pending' : 'failed';
+    this.bus.emit('message', { sessionId: s.id, message: card });
+    this.store.saveSessionNow(s);
+  }
+
+  // 요약에 넣을 회의 말: 카드를 만든 회의(그 실행·단계, 이번 시도)의 의견·차례 발언·조사 결과(사람마다 MEET_MAX 자). 이어서 할 때도 메시지에서 다시 모은다
+  #forkTalk(s, card, i) {
+    const name = (id) => String(this.store.get('agents', id)?.name || id).replace(/[\r\n#]+/g, ' ').trim().slice(0, 60);
+    const cut = (t0) => (t0.length > MEET_MAX ? `${t0.slice(0, MEET_MAX)}\n${tr('…(이하 생략)')}` : t0);
+    return s.messages.filter((x) => x.role === 'agent' && x.runId === card.runId && x.stageIndex === i && ['opinion', 'turn', 'research'].includes(x.meeting?.phase) && x.status === 'done' && (x.createdAt || 0) >= (card.since || 0) && String(x.text || '').trim())
+      .map((x) => `### ${tr('{r}바퀴', { r: x.meeting.round || 1 })} · ${name(x.agentId)}\n${cut(String(x.text))}`).join('\n\n');
+  }
+
+  // ── 진행자에게 질문(결정 0031) ──
+  // 진행자에게 물을 수 있는 카드 차례인가: 목표 일 실행의 진행자가 있고(지워지지 않음), 카드 담당이 진행자가 아니고, 끝 두 칸 다시 쓰기가 아니다. → 진행자 id 또는 null
+  #leadFor(ctx, agentId) {
+    const m = ctx.mission;
+    if (ctx.missionTurn !== 'work' || !m || ctx.s.mission !== m || ctx.tailAsk?.has(String(agentId))) return null;
+    const lead = m.leadId == null ? '' : String(m.leadId);
+    return lead && lead !== String(agentId) && this.store.get('agents', lead) ? lead : null;
+  }
+
+  // 그 에이전트가 이 실행에서 다른 차례(자기 카드 등)를 도는 중이면 끝날 때까지 기다린다(한 에이전트의 CLI 를 한 번에 하나만. 핸들 자리를 덮지 않게)
+  async #waitFree(ctx, id, i = null) {
+    const busy = () => ctx.handles.has(String(id)) || (i !== null && ctx.s.messages.some((x) => x.role === 'agent' && x.runId === ctx.run.id && x.stageIndex === i && String(x.agentId) === String(id) && x.status === 'streaming'));
+    while (!ctx.stopped && busy()) await new Promise((r) => setTimeout(r, 200));
+  }
+
+  // 카드 답 끝의 oc-lead 하나를 처리한다. 묻지 않으면(형식·상한·진행자가 맡은 카드·호출/구독 한도 상한) 진행 기록·알림 한 줄과 null.
+  // 물으면 카드에 "질문 중"(c.lead)을 달고, 진행자 답(다른 카드의 질문은 차례로, 진행자가 자기 카드를 하는 중이면 끝난 뒤)을 받아 { reply }(카드 담당에게 이어 줄 글)
+  async #leadTurn(ctx, i, ownerId, msg, lq, base, leadId) {
+    const { s } = ctx;
+    const m = ctx.mission;
+    const c = (m.cards || []).find((x) => x.id === msg.card?.id);
+    if (!c) return null;
+    const name = (id) => this.store.get('agents', id)?.name || id;
+    const skip = (text) => { logLine(m, 'lead', text, msg.id); this.#notice(s, msg, text); this.emitMission(s); this.store.saveSession(s, 100); return null; };
+    if (lq.error) return skip(tr('카드 {id}: 진행자에게 묻는 블록(oc-lead) 형식이 맞지 않아서 묻지 않았어.', { id: c.id }));
+    if (!leadId) return skip(tr('카드 {id}: 진행자가 맡은 카드이거나 진행자가 없어서 진행자에게 묻는 블록은 읽지 않았어.', { id: c.id }));
+    if ((c.leadAsks || 0) >= LEAD_MAX) return skip(tr('카드 {id}: 진행자 질문 상한({n}번)을 넘어서 블록을 무시했어.', { id: c.id, n: LEAD_MAX }));
+    // 진행자 답 1번 + 카드 이어 쓰기 1번
+    const lim = await this.#extraLimits(ctx, i, [leadId], 2);
+    if (lim) return skip(lim.why === 'cap' ? tr('카드 {id}: 남은 호출이 {n}번보다 적어서(호출 상한) 진행자에게 묻지 않았어. 블록은 무시했어.', { id: c.id, n: lim.need })
+      : tr('카드 {id}: 진행자의 AI({ais})가 구독 한도 상한을 넘어서 진행자에게 묻지 않았어. 블록은 무시했어.', { id: c.id, ais: lim.ais }));
+    c.leadAsks = (c.leadAsks || 0) + 1;
+    c.lead = { question: lq.question, at: Date.now() };
+    const entry = { from: base + lq.from, to: base + lq.to, question: lq.question, msgId: null };
+    (msg.leadAsks ||= []).push(entry);
+    logLine(m, 'lead', tr('카드 {id}: {name}이(가) 진행자에게 물었어({n}/{max}): {q}', { id: c.id, name: name(ownerId), n: c.leadAsks, max: LEAD_MAX, q: lq.question }), msg.id);
+    this.#state(s.id, ownerId, 'waiting', tr('진행자 답을 기다리는 중'));
+    this.bus.emit('message', { sessionId: s.id, message: msg });
+    this.emitMission(s);
+    this.store.saveSessionNow(s);
+    // 진행자는 한 번에 한 질문만(여러 카드가 같이 물으면 차례로)
+    const job = (ctx.leadQueue || Promise.resolve()).then(() => this.#leadAnswer(ctx, i, c, ownerId, lq, entry, leadId));
+    ctx.leadQueue = job.catch(() => {});
+    let out = null;
+    try { out = await job; } finally {
+      if (!this.closing) { delete c.lead; this.emitMission(s); }
+    }
+    return out;
+  }
+
+  // 진행자 답(한 번 실행·읽기 전용). 답 끝이 질문 블록이면 질문 창으로 사용자에게(답은 mission.decided, 카드 표시), 작은 회의 블록이면 허락을 묻고 열면 1바퀴.
+  // → { reply } | null(중지)
+  async #leadAnswer(ctx, i, c, ownerId, lq, entry, leadId) {
+    const { s } = ctx;
+    const m = ctx.mission;
+    const name = (id) => this.store.get('agents', id)?.name || id;
+    await this.#waitFree(ctx, leadId, i);
+    if (ctx.stopped) return null;
+    const agents = this.store.all('agents');
+    const roster = cardRoster(this.store.get('teams', s.teamId), agents, m.reviewerId);
+    const canAsk = this.store.settings.agentAsks !== false && !s.scheduleId && !s.agentOverride && !ctx.userMsg?.handoffAsk;
+    const canMeet = canAsk && (m.smallMeets || 0) < SMALL_MEET_MAX;
+    const prompt = leadPrompt({ head: this.#goalCardPrompt(ctx.goalCard), id: c.id, owner: name(ownerId), card: c, question: lq.question, context: lq.context, roster: roster.map((a) => ({ name: a.name, role: a.role })), canAsk, canMeet });
+    const { r, msg: lm } = await this.#prepOnce(ctx, i, leadId, prompt, { kind: 'lead', card: c.id });
+    if (ctx.stopped) return null;
+    entry.msgId = lm?.id || null;
+    if (!r || r.error || r.stopped || !String(lm?.text || '').trim()) {
+      logLine(m, 'lead', tr('카드 {id}: 진행자 답을 받지 못했어. 담당이 정하고 가정을 적게 해.', { id: c.id }), lm?.id || null).fail = r?.error ? (isQuotaError(r.error) ? 'outside' : 'unknown') : undefined;
+      return { reply: leadReply({ id: c.id, question: lq.question, missing: true }) };
+    }
+    let text = lm.text;
+    let decided = [];
+    let meetText = '';
+    const ask = parseAsk(text);
+    const meet = ask ? null : parseMeet(text);
+    const cutBlock = (b) => `${text.slice(0, b.from)}${text.slice(b.to)}`.trim();
+    if (ask && !ask.error && canAsk) {
+      // 사람이 정할 일: 첫 질문 하나만 질문 창으로(회의 질문과 같다). 답은 사용자가 정한 것(카드 표시)
+      const q0 = ask.ask.questions[0];
+      const questions = [{ ...q0, header: q0.header || tr('진행자 질문') }];
+      text = cutBlock(ask);
+      const got = await this.#ask(ctx, leadId, lm, { questions, from: ask.from, to: ask.to });
+      if (ctx.stopped) return null;
+      if (got.stop) ctx.skipped.delete(leadId);
+      this.#state(s.id, leadId, 'done', got.answers ? tr('답을 받았어') : tr('질문을 넘겼어'));
+      lm.text += `\n\n${answerRecord({ questions }, got.answers || null)}`;
+      this.bus.emit('message', { sessionId: s.id, message: lm });
+      if (got.answers) {
+        const answer = answerText({ questions }, got.answers);
+        const about = answerAbout({ questions }, got.answers);
+        const item = { question: q0.question, answer, ...(about ? { about } : {}), card: c.id, at: Date.now() };
+        (m.decided ||= []).push(item);
+        decided = [item];
+        userLine(m, 'answer', tr('진행자 질문에 답했어(카드 {id}): {q} → {a}', { id: c.id, q: q0.question, a: answer }), lm.id);
+      } else {
+        decided = [{ question: q0.question, skipped: true }];
+        userLine(m, 'answer', tr('진행자 질문에 답하지 않고 넘겼어(카드 {id}): {q}', { id: c.id, q: q0.question }), lm.id);
+      }
+    } else if (ask) {
+      text = ask.error ? text : cutBlock(ask);
+      logLine(m, 'lead', ask.error ? tr('카드 {id}: 진행자의 질문 블록 형식이 맞지 않아서 사용자에게 묻지 않았어. 진행자 답만 넘겨.', { id: c.id }) : tr('카드 {id}: 이 실행은 사용자에게 물을 수 없어서 진행자의 질문은 묻지 않았어. 진행자 답만 넘겨.', { id: c.id }), lm.id);
+    } else if (meet) {
+      if (!meet.error) text = cutBlock(meet);
+      const byName = new Map(roster.map((a) => [String(a.name || '').trim().toLowerCase(), a]));
+      const people = meet.error ? [] : [...new Map(meet.people.map((n0) => byName.get(n0.trim().toLowerCase())).filter(Boolean).map((a) => [String(a.id), a])).values()];
+      const n = smallMeetCalls(people.length);
+      const why = meet.error || people.length < 2 ? tr('카드 {id}: 진행자가 청한 작은 회의 블록을 읽지 못했거나 참석자를 팀에서 2명 찾지 못해서 열지 않았어. 진행자 답만 넘겨.', { id: c.id })
+        : !canMeet ? tr('카드 {id}: 작은 회의 상한({n}번)이거나 사용자에게 물을 수 없는 실행이라 작은 회의를 열지 않았어. 진행자 답만 넘겨.', { id: c.id, n: SMALL_MEET_MAX }) : '';
+      const lim = why ? null : await this.#extraLimits(ctx, i, [...people.map((a) => String(a.id)), leadId], n + 1);
+      if (why || lim) logLine(m, 'lead', why || (lim.why === 'cap' ? tr('카드 {id}: 남은 호출이 {n}번보다 적어서(호출 상한) 작은 회의를 열지 않았어.', { id: c.id, n: lim.need }) : tr('카드 {id}: 작은 회의에 들 AI({ais})가 구독 한도 상한을 넘어서 작은 회의를 열지 않았어.', { id: c.id, ais: lim.ais })), lm.id);
+      else {
+        const names = people.map((a) => a.name).join(', ');
+        const questions = [{ header: tr('작은 회의'), question: tr('진행자가 작은 회의를 청했어: {topic} (참석: {names}). 작은 회의를 열까? (추가 호출 약 {n}번)', { topic: meet.topic, names, n }), multi: false,
+          options: [{ label: tr('열어'), description: tr('참석자가 1바퀴 의견을 내고 진행자가 결론을 써(조사·반대편 없음)') }, { label: tr('안 열고 진행자 답으로 계속'), description: '' }] }];
+        const got = await this.#ask(ctx, leadId, lm, { questions, from: meet.from, to: meet.to });
+        if (ctx.stopped) return null;
+        if (got.stop) ctx.skipped.delete(leadId);
+        this.#state(s.id, leadId, 'done', got.answers ? tr('답을 받았어') : tr('질문을 넘겼어'));
+        lm.text += `\n\n${answerRecord({ questions }, got.answers || null)}`;
+        this.bus.emit('message', { sessionId: s.id, message: lm });
+        const open = !!got.answers && got.answers[0].picked[0] === 0;
+        userLine(m, 'lead', open ? tr('카드 {id}: 진행자가 청한 작은 회의를 열기로 했어({names}).', { id: c.id, names }) : tr('카드 {id}: 진행자가 청한 작은 회의는 열지 않았어. 진행자 답만으로 이어 가.', { id: c.id }), lm.id);
+        if (open) meetText = await this.#smallMeet(ctx, i, c, lq, text, people, meet.topic, leadId, ownerId);
+        if (ctx.stopped) return null;
+      }
+    }
+    this.emitMission(s);
+    this.store.saveSession(s, 100);
+    return { reply: leadReply({ id: c.id, question: lq.question, answer: text, meet: meetText, decided }) };
+  }
+
+  // 작은 회의(1바퀴): 참석자 의견(동시에, 서로 안 보고) → 진행자 결론. 모두 한 번 실행·읽기 전용, 조사·반대편 없음. → 결론 글('' 면 결론 없음)
+  // 카드 담당이 참석자면 그 사람의 기다리는 핸들은 의견을 쓰는 동안만 비켜 두었다가 되돌린다
+  async #smallMeet(ctx, i, c, lq, answer, people, topic, leadId, ownerId) {
+    const { s } = ctx;
+    const m = ctx.mission;
+    m.smallMeets = (m.smallMeets || 0) + 1;
+    logLine(m, 'lead', tr('카드 {id}: 작은 회의를 열어({n}/{max}): {topic}', { id: c.id, n: m.smallMeets, max: SMALL_MEET_MAX, topic }));
+    this.emitMission(s);
+    const head = this.#goalCardPrompt(ctx.goalCard);
+    const ops = await Promise.all(people.map(async (a) => {
+      const id = String(a.id);
+      const mine = id === String(ownerId) ? ctx.handles.get(id) : null;
+      if (mine) ctx.handles.delete(id); else await this.#waitFree(ctx, id);
+      try { return await this.#prepOnce(ctx, i, id, smallOpinionPrompt({ head, topic, question: lq.question, answer }), { kind: 'meet', card: c.id, phase: 'opinion' }); } finally {
+        if (mine) { ctx.handles.set(id, mine); this.#atWorking(ctx, i, id, true); this.#state(s.id, id, 'waiting', tr('진행자 답을 기다리는 중')); }
+      }
+    }));
+    if (ctx.stopped) return '';
+    const said = ops.filter((x) => x.msg && !x.r.error && !x.r.stopped && String(x.msg.text || '').trim()).map((x) => ({ name: this.store.get('agents', x.msg.agentId)?.name || x.msg.agentId, text: x.msg.text }));
+    if (!said.length) { logLine(m, 'lead', tr('카드 {id}: 작은 회의에서 의견을 받지 못했어. 진행자 답만으로 이어 가.', { id: c.id })); return ''; }
+    await this.#waitFree(ctx, leadId);
+    const { r, msg } = await this.#prepOnce(ctx, i, leadId, smallConcludePrompt({ head, topic, said }), { kind: 'meet', card: c.id, phase: 'conclude' });
+    const ok = r && !r.error && !r.stopped && String(msg?.text || '').trim();
+    logLine(m, 'lead', ok ? tr('카드 {id}: 작은 회의 결론이 나왔어. 담당에게 참고 자료로 넘겨.', { id: c.id }) : tr('카드 {id}: 작은 회의 결론을 받지 못했어. 진행자 답만으로 이어 가.', { id: c.id }), msg?.id || null);
+    return ok ? msg.text : '';
   }
 
   #hold(ctx, status, info) {
@@ -3488,7 +3860,8 @@ export class Orchestrator {
     // 일 카드의 계획 대목(결정 0018)도 조사 질문처럼 그 실행만 읽기 전용
     // savedPermission: 시스템 지시의 권한 문장은 저장된 권한으로 고정한다(결정 0023. 이 실행만 읽기 전용이라는 문장은 프롬프트 앞머리로)
     // 문서로 팀 짜기의 초안(결정 0024)도 그 실행만 읽기 전용이고, 역할 노트·스킬·커넥터 없이(코드의 지시와 문서만) 돈다
-    if (base && (researchTurn || goalMeetTurn || ['questions', 'plan', 'team'].includes(given?.prep?.kind))) base = { ...base, permission: 'plan', readOnlyRun: researchTurn ? 'research' : 'talk', savedPermission: base.permission };
+    // 두 갈래의 한 장 요약(결정 0031)도 그 실행만 읽기 전용(파일을 고치지 않는다)
+    if (base && (researchTurn || goalMeetTurn || ['questions', 'plan', 'team', 'fork', 'lead', 'meet'].includes(given?.prep?.kind))) base = { ...base, permission: 'plan', readOnlyRun: researchTurn ? 'research' : 'talk', savedPermission: base.permission };
     if (base && given?.prep?.kind === 'team') base = { ...base, noNotes: true, skills: [], connectors: [] };
     // 배정 기록의 "요청한 AI"(결정 0022)는 아래에서 바꾸기 전의 설정으로 적는다
     const asked = base;
@@ -3535,7 +3908,8 @@ export class Orchestrator {
     if (once?.prep) msg.prep = { ...once.prep }; // 일하기 전 조사·회의의 답(훑어보기·조사 질문·조사·준비 회의, 결정 0017. 기억에 넣지 않는다)
     // 일 카드의 답(결정 0018): 어느 목표의 어느 카드인지. 그 목표가 살아 있는 동안은 에이전트에게 넘기는 대화에 싣지 않는다(notTalk)
     const cardSt = run.stages[stageIdx];
-    const myCard = cardSt?.mission === 'cards' && ctx.mission?.cards ? ctx.mission.cards.find((c) => (cardSt.cardIds || []).includes(c.id) && c.ownerId === String(agentId)) : null;
+    // 한 번 실행(진행자 답·작은 회의, 결정 0031)은 그 사람이 이 단계에 카드를 쥐고 있어도 카드 답이 아니다
+    const myCard = !once && cardSt?.mission === 'cards' && ctx.mission?.cards ? ctx.mission.cards.find((c) => (cardSt.cardIds || []).includes(c.id) && c.ownerId === String(agentId)) : null;
     if (myCard) msg.card = { missionId: ctx.mission.id, id: myCard.id };
     // 끝의 두 칸 다시 쓰기 답은 만들 때 바로 표시한다(그 사이에 끊겨도 이어서 할 때 이 답을 카드 결과로 고르지 않게)
     if (myCard && ctx.tailAsk?.has(String(agentId))) msg.cardTail = true;
@@ -3764,7 +4138,12 @@ export class Orchestrator {
         res = await cur.start(rid ? nudge : `${full}\n\n${tr('[중요]')} ${nudge}`, rid).done;
       }
       // 에이전트가 사용자에게 물으면(답 끝의 oc-ask 블록) 선택 카드를 띄우고, 답을 받아 같은 답 안에서 이어 간다
-      for (let n = 0; askOk && !ctx.stopped && !res.stopped && !res.error; n++) {
+      // 진행자에게 질문(결정 0031): 일 카드 차례의 답이 oc-lead 로 끝나면(질문 블록을 다 받은 뒤) 진행자 답을 받아 같은 대화로 이어 간다(같은 카드 시작).
+      // 이어 쓴 답이 다시 질문 블록이나 oc-lead 로 끝날 수 있어 둘을 번갈아 본다. 질문 창 횟수(ASK_MAX)는 이 답 전체에서 센다
+      const leadId = myCard && !once ? this.#leadFor(ctx, agentId) : null;
+      let n = 0;
+      for (;;) {
+      for (; askOk && !ctx.stopped && !res.stopped && !res.error; n++) {
         const found = asking();
         if (!found) break;
         if (found.error) { this.#notice(s, msg, tr('에이전트가 질문을 보냈는데 형식이 맞지 않아서 선택창을 띄우지 못했어. 아래 글을 보고 직접 답해 줘.')); break; }
@@ -3792,6 +4171,38 @@ export class Orchestrator {
           res = await cur.start(fresh(), null).done;
         }
         if (!asking()) await drainSteer();
+      }
+      const lq = myCard && !once && !ctx.stopped && !res.stopped && !res.error ? parseLead(msg.text.slice(askFrom)) : null;
+      if (!lq) break;
+      // 기다리는 동안 핸들은 빈 것으로(질문 창을 기다릴 때와 같다)
+      ctx.handles.set(agentId, { handle: { stop() {}, steer: () => false }, msg, agent: cur.agent, prov: cur.prov });
+      const lead = await this.#leadTurn(ctx, stageIdx, agentId, msg, lq, askFrom, leadId);
+      if (ctx.stopped) { res = { ...res, stopped: true }; break; }
+      if (!lead) break; // 묻지 않았다(상한·형식·진행자가 맡은 카드): 블록은 읽지 않은 채 답이 끝난다
+      const record = `
+
+> 🧭 ${tr('진행자에게 물었어: {q}', { q: lq.question })}
+
+`;
+      msg.text += record;
+      this.bus.emit('delta', { sessionId: s.id, messageId: msg.id, text: record });
+      askFrom = msg.text.length;
+      const freshLead = () => `${recall.text}${full}
+
+${tr('[네 이전 답변]')}
+${stripAsks(msg.text).slice(-MAX_PREV)}
+
+${lead.reply}`;
+      const ridL = cur.prov.caps.resume ? res.providerSessionId : null;
+      remember(res.providerSessionId);
+      this.#state(s.id, agentId, 'thinking', tr('진행자 답을 받아 이어서 진행 중…'));
+      res = await cur.start(ridL ? lead.reply : freshLead(), ridL).done;
+      if (res.error && ridL && !res.stopped && !res.looped && !isQuotaError(res.error) && /conversation|session|not found|no such|resume/i.test(res.error)) {
+        this.#notice(s, msg, tr('이전 대화를 이어갈 수 없어서 새 대화로 다시 시작해.'));
+        if (conv) delete conv.id; else delete s.providerSessions[agentId];
+        res = await cur.start(freshLead(), null).done;
+      }
+      if (!asking()) await drainSteer();
       }
       await drainSteer(); // 질문을 더 받지 않고 끝난 경우에 밀린 추가 지시
     } catch (e) {
@@ -4634,6 +5045,12 @@ export class Orchestrator {
     if (multi && i < run.stages.length - 1 && !meet) parts.push(tr('결과는 다음 단계 담당이 바로 쓸 수 있게 핵심 위주의 마크다운으로 정리해.'));
     // 목표의 일 단계(결정 0018): 카드는 끝의 두 칸, 모든 일 단계는 막힘 출구(기준을 지킬 수 없으면 억지로 맞추지 말고 oc-blocked). 회의 차례에는 붙이지 않는다
     if (cardStage) parts.push(tailRule());
+    // 진행자에게 질문(결정 0031): 일 카드 차례에 사용법 한 줄과 블록 꼴(진행자가 맡은 카드·끝 두 칸 다시 쓰기·남은 질문이 없으면 없다)
+    if (cardStage && ctx.missionTurn === 'work') {
+      const c = (ctx.mission?.cards || []).find((x) => (st.cardIds || []).includes(x.id) && x.ownerId === String(agent.id));
+      const left = c ? LEAD_MAX - (c.leadAsks || 0) : 0;
+      if (c && left > 0 && this.#leadFor(ctx, agent.id)) parts.push(leadRule(left));
+    }
     // 묻고 할 일(결정 0022): 밖으로 나가는 일과 작업 폴더 밖 지우기는 하기 전에 질문 블록으로 묻게(물을 수 없는 실행이면 하지 말게). 자기 권한으로 도는 일 차례에만(읽기 전용 대목·회의 차례에는 안 붙인다).
     // 회의 단계의 되돌림은 진행자 혼자 회의 없이 자기 권한으로 고치니 붙인다. 막힘 출구는 회의 단계에서 읽지 않으니(#blockedOf) 거기엔 안 붙인다
     if (ctx.missionTurn === 'work' && ctx.goalCard && workStage && !meet) {
@@ -4888,7 +5305,7 @@ export class Orchestrator {
   }
 
   // ── 개입 ──
-  control(sessionId, { action, agentId = null, text = '', askId = null, answers = null, skip = false, to = null }) {
+  control(sessionId, { action, agentId = null, text = '', askId = null, answers = null, skip = false, to = null, pick = null, hash = null }) {
     const ctx = this.ctx.get(sessionId);
     if (!ctx) throw Object.assign(new Error(tr('진행 중인 작업이 없어.')), { status: 409 });
     const { s } = ctx;
@@ -4897,7 +5314,8 @@ export class Orchestrator {
     // 목표의 한도 대기(quota, 결정 0019): 초기화 뒤 이어서(later, 시각을 알고 자동 횟수가 남았고 아직 안 골랐을 때만)·지금 다시(retry)·건너뛰기(skip, 일 단계)·받아들이기(accept, 판정)·그만
     // 구독 한도 상한(limitcap, 결정 0026): 계속(accept)·초기화 뒤 이어서(later)·그만. retry 는 자동 이어서 타이머가 다시 보게 한다
     // 윗등급에게 넘기기(raise, 결정 0027): 되풀이 상한·막힘 질문에 넘기기 보기가 있을 때만
-    const ALLOWED = { approve: ['approve', 'reject', 'retry', 'stop'], error: ['retry', 'skip', 'stop'], pause: ['resume', 'stop'], mission: ['accept', 'more', 'raise', 'stop'], cap: ['more', 'stop'], quota: ['later', 'retry', 'skip', 'accept', 'stop'], limitcap: ['accept', 'later', 'retry', 'stop'] };
+    // 두 갈래(fork, 결정 0031): 묻기(step offer)는 요약 받기(write)·팀이 정해(team), 고르기(step pick)는 안 A·B(a·b)·팀이 정해. 안을 고를 때는 본 요약의 해시가 저장된 것과 같아야 한다
+    const ALLOWED = { approve: ['approve', 'reject', 'retry', 'stop'], error: ['retry', 'skip', 'stop'], pause: ['resume', 'stop'], mission: ['accept', 'more', 'raise', 'stop'], cap: ['more', 'stop'], quota: ['later', 'retry', 'skip', 'accept', 'stop'], limitcap: ['accept', 'later', 'retry', 'stop'], fork: ['fork', 'stop'] };
     const gate = (d) => {
       if (!ctx.gate) return false;
       const reason = ctx.run.hold?.reason;
@@ -5043,6 +5461,23 @@ export class Orchestrator {
       case 'more': return { ok: gate({ action: 'more' }) }; // 목표: 한 번 더 고친다 / 호출 20번 더
       case 'later': return { ok: gate({ action: 'later' }) }; // 목표의 한도 대기: 초기화 시각 뒤에 자동으로 이어서(결정 0019)
       case 'raise': return { ok: gate({ action: 'raise', to }) }; // 목표의 일 카드: 윗등급에게 넘기기(결정 0027). to: 후보 에이전트 id 또는 { 카드 id: 에이전트 id }
+      case 'fork': {
+        // 두 갈래(결정 0031): pick 은 그 대기가 받는 값만. 안(a·b)을 고르면 화면이 본 요약의 해시(hash)를 저장된 요약으로 다시 만든 값과 대조하고,
+        // 다르면 반영하지 않고 카드를 다시 보낸다(대기는 그대로. 화면이 새 카드로 다시 그려 다시 고른다)
+        const h = ctx.run.hold;
+        if (!ctx.gate || h?.reason !== 'fork') return { ok: false };
+        const p = String(pick ?? '');
+        if (!(h.step === 'offer' ? ['write', 'team'] : ['a', 'b', 'team']).includes(p)) return { ok: false };
+        if (h.step === 'pick' && p !== 'team') {
+          const card = s.messages.find((x) => x.id === h.msgId && x.role === 'proposal' && x.kind === 'fork');
+          if (!card || String(hash ?? '') !== forkHash(card.options || [])) {
+            if (card && ctx.mission && ctx.mission === s.mission) { logLine(ctx.mission, 'fork', tr('본 요약과 저장된 요약이 달라서 고른 것을 반영하지 않았어. 카드를 다시 보여 줄게.'), card.id); this.emitMission(s); }
+            if (card) this.bus.emit('message', { sessionId: s.id, message: card });
+            return { ok: false, stale: true, reason: tr('화면에 보이던 요약과 저장된 요약이 달라. 카드를 다시 보여 줄게. 다시 골라 줘.') };
+          }
+        }
+        return { ok: gate({ action: 'fork', pick: p }) };
+      }
       default: throw Object.assign(new Error(tr('모르는 동작: {action}', { action })), { status: 400 });
     }
   }

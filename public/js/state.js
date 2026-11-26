@@ -193,7 +193,7 @@ function handle(type, d) {
       }
       if (['running', 'paused', 'waiting'].includes(d.run.status) && !d.run.endedAt) state.active.add(d.sessionId);
       else state.active.delete(d.sessionId);
-      if (d.run.status === 'waiting' && d.sessionId !== state.route.id) toast({ approve: t('다른 세션에서 승인이 필요해'), mission: t('다른 세션에서 목표 판정을 보고 답해 줘'), cap: t('다른 세션에서 목표가 호출 상한에 닿았어'), quota: t('다른 세션에서 목표가 사용량 한도에 걸려 멈췄어'), limitcap: t('다른 세션에서 목표가 구독 한도 상한에 닿아 시작하기 전에 물어봤어') }[d.run.hold?.reason] || t('다른 세션에서 결정이 필요해'), 'warn');
+      if (d.run.status === 'waiting' && d.sessionId !== state.route.id) toast({ approve: t('다른 세션에서 승인이 필요해'), mission: t('다른 세션에서 목표 판정을 보고 답해 줘'), cap: t('다른 세션에서 목표가 호출 상한에 닿았어'), quota: t('다른 세션에서 목표가 사용량 한도에 걸려 멈췄어'), limitcap: t('다른 세션에서 목표가 구독 한도 상한에 닿아 시작하기 전에 물어봤어'), fork: t('다른 세션에서 목표의 회의가 두 안으로 갈려서 골라 달래') }[d.run.hold?.reason] || t('다른 세션에서 결정이 필요해'), 'warn');
       notifyRun(d.sessionId, d.run);
       notifyAsk(d.sessionId, d.run);
       break;
@@ -241,7 +241,7 @@ function notifyAsk(sessionId, run) {
 }
 function notifyRun(sessionId, run) {
   const title = {
-    waiting: { approve: t('승인이 필요해'), mission: t('목표 판정을 보고 답해 줘'), cap: t('목표가 호출 상한에 닿았어'), quota: t('목표가 사용량 한도에 걸려 멈췄어'), limitcap: t('목표가 구독 한도 상한에 닿아 시작하기 전에 물어봤어') }[run.hold?.reason] || t('결정이 필요해'),
+    waiting: { approve: t('승인이 필요해'), mission: t('목표 판정을 보고 답해 줘'), cap: t('목표가 호출 상한에 닿았어'), quota: t('목표가 사용량 한도에 걸려 멈췄어'), limitcap: t('목표가 구독 한도 상한에 닿아 시작하기 전에 물어봤어'), fork: t('목표의 회의가 두 안으로 갈려서 골라 달래') }[run.hold?.reason] || t('결정이 필요해'),
     done: t('작업이 끝났어'),
     error: t('작업이 실패했어'),
   }[run.status];

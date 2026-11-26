@@ -8,6 +8,10 @@
 
 A work stage or task card step where every failed person failed with a temporary outage (network, timeout, 5xx, overload; never a usage limit, which keeps this record's wait) is now run once more by itself before the error wait, when git shows the stage changed no file and the call cap, the subscription cap and the card start limit allow it ([0030](0030-goal-run-records-retry-and-flow-map.md)). "A stage where someone failed for another reason gets the error wait" still holds after that one retry.
 
+## Revision (2026-11-26, with [0031](0031-two-options-and-asking-the-lead.md))
+
+The estimate parts gain `fork: { calls, prep, stages }` (2 calls for each goal meeting that can split into two options: the pre-work meeting and team meeting stages with four participants or more). `sumEstimate` adds them to the maximum only, and only when the pick carries a `fork` value other than `off` (the goal card sends the user's choice; a confirm without it is compared as before). Questions to the lead and small meetings are not in the estimate.
+
 ## Revision (2026-11-26, with [0025](0025-goal-report-and-evidence.md))
 
 With task cards, the calls left are estimated again once the plan exists, with the same `sumEstimate` (the card steps, the check and the returns left), and shown on the plan card. When the top of that range is more than the calls left under the cap, the run asks the call-cap question ("20 more" / stop, `hold.kind: 'plan'`) before the first card step instead of stopping at the cap midway; a goal cut at that question asks it again when continued. The goal report shows the actual calls next to the confirm-time estimate.

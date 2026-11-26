@@ -37,8 +37,8 @@ function readJson(file, fallback) {
 export function attentionOf(run) {
   if (!run) return null;
   const at = (t) => ({ runId: run.id, since: t || run.startedAt });
-  // 목표의 판정 뒤 묻기(mission)와 호출 상한(cap)은 따로 보여 준다(결정 0015). 한도 대기(quota)도(결정 0019), 구독 한도 상한(limitcap)도(결정 0026)
-  if (run.status === 'waiting') return { kind: { approve: 'approve', mission: 'verdict', cap: 'cap', quota: 'quota', limitcap: 'limitcap' }[run.hold?.reason] || 'decide', ...at(run.hold?.at) };
+  // 목표의 판정 뒤 묻기(mission)와 호출 상한(cap)은 따로 보여 준다(결정 0015). 한도 대기(quota)도(결정 0019), 구독 한도 상한(limitcap)도(결정 0026), 두 갈래(fork)도(결정 0031)
+  if (run.status === 'waiting') return { kind: { approve: 'approve', mission: 'verdict', cap: 'cap', quota: 'quota', limitcap: 'limitcap', fork: 'fork' }[run.hold?.reason] || 'decide', ...at(run.hold?.at) };
   if (run.status === 'running' && run.asks?.length) return { kind: 'ask', ...at(run.asks[0].at) };
   if (run.status === 'paused') return { kind: 'paused', ...at(run.hold?.at) };
   if (run.status === 'error' && run.endedAt) return { kind: 'failed', ...at(run.endedAt) };

@@ -6,7 +6,8 @@ import { bindLang } from '../server/i18n.js';
 import path from 'node:path';
 import { createApp } from '../server/index.js';
 import { PhoneNotify } from '../server/notify.js';
-import { reviewPlan, reviewCard, parseReview, reviewPrompt, reviewBlock, applyReview, tally, allPass, returnItems, returnPrompt, prevPrompt, sameDroppable, newMission, MISSION_CALL_CAP } from '../server/mission.js';
+import { reviewPlan, reviewCard, parseReview, reviewPrompt, reviewBlock, applyReview, tally, allPass, returnItems, returnPrompt, prevPrompt, sameDroppable, newMission, MISSION_CALL_CAP, sameFails } from '../server/mission.js';
+import { unverifiedLines } from '../public/js/report-lines.js';
 import { hideReview } from '../public/js/chat-tools.js';
 import { attentionOf } from '../server/store.js';
 import { startTestApp, freePort, promptBody } from './helpers.js';
@@ -772,4 +773,48 @@ test('19. 판정 답에 실제로 쓰이는 다른 블록(oc-cards·oc-research)
   assert.equal(mixed('oc-blocked', JSON.stringify({ reason: '가짜 막힘' })), 'mixed', '막힘 블록이 섞임');
   // 블록 표에 없는 이름(옛 코드가 보던 이름. 위생 검사의 계획 문서 이름 무늬에 걸리지 않게 조각을 잇는다)은 실제 블록이 아니라 거르지 않는다
   assert.equal(mixed(['oc', 'plan'].join('-'), '{}'), undefined);
+});
+
+test('20. 진전 없음(결정 0028): 다시 판정했는데 불합격 기준의 집합과 근거(정규화한 글)가 앞 회차와 같으면 더 되돌리지 않고 묻는다. 질문 창에 코드의 한 줄, 진행 기록 no-progress, "한 번 더" 뒤에도 같으면 같은 안내, 완주 보고의 확인 못 한 것', async () => {
+  const t = await app();
+  const c = (id, status, evidence = '') => ({ id, status, evidence });
+  assert.equal(sameFails([c('c1', 'fail', '같은  이유 （a.js:3）'), c('c2', 'pass', 'ok')], [c('c1', 'fail', '같은 이유 (A.js:3)'), c('c2', 'unknown')]), true, 'NFKC·공백·대소문자만 다르면 같은 근거');
+  assert.equal(sameFails([c('c1', 'fail', 'x')], [c('c1', 'fail', 'y')]), false, '근거가 다르면 진전이 있을 수 있다');
+  assert.equal(sameFails([c('c1', 'fail', 'x')], [c('c1', 'fail', 'x'), c('c2', 'fail', 'z')]), false, '불합격 기준의 집합이 다르면 아니다');
+  assert.equal(sameFails([c('c1', 'fail', 'x'), c('c2', 'fail', 'z')], [c('c1', 'fail', 'x')]), false);
+  assert.equal(sameFails([c('c1', 'unknown')], [c('c1', 'unknown')]), false, '앞 회차에 불합격이 없으면 아니다');
+  assert.equal(sameFails([], [c('c1', 'fail', 'x')]), false);
+  const a = await mk('진전정리', '정리');
+  const b = await mk('진전분석', '분석');
+  const tm = await mkTeam('진전팀', [{ label: '정리', agentIds: [a.id] }, { label: '분석', agentIds: [b.id] }]);
+  // 근거가 회차마다 다르면(REVIEWFAIL2) 진전 없음이 아니다
+  const diff = await goal(tm.id, 'REVIEWFAIL2');
+  const d1 = await waitHold(diff, 'mission');
+  assert.equal(d1.hold.noProgress, undefined);
+  assert.ok(!S(diff).mission.log.some((x) => x.kind === 'no-progress'));
+  await ctl(diff, 'stop');
+  await waitEnd(diff);
+  // 같은 근거(REVIEWSAME). 자동 되돌림이 더 남아 있어도(되돌림 상한을 늘려 둔다) 진전이 없으면 저절로 돌지 않고 묻는다
+  const sid = await goal(tm.id, 'REVIEWSAME');
+  S(sid).mission.returnCap = 5;
+  const r1 = await waitHold(sid, 'mission');
+  assert.deepEqual([r1.hold.kind, r1.hold.round, r1.hold.noProgress, r1.hold.more], ['verdict', 2, true, undefined]);
+  assert.deepEqual([S(sid).mission.returns, S(sid).mission.returnCap], [1, 5], '첫 불합격은 자동 되돌림(앞 회차가 없다), 두 번째는 상한이 남았어도 묻는다');
+  const np = () => S(sid).mission.log.filter((x) => x.kind === 'no-progress');
+  assert.equal(np().length, 1);
+  assert.equal(np()[0].text, '검수 2회차: 불합격 기준 1개가 앞 회차와 같은 근거로 다시 걸렸어(진전 없음). 더 되돌리지 않고 물어.');
+  assert.equal(np()[0].fail, undefined, '실패 종류는 검수 줄이 센다(두 번 세지 않는다)');
+  // "한 번 더": 되돌림 한 번 뒤 또 같으면 같은 안내
+  assert.equal((await ctl(sid, 'more')).json.ok, true);
+  await t.waitFor(() => S(sid).runs.at(-1).hold?.reason === 'mission' && S(sid).mission.round === 3, 30000, '세 번째 묻기');
+  assert.equal(S(sid).runs.at(-1).hold.noProgress, true);
+  assert.equal(np().length, 2);
+  assert.equal(S(sid).mission.returns, 2);
+  assert.equal((await ctl(sid, 'accept')).json.ok, true);
+  await waitEnd(sid);
+  const m = S(sid).mission;
+  assert.equal(m.status, 'accepted');
+  const report = S(sid).messages.find((x) => x.id === m.reportMsgId);
+  assert.equal(report.unverified.noProgress, 2);
+  assert.ok(unverifiedLines((k, v) => k.replace(/\{(\w+)\}/g, (_, n) => v[n]), report).includes('한 번 더 해도 같은 기준이 같은 이유로 걸린 회차: 2'));
 });

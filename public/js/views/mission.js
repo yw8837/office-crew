@@ -670,6 +670,7 @@ export function MissionGate({ s, run }) {
   return html`<div class="ask-panel mission-gate" role="group" aria-label=${t('목표 판정')}>
     <div class="ask-head"><span class="ask-who">🎯 ${t('목표 판정')}</span></div>
     <div class="ask-question">${q}</div>
+    ${hold.noProgress && !notes && html`<div class="warnbox" role="note">${t('한 번 더 해도 같은 기준이 같은 이유로 걸렸어.')}</div>`}
     ${left.length > 0 && html`<div class="crit-table" role="list" aria-label=${t('남은 기준')}>${left.map((c) => html`<${CritRow} c=${{ ...c, text: `${c.id}. ${c.text}` }} />`)}</div>`}
     ${hold.keepBroken?.length > 0 && html`<div class="warnbox" role="note"><b>${t('지키기로 한 것을 어김')}</b><ul class="small">${hold.keepBroken.map((x) => html`<li>${x}</li>`)}</ul><span class="small muted">${t('에이전트가 씀 · 사용자 확인 안 함')}</span></div>`}
     ${hold.noFixer && hold.more !== false && html`<div class="small muted" role="note">${t('마지막 카드 단계에 조사·확인 카드만 있어서, "한 번 더"를 골라도 고치는(만들기·글) 카드는 돌지 않아.')}</div>`}

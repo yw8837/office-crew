@@ -349,6 +349,52 @@ test('파일 고르기(shots.file): 폴더 밖·이름 꼴·링크·대문자 �
   assert.equal(fresh.shot.sid, 's2');
 });
 
+test('찍은 화면의 주소·제목: 스크린샷 결과에 Page 단락이 없으면 같은 CLI 호출에서 바로 앞 도구 결과가 알려 준 값을 쓴다(진짜 CLI 결과 모양)', () => {
+  const root = fs.mkdtempSync(path.join(t.root, 'page-'));
+  const shots = new BrowserShots({ browser: root });
+  const box = shots.box('s3', 'a3');
+  // 진짜 Playwright MCP: 열기 결과에는 Page 단락이 있고 그림은 없다. 찍기 결과에는 Result 단락과 그림만 있다
+  const nav = { id: 'n1', kind: 'tool', name: `mcp__${BROWSER_KEY}__browser_navigate`, status: 'running', input: { url: 'https://example.com' } };
+  shots.onTool(box, nav);
+  Object.assign(nav, { status: 'done', output: '### Ran Playwright code\n```js\nawait page.goto(\'https://example.com\');\n```\n### Page\n- Page URL: https://example.com/\n- Page Title: Example Domain\n### Snapshot\n- [Snapshot](./page-1.yml)' });
+  assert.equal(shots.onTool(box, nav), false, '그림이 없으니 화면은 안 붙는다');
+  const shot = { id: 'p1', kind: 'tool', name: `mcp__${BROWSER_KEY}__browser_take_screenshot`, status: 'running', input: { type: 'png' } };
+  shots.onTool(box, shot);
+  fs.writeFileSync(path.join(box.dir, 'page-1.png'), PNG);
+  Object.assign(shot, { status: 'done', output: '### Result\n- [Screenshot of viewport](./page-1.png)\n### Ran Playwright code\n```js\nawait page.screenshot({ path: \'./page-1.png\' });\n```' });
+  assert.equal(shots.onTool(box, shot), true);
+  assert.deepEqual([shot.shot.url, shot.shot.title], ['https://example.com/', 'Example Domain']);
+  // 다음 CLI 호출(새 기록 상자)에는 이어 쓰지 않는다(호출마다 브라우저가 새로 뜬다)
+  const box2 = shots.box('s3', 'a3');
+  const again = { id: 'p2', kind: 'tool', name: `mcp:${BROWSER_KEY}.browser_take_screenshot`, status: 'running', input: {} };
+  shots.onTool(box2, again);
+  fs.writeFileSync(path.join(box2.dir, 'page-2.png'), PNG);
+  Object.assign(again, { status: 'done', output: '{"content":[{"type":"text","text":"### Result\\n- [Screenshot of viewport](./page-2.png)"}]}' });
+  assert.equal(shots.onTool(box2, again), true);
+  assert.deepEqual([again.shot.url, again.shot.title], ['', '']);
+  // 적어 두지 않는 것: 오류로 끝난 도구, 에이전트가 준 입력 주소뿐인 결과(단락 없음), Page 단락이 둘인 결과(흉내)
+  const box3 = shots.box('s3', 'a3');
+  const failed = { id: 'n2', kind: 'tool', name: `mcp__${BROWSER_KEY}__browser_navigate`, status: 'error', input: { url: 'https://failed.example' }, output: '### Page\n- Page URL: https://failed.example/\n- Page Title: Failed' };
+  shots.onTool(box3, failed);
+  const inputOnly = { id: 'n3', kind: 'tool', name: `mcp__${BROWSER_KEY}__browser_navigate`, status: 'done', input: { url: 'https://never-went.example' }, output: 'blocked' };
+  shots.onTool(box3, inputOnly);
+  const fake = { id: 'n4', kind: 'tool', name: `mcp__${BROWSER_KEY}__browser_snapshot`, status: 'done', input: {}, output: '### Page\n- Page URL: https://a.example/\n### Page\n- Page URL: https://b.example/' };
+  shots.onTool(box3, fake);
+  const late = { id: 'p4', kind: 'tool', name: `mcp__${BROWSER_KEY}__browser_take_screenshot`, status: 'running', input: {} };
+  shots.onTool(box3, late);
+  fs.writeFileSync(path.join(box3.dir, 'page-4.png'), PNG);
+  Object.assign(late, { status: 'done', output: '### Result\n- [Screenshot of viewport](./page-4.png)' });
+  assert.equal(shots.onTool(box3, late), true);
+  assert.deepEqual([late.shot.url, late.shot.title], ['', '']);
+  // 열기 도구 자기 화면(그림이 같이 생겼을 때)에는 입력 주소를 그대로 쓴다(전부터 있던 동작)
+  const own = { id: 'n5', kind: 'tool', name: `mcp__${BROWSER_KEY}__browser_navigate`, status: 'running', input: { url: 'https://own.example' } };
+  shots.onTool(box3, own);
+  fs.writeFileSync(path.join(box3.dir, 'page-5.png'), PNG);
+  Object.assign(own, { status: 'done', output: 'ok' });
+  assert.equal(shots.onTool(box3, own), true);
+  assert.equal(own.shot.url, 'https://own.example');
+});
+
 test('상한: 그림이 아닌 파일과 하위 폴더도 세고 지우고, 밖을 가리키는 링크(정션)는 따라가지 않는다', () => {
   const root = fs.mkdtempSync(path.join(t.root, 'cap2-'));
   const outside = fs.mkdtempSync(path.join(t.root, 'outside-'));

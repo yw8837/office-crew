@@ -442,6 +442,8 @@ test('14. 진행자 답을 기다리는 카드를 건너뛰면 기다림을 끊�
   const { p, tm } = await leadTeam('건너');
   const sid = await goal(tm.id, `LEADQ:${p.name} LEADSLOW`);
   await t.waitFor(() => card(sid, 'k2')?.lead, 30000, '질문 중');
+  // 진행자의 답 실행이 시작된 뒤에 건너뛴다(표시만 붙고 답 메시지가 아직 없을 때 건너뛰면 아래 "쓰던 진행자 실행은 멈춘다"를 볼 메시지가 없다. Windows 검사에서 한 번 그랬다)
+  await t.waitFor(() => S(sid).messages.some((x) => x.prep?.kind === 'lead'), 30000, '진행자 답 시작');
   const from = mark();
   const r = await ctl(sid, { action: 'skip', agentId: p.id });
   assert.equal(r.json.ok, true);

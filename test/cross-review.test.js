@@ -1,15 +1,16 @@
 // 교차 검수(결정 0032): 목표 카드에서 켜는 선택. 검증 검수자와 레드팀 검수자가 서로의 글을 보지 않고(각자 새 대화, 읽기 전용) 판정하고,
 // 코드가 기준마다 합친다(둘 다 합격 = 합격, 확인할 수 있는 근거가 있는 불합격 = 불합격, 한쪽만 근거 없이 불합격 = 엇갈림 → 판정 카드).
-// 가짜 CLI 로만(실제 AI 사용량 0). 신호어는 test/fake-cli/fake-claude.js 의 REDFAILEV·REDFAILNOEV·REDOMIT·REDBAD·REDERR·CHECKBROKEN·SECRETS, fake-codex.js 의 CODEXREVIEW
+// 가짜 CLI 로만(실제 AI 사용량 0). 신호어는 test/fake-cli/fake-claude.js 의 REDFAILEV·REDFAILNOEV·REDOMIT·REDBAD·REDERR·REDEXTRA·REDLEAD·REDQUOTA·
+// CHECKBROKEN·CHECKFAILNOEV·CHECKUNK·CHECKEXTRA·CHECKERR·SECRETS, fake-codex.js 의 CODEXREVIEW
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { bindLang } from '../server/i18n.js';
 import { hasEvidence, crossPlan, mergeReviews, applyPicks, cleanPicks, reviewPrompt, returnItems, returnPrompt, applyReview, estimateCalls, estimateParts, planEstimate, newMission, cutMission, RETURN_CAP } from '../server/mission.js';
 import { sumEstimate } from '../public/js/mission-numbers.js';
 import { answerKind } from '../public/js/usage-numbers.js';
-import { buildReport, exportRun } from '../server/report.js';
+import { buildReport, exportRun, reportText } from '../server/report.js';
 import { flowModel } from '../public/js/flow-graph.js';
-import { crossWords } from '../public/js/report-lines.js';
+import { crossWords, answerRows } from '../public/js/report-lines.js';
 import { attentionOf } from '../server/store.js';
 import { startTestApp, promptBody } from './helpers.js';
 
@@ -78,10 +79,20 @@ async function goal(teamId, signal = '', opts = {}) {
 }
 
 // ── 순수 함수 ──
-test('1. 근거 판정(hasEvidence): 파일 위치·주소·백틱 명령·따옴표 인용·종료 코드만 확인할 수 있는 근거다', () => {
-  for (const s of ['src/app.js:3 에서 빈 입력이면 깨져', 'app.js:12', 'docs/a.md#L4 의 표', 'https://example.com/x 에 없음', '`npm test` 가 실패', '출력 "1 failing" 이 나왔어', '「테스트 실패」라고 나옴',
-    'exit code 1', '종료 코드 2 로 끝남', 'server/mission.js 를 열어 봄', '“no such file” 오류']) assert.equal(hasEvidence(s), true, s);
-  for (const s of ['', '   ', '왠지 기준에 안 맞아 보여', '기준에 맞지 않음', 'app.js 를 봤어', '"짧은"', 'v1.2 가 맞아', '`a`', 'i.e. 별로야', null, undefined]) assert.equal(hasEvidence(s), false, String(s));
+test('1. 근거 판정(hasEvidence) 표: 파일 위치(유니코드 이름도)·http 주소·명령 같은 백틱·긴 인용·종료 코드의 꼴만 근거다. 판정 낱말·짧은 인용·문장 사이 점은 아니다', () => {
+  // [글, 근거인가, 까닭]
+  const rows = [
+    ['src/app.js:3 에서 빈 입력이면 깨져', true, '폴더/파일:줄'], ['app.js:12', true, '파일:줄'], ['main.c:3', true, '한 글자 확장자도 이름이 길면'], ['docs/a.md#L4 의 표', true, '파일#L줄'],
+    ['파일.js:7 에서', true, '한글 파일 이름:줄'], ['폴더/파일.js 를 열어 봄', true, '한글 경로'], ['C:\\작업\\app.js 를 열어 봄', true, '역슬래시 한글 경로'], ['server/mission.js 를 열어 봄', true, '폴더/파일'],
+    ['README.MD:3', true, '대문자 확장자'], ['https://example.com/x 에 없음', true, 'https 주소'], ['`npm test` 가 실패', true, '공백 든 명령'], ['`foo()` 가 없음', true, '괄호 든 코드'],
+    ['exit code 1', true, '종료 코드'], ['종료 코드 2 로 끝남', true, '한국어 종료 코드'], ['"Expected 200 but got 500" 이 나옴', true, '열두 글자 넘는 인용'], ['「入力が空ならエラーを返さない」', true, '긴 낫표 인용'],
+    ['`ok`', false, '판정 낱말 백틱'], ['`c1`', false, '기준 id 백틱'], ['`a` and `b`', false, '백틱 두 개 사이 글'], ['`c1 fail`', false, 'id 와 판정 낱말뿐'], ['`abc`', false, '명령 꼴 글자 없음'],
+    ['"fail"', false, '판정 낱말 인용'], ['the "Save" button', false, '짧은 인용'], ['"c1 pass ok yes no true"', false, '판정 낱말만 든 긴 인용'], ['「테스트 실패」라고 나옴', false, '짧은 낫표 인용'],
+    ['출력 "1 failing" 이 나왔어', false, '열두 글자 아래 인용'], ['e.g:1', false, '낱말 줄임 뒤 쌍점'], ['input/output.Then', false, '문장 사이 점'], ['Node.js/npm.It', false, '문장 사이 점'],
+    ['www.example.com', false, 'http 로 시작하지 않는 주소'], ['왠지 기준에 안 맞아 보여', false, '설명뿐'], ['app.js 를 봤어', false, '파일 이름만'], ['v1.2 가 맞아', false, '판 번호'], ['i.e. 별로야', false, '낱말 줄임'],
+    ['', false, '빈 글'], ['   ', false, '공백'], [null, false, '없음'], [undefined, false, '없음'],
+  ];
+  for (const [s, want, why] of rows) assert.equal(hasEvidence(s), want, `${String(s)} — ${why}`);
 });
 
 test('2. 합치기(mergeReviews): 둘 다 합격 = 합격, 근거 있는 불합격 = 불합격, 근거 없는 불합격 = 엇갈림, 빼먹음·깨짐 = 다른 쪽 + 한 명만 봄', () => {
@@ -111,6 +122,10 @@ test('2. 합치기(mergeReviews): 둘 다 합격 = 합격, 근거 있는 불합�
   // 두 검수자의 판정이 기준마다 그대로 남는다(판정 카드에 나란히)
   const [m] = mergeReviews(['c1'], side(r('pass', 'a')), side(r('fail', N)));
   assert.deepEqual([m.a, m.b], [{ verdict: 'pass', evidence: 'a' }, { verdict: 'fail', evidence: N }]);
+  // 엇갈린 모양(판정 카드의 설명 줄): 한쪽 합격 · 둘 다 근거 없는 불합격 · 다른 쪽 확인 못 함
+  const why = (a, b) => mergeReviews(['c1'], side(a), side(b))[0].splitWhy;
+  assert.deepEqual([why(r('pass', 'a'), r('fail', N)), why(r('fail', N), r('pass', 'b')), why(r('fail', N), r('fail', N)), why(r('unknown', 'u'), r('fail', N)), why(r('fail', N), r('unknown', ''))], ['pass', 'pass', 'both', 'unknown', 'unknown']);
+  assert.equal(why(r('pass', 'a'), r('fail', E)), undefined, '엇갈림이 아니면 없다');
 });
 
 test('3. 둘째 검수자 고르기(crossPlan): 진행자·첫째가 아닌 로그인된 팀원. 일을 안 하는(검수 역할) 사람 먼저, 그다음 다른 회사 AI', () => {
@@ -118,16 +133,17 @@ test('3. 둘째 검수자 고르기(crossPlan): 진행자·첫째가 아닌 로�
     { id: 'x', role: '개발', provider: 'codex' }, { id: 'q', role: '검수', provider: 'codex' }, { id: 'au', role: '검수', routing: 'auto' }];
   const T = (...stages) => ({ stages: stages.map((x) => ({ agentIds: x })) });
   const o = { leadId: 'l', reviewerId: 'r' };
-  assert.deepEqual(crossPlan(T(['l'], ['d'], ['r', 'r2']), A, o), { secondId: 'r2', why: '', sameAi: true });
-  assert.deepEqual(crossPlan(T(['l'], ['d'], ['r', 'r2', 'q']), A, o), { secondId: 'q', why: '', sameAi: false }, '같은 검수 역할이면 다른 회사 AI');
+  assert.deepEqual(crossPlan(T(['l'], ['d'], ['r', 'r2']), A, o), { secondId: 'r2', why: '', sameAi: true, worked: false });
+  assert.deepEqual(crossPlan(T(['l'], ['d'], ['r', 'r2', 'q']), A, o), { secondId: 'q', why: '', sameAi: false, worked: false }, '같은 검수 역할이면 다른 회사 AI');
   assert.equal(crossPlan(T(['l'], ['d', 'x'], ['r']), A, o).secondId, 'x', '둘 다 일한 사람이면 다른 회사 AI');
   assert.equal(crossPlan(T(['l'], ['x'], ['r', 'r2']), A, o).secondId, 'r2', '일을 안 한 사람이 다른 회사 AI 보다 먼저');
-  assert.deepEqual(crossPlan(T(['l'], ['d'], ['r']), A, o), { secondId: 'd', why: '', sameAi: true }, '한 명뿐이면 일한 사람이라도');
+  assert.deepEqual(crossPlan(T(['l'], ['d'], ['r']), A, o), { secondId: 'd', why: '', sameAi: true, worked: true }, '한 명뿐이면 일한 사람이라도(그렇다고 알린다)');
+  assert.equal(crossPlan(T(['l'], ['d', 'r2'], ['r', 'r2']), A, o).worked, true, '검수 역할이어도 일 단계에 같이 있으면 일한 사람');
   assert.equal(crossPlan(T(['l'], ['au', 'q'], ['r']), A, o).secondId, 'q', '자동 라우팅은 회사를 몰라서 같은 회사로 친다');
-  assert.deepEqual(crossPlan(T(['l'], ['r']), A, o), { secondId: null, why: 'few', sameAi: false }, '진행자·첫째 말고 없음');
-  assert.deepEqual(crossPlan(T(['l'], ['d'], ['r']), A, { ...o, usable: () => false }), { secondId: null, why: 'signin', sameAi: false });
+  assert.deepEqual(crossPlan(T(['l'], ['r']), A, o), { secondId: null, why: 'few', sameAi: false, worked: false }, '진행자·첫째 말고 없음');
+  assert.deepEqual(crossPlan(T(['l'], ['d'], ['r']), A, { ...o, usable: () => false }), { secondId: null, why: 'signin', sameAi: false, worked: false });
   assert.equal(crossPlan(T(['l'], ['d', 'q'], ['r']), A, { ...o, usable: (a) => a.provider === 'claude' }).secondId, 'd', '로그인 안 된 AI 는 빼고');
-  assert.deepEqual(crossPlan(T(['l']), A, { leadId: 'l', reviewerId: null }), { secondId: null, why: 'none', sameAi: false });
+  assert.deepEqual(crossPlan(T(['l']), A, { leadId: 'l', reviewerId: null }), { secondId: null, why: 'none', sameAi: false, worked: false });
   assert.equal(crossPlan(T(['l'], ['gone'], ['r']), A, o).why, 'few', '지워진 에이전트는 없는 것으로');
 });
 
@@ -193,7 +209,7 @@ test('7. 둘 다 합격: 두 검수자가 동시에 한 번 실행·읽기 전�
   await say(sid0, '정리해 줘');
   await waitDraft(sid0);
   const c = cardOf(sid0);
-  assert.deepEqual(c.cross, { can: true, on: false, secondId: x.red.id, secondName: x.red.name, ai: 'Claude · claude-sonnet-5-5', sameAi: true, why: '' }, '팀 기본값이 없으면 꺼짐');
+  assert.deepEqual(c.cross, { can: true, on: false, secondId: x.red.id, secondName: x.red.name, ai: 'Claude · claude-sonnet-5-5', sameAi: true, worked: false, why: '' }, '팀 기본값이 없으면 꺼짐');
   await ctl(sid0, 'stop');
   const from = t.fakeLog().length;
   const sid = await goal(x.tm.id, 'SLOW SECRETS');
@@ -264,7 +280,7 @@ test('9. 엇갈림 → 판정 카드: 다른 대기의 제어·틀린 값은 거
   const h = run.hold;
   assert.equal(h.round, 1);
   assert.deepEqual(h.names, { a: x.check.name, b: x.red.name });
-  assert.deepEqual(h.items.map((i) => [i.id, !!i.split, i.a.verdict, i.b.verdict]), [['c1', true, 'pass', 'fail'], ['c2', false, 'pass', 'pass']]);
+  assert.deepEqual(h.items.map((i) => [i.id, !!i.split, i.a.verdict, i.b.verdict, i.splitWhy]), [['c1', true, 'pass', 'fail', 'pass'], ['c2', false, 'pass', 'pass', undefined]], '엇갈린 모양(카드의 설명 줄)');
   assert.equal(h.items[1].verdict, 'pass');
   const m = S(sid).mission;
   assert.deepEqual([m.status, m.at.wait, m.split?.round], ['waiting', { reason: 'mission', kind: 'split' }, 1]);
@@ -300,7 +316,17 @@ test('9. 엇갈림 → 판정 카드: 다른 대기의 제어·틀린 값은 거
   assert.deepEqual([m2.status, m2.round, m2.returns, m2.calls.used, m2.criteria[0].status, m2.criteria[0].user], ['done', 2, 1, 8, 'pass', { pick: 'fold' }]);
   assert.ok(m2.criteria[0].evidence.startsWith('가짜 확인'), '접기는 합격 쪽 근거');
   assert.equal(m2.split, undefined, '카드 값은 반영 뒤 지운다');
-  assert.deepEqual(m2.log.filter((l) => l.kind === 'answer' && l.by === 'user' && l.text.startsWith('판정 카드')).map((l) => l.text), ['판정 카드에서 정했어: c1 불합격으로 고치기 — 사유: 빈 입력 <b>꼭</b> 봐', '판정 카드에서 정했어: c1 합격으로 접기']);
+  // 고른 것과 사용자가 쓴 사유는 줄을 나눈다(사유 줄은 typed: 본문을 뺀 내보내기에서 글을 뺀다)
+  assert.deepEqual(m2.log.filter((l) => l.kind === 'answer' && l.by === 'user' && l.text.startsWith('판정 카드')).map((l) => [l.text, !!l.typed]),
+    [['판정 카드에서 정했어: c1 불합격으로 고치기', false], ['판정 카드에 쓴 사유: c1 — 빈 입력 <b>꼭</b> 봐', true], ['판정 카드에서 정했어: c1 합격으로 접기', false]]);
+  // 본문을 뺀 내보내기(결정 0030): 사유 줄은 글 없이 종류만, 완주 보고의 "사용자가 확정한 것"에서도 뺀다. 본문을 넣으면 그대로
+  const noBody = exportRun({ s: S(sid), m: m2 });
+  assert.ok(!JSON.stringify(noBody).includes('빈 입력'), '사유 글이 나가지 않는다');
+  assert.ok(noBody.log.some((l) => l.kind === 'answer' && l.textOmitted && l.by === 'user'));
+  assert.ok(noBody.log.some((l) => l.text === '판정 카드에서 정했어: c1 불합격으로 고치기'), '고른 것(사용자가 정한 사실)은 그대로');
+  assert.ok(noBody.report.user.some((u) => u.textOmitted) && !noBody.report.user.some((u) => String(u.text || '').includes('빈 입력')));
+  assert.ok(noBody.notes.omitted.includes('judgment card reasons'));
+  assert.ok(JSON.stringify(exportRun({ s: S(sid), m: m2, body: true })).includes('빈 입력'), '본문을 넣으면 사유도');
   const rep = S(sid).messages.find((y) => y.kind === 'report');
   assert.deepEqual([rep.cross.splits, rep.cross.picks], [2, { fix: 1, fold: 1, hold: 0 }]);
   const fm = flowModel({ mission: m2, runs: S(sid).runs, messages: S(sid).messages });
@@ -314,7 +340,11 @@ test('10. 보류: 그 기준은 이번엔 넘기고(되돌리지 않고) 판정 
   await waitHold(sid, 'mission', 'split');
   assert.equal((await ctl(sid, 'judge', { round: 1, picks: { c1: { pick: 'hold', note: '다음에' } } })).json.ok, true);
   const run = await waitHold(sid, 'mission', 'verdict');
-  assert.deepEqual(run.hold.left.map((c) => c.id), ['c1']);
+  assert.deepEqual(run.hold.left.map((c) => [c.id, c.user]), [['c1', { pick: 'hold', note: '다음에' }]], '남은 기준 줄에 사용자가 정한 것');
+  assert.equal(S(sid).mission.split, undefined, '판정 카드 값은 반영하면서 지운다(목표가 끝나기 전에)');
+  // 되돌릴 기준이 없다(보류만 남음): "한 번 더"를 내지 않는다(받아들이기·그만만). 눌러도 안 듣는다
+  assert.deepEqual([run.hold.more, run.hold.noReturn], [false, true]);
+  assert.equal((await ctl(sid, 'more')).json.ok, false, '한 번 더는 안 듣는다');
   assert.equal((await ctl(sid, 'judge', { round: 1, picks: { c1: 'fix' } })).json.ok, false, '판정 뒤 묻기에는 판정 카드 제어가 안 듣는다');
   assert.equal((await ctl(sid, 'accept')).json.ok, true);
   await waitEnd(sid);
@@ -404,12 +434,26 @@ test('14. 돈: 둘째 검수 앞에서 호출 상한·구독 한도 상한을 �
   await app();
   const x = await crossTeam('상한');
   // 호출: 검수 앞에서 남은 호출이 1번(첫째 몫만)
+  const from = t.fakeLog().length;
   const sid = await goal(x.tm.id, '', { before: (id) => { S(id).mission.calls.cap = 4; } });
   await waitEnd(sid);
   let m = S(sid).mission;
   assert.deepEqual([m.status, m.calls.used, m.calls.cap, reviewMsgs(sid).length], ['done', 4, 4, 1]);
   assert.ok(m.log.some((l) => l.kind === 'cross' && l.text.includes('호출 상한')), JSON.stringify(m.log.map((l) => l.text)));
   assert.ok(!m.log.some((l) => l.kind === 'cap'), '상한 질문을 띄우지 않았다');
+  // 교차 검수를 켠 목표의 한 명 검수 회차도 카드·기록이 말한 대로 그 실행만 읽기 전용(검수자의 저장된 권한은 edit)
+  const [one] = reviewProcs(from);
+  assert.deepEqual(one.args.slice(one.args.indexOf('--permission-mode'), one.args.indexOf('--permission-mode') + 2), ['--permission-mode', 'plan']);
+  assert.ok(!reviewMsgs(sid)[0].review.role, '한 명 검수 표(역할 표시 없음)');
+  // 최악(두 검수자가 형식을 한 번씩 다시 받음 = 4번)보다 남은 호출이 적으면 한 명 검수: 남은 3번이어도
+  const s6 = await goal(x.tm.id, '', { before: (id) => { S(id).mission.calls.cap = 6; } });
+  await waitEnd(s6);
+  assert.deepEqual([S(s6).mission.calls.used, reviewMsgs(s6).length], [4, 1]);
+  assert.ok(S(s6).mission.log.some((l) => l.kind === 'cross' && l.text.includes('남은 호출이 3번') && l.text.includes('(4번)')), JSON.stringify(S(s6).mission.log.map((l) => l.text)));
+  // 남은 4번이면 둘이 검수
+  const s7 = await goal(x.tm.id, '', { before: (id) => { S(id).mission.calls.cap = 7; } });
+  await waitEnd(s7);
+  assert.deepEqual([S(s7).mission.calls.used, reviewMsgs(s7).length], [5, 2]);
   // 구독 한도 상한: 둘째의 AI(Codex) 창이 상한 이상
   const cx = await crossTeam('한도', { red: { provider: 'codex', model: 'gpt-6.1-sol' } });
   // 92%: 상한(90%) 이상이지만 이어받기 기준(95%) 아래(다른 AI 로 넘기지 않고 그 AI 로 돌 차례)
@@ -467,6 +511,10 @@ test('16. 판정 카드가 뜬 채 끊김 → 이어서: 같은 카드를 AI 호
   assert.equal(S(sid).mission.status, 'waiting', '끄는 중에는 목표 상태를 바꾸지 않는다');
   cutMission(S(sid)); // 다시 켤 때 하는 일(#fixStale)
   assert.equal(S(sid).mission.status, 'cut');
+  // 내보내기(결정 0030): 열린 판정 카드(splitOpen. 근거는 에이전트가 쓴 글), 흐름도의 판정 카드는 대기 중
+  const ex = exportRun({ s: S(sid), m: S(sid).mission });
+  assert.deepEqual([ex.splitOpen?.round, ex.splitOpen?.items.map((i) => [i.id, i.split, i.b?.verdict])], [1, [['c1', true, 'fail'], ['c2', false, 'pass']]]);
+  assert.equal(flowModel({ mission: S(sid).mission, runs: S(sid).runs, messages: S(sid).messages }).nodes.find((n) => n.id === 'split')?.state, 'wait');
   const calls = S(sid).mission.calls.used;
   const n = t.fakeLog().length;
   const r = await t.api('POST', `/api/sessions/${sid}/mission/resume`, { missionId: S(sid).mission.id });
@@ -502,6 +550,10 @@ test('17. 어림 숫자: 카드의 교차 검수 스위치가 검수 몫을 늘�
   assert.deepEqual(S(sid).mission.estimate, on);
   await waitEnd(sid);
   assert.ok(S(sid).mission.calls.used >= on.min && S(sid).mission.calls.used <= on.max);
+  // 옛 화면(교차 검수 값을 안 보냄)의 확인은 팀 기본값이 켜짐이어도 켜지 않는다(한 명 검수, 지금 그대로)
+  const old = await goal(x.tm.id, '', { cross: undefined });
+  await waitEnd(old);
+  assert.deepEqual([S(old).mission.cross, S(old).runs.at(-1).stages.at(-1).agentIds, reviewMsgs(old).length, cardOf(old).crossChosen], [undefined, [x.check.id], 1, undefined]);
   await t.api('PUT', `/api/teams/${x.tm.id}`, { ...x.tm, crossReview: false });
   assert.equal(t.app.store.get('teams', x.tm.id).crossReview, undefined, '끄면 저장하지 않는다');
 });
@@ -522,4 +574,221 @@ test('18. 다른 회사 AI 의 레드팀(Codex): 같은 판정 블록으로 판�
   assert.equal(cx.length, 2);
   for (const l of cx) assert.ok(l.args.some((a) => /read-only/.test(a)), JSON.stringify(l.args));
   assert.ok(m.crossLog[0].b === x.red.id);
+});
+
+// ── 검토 반영(결정 0032) ──
+// 일 단계(개발)가 도는 중에 앱이 꺼진 것처럼 끊는다(SLOW 로 한 차례가 1.5초)
+async function cutAtWork(sid) {
+  await t.waitFor(() => S(sid).runs.at(-1)?.stages?.[1]?.status === 'running', 30000, '개발 단계 시작');
+  t.app.orch.stopAll();
+  await t.waitFor(() => idle(sid), 20000, '실행 정리');
+  t.app.orch.closing = false;
+  cutMission(S(sid));
+  assert.equal(S(sid).mission.status, 'cut');
+}
+const resume = (sid) => t.api('POST', `/api/sessions/${sid}/mission/resume`, { missionId: S(sid).mission.id });
+const cutAtCard = async (sid) => {
+  await waitHold(sid, 'mission', 'split');
+  t.app.orch.stopAll();
+  await t.waitFor(() => idle(sid), 20000, '실행 정리');
+  t.app.orch.closing = false;
+  cutMission(S(sid));
+};
+
+test('19. 확인 대조: 카드의 둘째 검수자 id 가 지금 계산과 다르면 409 와 지금 값(반영하지 않음). 둘째가 팀의 일 단계에도 있으면 카드가 알린다', async () => {
+  await app();
+  const x = await crossTeam('대조');
+  const sid = await mkSession(x.tm.id);
+  await say(sid, '정리해 줘');
+  await waitDraft(sid);
+  const c = cardOf(sid);
+  assert.deepEqual([c.cross.secondId, c.cross.worked], [x.red.id, false]);
+  const body = { missionId: S(sid).mission.id, expected: shown(c), review: { reviewerId: c.review.reviewerId, droppable: c.review.droppable, drop: c.review.droppable.map((d) => d.index) } };
+  const bad = await confirm(sid, { ...body, cross: { on: true, secondId: x.dev.id } });
+  assert.equal(bad.status, 409);
+  assert.deepEqual([bad.json.cross.secondId, bad.json.cross.can, typeof bad.json.estimate?.review], [x.red.id, true, 'number']);
+  assert.deepEqual([S(sid).mission.status, S(sid).mission.cross], ['draft', undefined], '반영하지 않았다');
+  assert.equal((await confirm(sid, { ...body, cross: { on: true, secondId: x.red.id } })).status, 200);
+  await waitEnd(sid);
+  assert.equal(S(sid).mission.cross.secondId, x.red.id);
+  // 후보가 개발 담당뿐: 자기 일을 검수할 수 있다고 카드가 알린다(worked)
+  const lead = await mk('일함분석', '분석');
+  const dev = await mk('일함개발', '개발');
+  const chk = await mk('일함검수', '검수');
+  const tm = await mkTeam('일함팀', [{ label: '분석', agentIds: [lead.id] }, { label: '개발', agentIds: [dev.id] }, { label: '검수', agentIds: [chk.id] }]);
+  const s2 = await mkSession(tm.id);
+  await say(s2, '정리해 줘');
+  await waitDraft(s2);
+  assert.deepEqual([cardOf(s2).cross.secondId, cardOf(s2).cross.worked], [dev.id, true]);
+});
+
+test('20. 이번 회차에 둘째를 못 쓰는 까닭: 첫째와 같은 사람·팀에서 빠짐·끊긴 사이 지워짐 → 이어서가 막히지 않고 한 명 검수 + 진행 기록 한 줄', async () => {
+  await app();
+  const cases = [
+    ['같음', (x, sid) => { S(sid).mission.cross.secondId = x.check.id; S(sid).runs.at(-1).stages.at(-1).agentIds = [x.check.id, x.check.id]; }, '첫째 검수자와 같은 사람이야'],
+    ['빠짐', async (x) => { await t.api('PUT', `/api/teams/${x.tm.id}`, { ...x.tm, stages: x.tm.stages.map((st) => ({ ...st, agentIds: st.agentIds.filter((id) => id !== x.red.id) })) }); }, '팀에 없어'],
+    ['지움', async (x) => { assert.equal((await t.api('DELETE', `/api/agents/${x.red.id}`)).status, 200); }, '찾을 수 없어(지워진 에이전트)'],
+  ];
+  for (const [tag, change, why] of cases) {
+    const x = await crossTeam(`못씀${tag}`);
+    const sid = await goal(x.tm.id, 'SLOW');
+    await cutAtWork(sid);
+    await change(x, sid);
+    const r = await resume(sid);
+    assert.equal(r.status, 200, `${tag}: ${JSON.stringify(r.json)}`);
+    await waitEnd(sid);
+    const m = S(sid).mission;
+    assert.deepEqual([m.status, reviewMsgs(sid).filter((y) => y.review.round === 1).length], ['done', 1], tag);
+    assert.ok(m.log.some((l) => l.kind === 'cross' && l.text.includes(why) && l.text.endsWith('그래서 이번 회차는 한 명이 검수해.')), `${tag}: ${JSON.stringify(m.log.map((l) => l.text))}`);
+    assert.equal(m.crossLog.at(-1).single, true, tag);
+  }
+});
+
+test('21. 판정 카드 값 지우기: 카드에서 그만 → 목표 끝에 지움. 끊긴 목표를 버리면 지움(흐름도·내보내기에 대기로 안 남음). 카드 값이 없는 자리에서 이어서 하면 검수부터 다시', async () => {
+  await app();
+  const x = await crossTeam('카드값');
+  const a = await goal(x.tm.id, 'REDFAILNOEV');
+  await waitHold(a, 'mission', 'split');
+  assert.equal((await ctl(a, 'stop')).json.ok, true);
+  await waitEnd(a);
+  assert.deepEqual([S(a).mission.status, S(a).mission.split], ['stopped', undefined]);
+  assert.notEqual(flowModel({ mission: S(a).mission, runs: S(a).runs, messages: S(a).messages }).nodes.find((n) => n.id === 'split')?.state, 'wait');
+  // 끊긴 목표 버리기
+  const b = await goal(x.tm.id, 'REDFAILNOEV');
+  await cutAtCard(b);
+  assert.ok(S(b).mission.split);
+  assert.equal((await t.api('POST', `/api/sessions/${b}/mission/discard`, { missionId: S(b).mission.id })).status, 200);
+  assert.deepEqual([S(b).mission.status, S(b).mission.split], ['cancelled', undefined]);
+  assert.equal(exportRun({ s: S(b), m: S(b).mission }).splitOpen, undefined);
+  assert.notEqual(flowModel({ mission: S(b).mission, runs: S(b).runs, messages: S(b).messages }).nodes.find((n) => n.id === 'split')?.state, 'wait');
+  // 카드 값이 없는 자리(옛 판 등): 같은 회차 검수를 다시 해서 카드를 다시 띄운다
+  const c = await goal(x.tm.id, 'REDFAILNOEV');
+  await cutAtCard(c);
+  delete S(c).mission.split;
+  const before = reviewMsgs(c).length;
+  assert.equal((await resume(c)).status, 200);
+  const h = (await waitHold(c, 'mission', 'split')).hold;
+  assert.deepEqual([h.round, reviewMsgs(c).length - before], [1, 2], '두 검수자가 다시 판정');
+  await ctl(c, 'stop');
+  await waitEnd(c);
+});
+
+test('22. 판정 카드에서 고르면 목표는 다시 도는 중(active): 고치기 뒤 되돌림이 도는 동안', async () => {
+  await app();
+  const x = await crossTeam('상태');
+  const sid = await goal(x.tm.id, 'SLOW REDFAILNOEV');
+  await waitHold(sid, 'mission', 'split');
+  assert.equal(S(sid).mission.status, 'waiting');
+  assert.equal((await ctl(sid, 'judge', { round: 1, picks: { c1: 'fix' } })).json.ok, true);
+  await t.waitFor(() => S(sid).mission.status === 'active' && S(sid).runs.at(-1).status === 'running', 10000, '고른 뒤 active');
+  await t.waitFor(() => S(sid).runs.at(-1)?.hold?.kind === 'split' && S(sid).runs.at(-1).hold.round === 2, 40000, '2회차 카드');
+  await ctl(sid, 'stop');
+  await waitEnd(sid);
+});
+
+test('23. 남은 일·지키기로 한 것을 어김은 두 검수자 것의 합집합. 되돌릴 기준이 없으면 "한 번 더"를 내지 않는다', async () => {
+  await app();
+  const x = await crossTeam('합집');
+  const sid = await goal(x.tm.id, 'CHECKEXTRA REDEXTRA');
+  const run = await waitHold(sid, 'mission', 'verdict');
+  const m = S(sid).mission;
+  assert.deepEqual(m.extras, ['가짜 검증 남은 일: 로그가 길어', '가짜 레드팀 남은 일: 도움말 빠짐']);
+  assert.deepEqual(m.keepBroken, ['가짜 검증: API 이름이 바뀜 (src/app.js:3)', '가짜 레드팀: 설정 이름이 바뀜 (src/cfg.js:1)']);
+  assert.deepEqual([run.hold.extras.length, run.hold.keepBroken.length, run.hold.more, run.hold.noReturn], [2, 2, false, true]);
+  await ctl(sid, 'stop');
+  await waitEnd(sid);
+});
+
+test('24. 둘 다 판정 없음 + 사용량 한도: 한도 대기(결정 0019)를 띄우고 쪽마다 까닭을 남긴다(검증은 오류·레드팀은 한도여도)', async () => {
+  await app();
+  const keep = t.app.store.settings.failover;
+  t.app.store.settings.failover = false; // 다른 AI 로 이어받지 않게(이어받을 AI 가 없는 경우)
+  try {
+    const x = await crossTeam('한도둘');
+    for (const sig of ['REVIEWQUOTA', 'CHECKERR REDQUOTA']) {
+      const sid = await goal(x.tm.id, sig);
+      const run = await waitHold(sid, 'quota');
+      assert.equal(run.hold.phase, 'review', sig);
+      const m = S(sid).mission;
+      const lines = m.log.filter((l) => l.kind === 'cross' && l.text.startsWith('교차 검수 1회차: ')).map((l) => l.text);
+      assert.ok(lines.some((l) => l.includes(x.red.name) && l.includes('사용량 한도에 걸렸어')), `${sig}: ${JSON.stringify(lines)}`);
+      assert.ok(lines.some((l) => l.includes(x.check.name) && l.includes(sig === 'REVIEWQUOTA' ? '사용량 한도에 걸렸어' : '검수가 오류로 끝났어')), `${sig}: ${JSON.stringify(lines)}`);
+      assert.ok(run.hold.who.some((w) => w.agentId === (sig === 'REVIEWQUOTA' ? x.check.id : x.red.id)), JSON.stringify(run.hold.who));
+      await ctl(sid, 'stop');
+      await waitEnd(sid);
+      t.app.orch.cooldown.map.clear(); // 가짜 한도 오류가 남긴 쉬는 표시·한도 기록은 다음 차례·뒤 테스트에 남기지 않는다
+      t.app.store.usage.limits = {};
+    }
+  } finally { t.app.store.settings.failover = keep; t.app.orch.cooldown.map.clear(); t.app.store.usage.limits = {}; }
+});
+
+test('25. 둘째의 AI 한도가 이미 다 참: 묻지 않고 한 명 검수(진행 기록 한 줄)', async () => {
+  await app();
+  const x = await crossTeam('다참', { red: { provider: 'codex', model: 'gpt-6.1-sol' } });
+  const keepLim = t.app.store.usage.limits;
+  const keepFo = t.app.store.settings.failover;
+  t.app.store.usage.limits = { ...(keepLim || {}), codex: { windows: { five_hour: { pct: 100, resetsAt: Math.floor(Date.now() / 1000) + 3600 } }, observedAt: Date.now() } };
+  t.app.store.settings.failover = false;
+  try {
+    const sid = await goal(x.tm.id);
+    await waitEnd(sid);
+    const m = S(sid).mission;
+    assert.deepEqual([m.status, reviewMsgs(sid).length], ['done', 1]);
+    assert.ok(m.log.some((l) => l.kind === 'cross' && l.text.includes('한도가 이미 다 찼어')), JSON.stringify(m.log.map((l) => l.text)));
+  } finally { t.app.store.usage.limits = keepLim; t.app.store.settings.failover = keepFo; }
+});
+
+test('26. 형식을 다시 요청해 받은 판정은 구멍이 아니다(한 명 검수·교차 검수). 검수자가 진행자 질문 블록(oc-lead)을 쓰면 판정이 아니고, 진행자에게 묻지도 않는다', async () => {
+  await app();
+  const x = await crossTeam('구멍');
+  const one = await goal(x.tm.id, 'REVIEWBAD1', { cross: false });
+  await waitEnd(one);
+  assert.equal(S(one).mission.status, 'done');
+  assert.ok(!S(one).mission.log.some((l) => l.fail === 'hole'), JSON.stringify(S(one).mission.log.filter((l) => l.fail)));
+  const sid = await goal(x.tm.id, 'REDLEAD');
+  await waitEnd(sid);
+  const m = S(sid).mission;
+  assert.deepEqual([m.status, m.calls.used], ['done', 6], '레드팀은 형식을 한 번 더 받았다');
+  const reds = reviewMsgs(sid).filter((y) => y.review.role === 'red');
+  assert.deepEqual(reds.map((y) => [y.review.missing, !!y.review.retried]), [[true, false], [false, true]]);
+  assert.ok(!m.log.some((l) => l.fail), JSON.stringify(m.log.filter((l) => l.fail)));
+  assert.ok(!m.log.some((l) => l.kind === 'lead') && !reds.some((y) => y.leadAsks?.length), '진행자에게 묻지 않았다');
+  assert.deepEqual(m.criteria.map((c) => [c.status, c.one || '']), [['pass', ''], ['pass', '']]);
+});
+
+test('27. 결정 0031 과 맞물림: 두 갈래에서 사용자가 고른 것이 두 검수자 프롬프트에 다 가고, 답 종류·보고·내보내기·흐름도에 양쪽 칸이 다 나온다', async () => {
+  await app();
+  assert.deepEqual(['fork', 'lead', 'meet'].map((kind) => answerKind({ role: 'agent', prep: { kind } })), ['fork', 'lead', 'meeting']);
+  assert.deepEqual([answerKind({ review: { round: 1, role: 'red' } }), answerKind({ review: { round: 1, role: 'check' } }), answerKind({ review: { round: 1 } })], ['cross', 'review', 'review']);
+  assert.deepEqual(answerRows((k) => k, { review: 2, cross: 1, fork: 2, lead: 1 }).map(([k]) => k).slice(-4), ['review', 'cross', 'fork', 'lead']);
+  const x = await crossTeam('맞물');
+  const from = t.fakeLog().length;
+  const sid = await goal(x.tm.id, 'SLOW');
+  S(sid).mission.decided = [{ question: '어느 안으로 갈까?', answer: '안 A', about: '안 A 의 요약', fork: true, stageIndex: 1, at: Date.now() }];
+  await waitEnd(sid);
+  const rp = reviewProcs(from);
+  assert.equal(rp.length, 2);
+  for (const p of rp) assert.ok(p.texts[0].includes('[사용자가 정한 것 — 회의가 두 안으로 갈려 사용자가 하나를 고름. 이 안대로 해]'), p.texts[0].slice(0, 120));
+  const s = S(sid);
+  const m = s.mission;
+  m.forks = [{ label: '회의', picked: 'a', chosen: '안 A', dropped: ['안 B'], msgId: null }];
+  const rep = buildReport({ m, messages: s.messages, runs: s.runs, nameOf: (id) => t.app.store.get('agents', id)?.name || id });
+  assert.ok(rep.forks?.length === 1 && rep.cross?.rounds === 1);
+  const text = reportText(rep, { missionId: m.id });
+  assert.ok(text.includes('두 갈래(입장은 에이전트가 씀):') && text.includes('교차 검수:') && text.includes('교차 검수(레드팀) 1'), text);
+  const out = exportRun({ s, m });
+  assert.ok(out.crossLog.length === 1 && out.decided.some((d) => d.fork) && out.calls.some((k) => k.kind === 'cross'));
+  assert.ok(flowModel({ mission: m, runs: s.runs, messages: s.messages }).nodes.some((n) => n.id === 'review:red'));
+});
+
+test('28. 회귀: 교차 검수를 끈 목표는 지키기로 한 것을 어겨 되돌릴 기준이 없어도 "한 번 더"를 낸다(지금 그대로)', async () => {
+  await app();
+  const x = await crossTeam('끈목표');
+  const sid = await goal(x.tm.id, 'REVIEWKEEP', { cross: false });
+  const run = await waitHold(sid, 'mission', 'verdict');
+  assert.deepEqual([run.hold.more, run.hold.noReturn, run.hold.left.length], [undefined, undefined, 0]);
+  assert.equal((await ctl(sid, 'more')).json.ok, true);
+  await waitHold(sid, 'mission', 'verdict');
+  await ctl(sid, 'stop');
+  await waitEnd(sid);
 });

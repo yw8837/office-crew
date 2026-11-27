@@ -589,7 +589,8 @@ export function GoalCard({ m }) {
         <span><b>${t('교차 검수')}</b> · ${t('검수마다 호출 +1')} — ${!cx.can ? crossWhy(cx.why)
           : t('{name}({ai})이(가) 레드팀으로 따로 판정해: 기준이 깨지는 경우·빠진 것·증거 없는 주장을 찾아. 두 판정은 코드가 합치고, 엇갈리면 판정 카드로 물어.', { name: agentById(cx.secondId)?.name || cx.secondName, ai: cx.ai })}
           ${cx.can && crossOn && html`<span class="muted goal-keep-ins">${t('두 검수자 모두 그 실행만 읽기 전용으로 돌아(명령·테스트를 못 돌려). 서로의 글은 보지 않아.')}</span>`}
-          ${cx.can && cx.sameAi && html`<span class="muted goal-keep-ins">${t('둘째 검수자도 첫째와 같은 회사 AI(또는 모르는 AI)라서 교차가 약해.')}</span>`}</span>
+          ${cx.can && cx.sameAi && html`<span class="muted goal-keep-ins">${t('둘째 검수자도 첫째와 같은 회사 AI(또는 모르는 AI)라서 교차가 약해.')}</span>`}
+          ${cx.can && cx.worked && html`<span class="muted goal-keep-ins">${t('둘째 검수자가 팀의 일 단계에도 있어서 자기가 한 일을 검수할 수 있어.')}</span>`}</span>
       </div>
     </div>`}
     ${work !== 'cards' && (rv.droppable || []).map((d) => html`<label class="goal-keep small">
@@ -810,6 +811,9 @@ export function MissionGate({ s, run }) {
     const ready = splits.every((x) => picks[x.id]?.pick);
     const set = (id, v) => setPicks({ ...picks, [id]: { ...(picks[id] || {}), ...v } });
     const opts = [['fix', PICK().fix, t('마지막 일 단계가 고쳐(되돌림이 남았으면 저절로).')], ['fold', PICK().fold, t('이 기준은 채운 걸로 봐.')], ['hold', PICK().hold, t('이번엔 넘겨. 되돌리지 않고 완주 보고에 남겨.')]];
+    // 엇갈린 모양마다 한 줄(mergeReviews 의 splitWhy. 옛 카드 값에 없으면 한쪽 합격으로 본다)
+    const splitLine = (x) => ({ both: t('두 검수자 모두 불합격이라고 했는데, 둘 다 확인할 수 있는 근거의 꼴이 없어.'), unknown: t('한쪽은 불합격(확인할 수 있는 근거의 꼴 없음), 다른 쪽은 확인 못 함이라고 했어.') }[x.splitWhy]
+      || t('한쪽은 합격, 다른 쪽은 불합격이라고 했는데 그 불합격에 확인할 수 있는 근거의 꼴이 없어.'));
     const side = (label, name, r) => html`<div class="split-side">
       <div class="small"><b>${label}</b> · ${name}</div>
       ${r ? html`<div><span class=${`chip${verdictChip(r.verdict)[1]}`}>${verdictChip(r.verdict)[0]}</span></div>${r.evidence ? html`<div class="small muted crit-ev">${r.evidence}</div>` : html`<div class="small muted">${t('근거 없음')}</div>`}`
@@ -819,11 +823,12 @@ export function MissionGate({ s, run }) {
     return html`<div class="ask-panel mission-gate split-card" role="group" aria-label=${t('판정 카드')}>
       <div class="ask-head"><span class="ask-who">⚖️ ${t('판정 카드')} · ${t('검수 {r}회차', { r: hold.round })}</span></div>
       <div class="ask-question">${t('두 검수자의 판정이 엇갈린 기준이 {n}개 있어. 기준마다 정해 줘.', { n: splits.length })}</div>
-      <div class="small muted">${t('엇갈림: 한쪽만 불합격이라고 했는데 확인할 수 있는 근거(파일:줄·명령 출력·인용)가 없어. 판정과 근거는 에이전트가 쓴 글이야(사용자 확인 안 함).')}</div>
+      <div class="small muted">${t('엇갈림: 불합격이라고 한 쪽의 근거에 확인할 수 있는 꼴(파일 위치·주소·백틱 명령·긴 인용·종료 코드)이 없어. 코드는 근거의 꼴만 보고, 그 파일·출력이 정말 있는지는 확인하지 않아. 판정과 근거는 에이전트가 쓴 글이야(사용자 확인 안 함).')}</div>
+      <div class="small muted">${t('사유는 "불합격으로 고치기"를 고른 기준만 고칠 에이전트에게 사용자 글로 가. 다른 선택의 사유는 진행 기록에만 남아.')}</div>
       <div class="split-list">${items.map((x) => html`<fieldset class=${`split-row${x.split ? ' open' : ''}`}>
         <legend class="small"><b>${x.id}</b>. ${x.text}</legend>
         <div class="split-two">${side(t('검증'), hold.names?.a || '', x.a)}${side(t('레드팀'), hold.names?.b || '', x.b)}</div>
-        ${x.split ? html`<div class="split-picks" role="radiogroup" aria-label=${t('{id} 어떻게 할까', { id: x.id })}>
+        ${x.split ? html`<div class="small split-why">${splitLine(x)}</div><div class="split-picks" role="radiogroup" aria-label=${t('{id} 어떻게 할까', { id: x.id })}>
             ${opts.map(([v, label, desc]) => html`<label class="goal-keep small"><input type="radio" name=${`split-${run.id}-${hold.round}-${x.id}`} value=${v} checked=${picks[x.id]?.pick === v} disabled=${busy} onChange=${() => set(x.id, { pick: v })} /><span><b>${label}</b> — ${desc}</span></label>`)}
             <input class="input" maxlength="200" placeholder=${t('사유 한 줄(선택)')} aria-label=${t('{id} 사유 한 줄(선택)', { id: x.id })} value=${picks[x.id]?.note || ''} disabled=${busy} onInput=${(e) => set(x.id, { note: e.target.value })} />
           </div>`
@@ -851,7 +856,7 @@ export function MissionGate({ s, run }) {
       ${row(1, notes ? t('그대로 끝') : t('받아들이기'), notes ? t('추가 지시는 반영하지 않고 지금 판정으로 끝내.') : t('남은 기준은 판정 그대로 두고 끝내.'), 'accept')}
       ${hold.more !== false && row(2, notes ? t('반영해서 한 번 더') : t('한 번 더'), notes ? (hold.reviewer === false ? t('마지막 일 단계가 추가 지시를 넣어 다시 해. 검수할 사람이 없어서 그 뒤에 판정 없이 다시 물어.') : t('마지막 일 단계가 추가 지시를 넣어 다시 하고, 다시 검수해.')) : t('마지막 일 단계가 걸린 기준을 고친 뒤 다시 검수해.'), 'more')}
     </div>
-    ${hold.more === false && html`<div class="small muted">${t('검수할 다른 팀원이 없어서 다시 고쳐도 판정할 사람이 없어.')}</div>`}
+    ${hold.more === false && html`<div class="small muted">${hold.noReturn ? t('되돌릴 기준이 없어(판정 카드에서 보류한 기준은 되돌리지 않아). 받아들이거나 그만해.') : t('검수할 다른 팀원이 없어서 다시 고쳐도 판정할 사람이 없어.')}</div>`}
     <div class="ask-foot"><span class="grow"></span><button type="button" class="btn sm danger" disabled=${busy} onClick=${() => ctl('stop')}>${t('그만')}</button></div>
   </div>`;
 }

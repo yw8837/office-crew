@@ -130,8 +130,16 @@ async function pump() {
     if (redTurn && has('REDFAILEV1') && round === 1) set('c1', 'fail', '가짜: 빈 입력이면 깨져 src/app.js:3 에서 `npm test` 출력 "1 failing"');
     if (redTurn && has('REDFAILNOEV')) set('c1', 'fail', '가짜: 왠지 기준에 안 맞아 보여');
     if (redTurn && has('REDOMIT')) results = results.filter((r) => r.id !== 'c2');
+    // 검증 쪽만: CHECKFAILNOEV(c1 불합격인데 근거가 설명뿐) · CHECKUNK(c1 확인 못 함) · CHECKEXTRA(남은 일·어김 하나씩). 레드팀만: REDEXTRA(남은 일·어김 하나씩) ·
+    // REDLEAD(첫 판정 답에 진행자 질문 블록 oc-lead 를 섞음. 다시 요청엔 맞게). REDQUOTA(레드팀 차례만 한도)·CHECKERR(검증 차례만 오류)는 아래 결과 쪽
+    if (!redTurn && has('CHECKFAILNOEV')) set('c1', 'fail', '가짜: 검증도 왠지 안 맞아 보여');
+    if (!redTurn && has('CHECKUNK')) set('c1', 'unknown', '가짜: 검증은 확인하지 못했어');
+    const side = redTurn ? (has('REDEXTRA') ? { extras: ['가짜 레드팀 남은 일: 도움말 빠짐'], keepBroken: ['가짜 레드팀: 설정 이름이 바뀜 (src/cfg.js:1)'] } : {})
+      : has('CHECKEXTRA') ? { extras: ['가짜 검증 남은 일: 로그가 길어'], keepBroken: ['가짜 검증: API 이름이 바뀜 (src/app.js:3)'] } : {};
     const secret = has('SECRETS') ? `${redTurn ? 'REDSECRET' : 'CHECKSECRET'}-r${round}-p${process.pid}\n\n` : '';
     if ((redTurn && has('REDBAD')) || (!redTurn && has('CHECKBROKEN'))) return [`${secret}판정했어.\n\n`, '```oc-review\n{"nonce": 망가진\n```'];
+    if (redTurn && has('REDLEAD') && !retry) return ['판정했어.\n\n```oc-lead\n{"question":"REDLEAD 진행자에게 물어도 돼?"}\n```\n\n', '```oc-review\n' + JSON.stringify({ nonce, results }) + '\n```'];
+    if (Object.keys(side).length) return [`${secret}판정했어.\n\n`, '```oc-review\n' + JSON.stringify({ nonce, results, ...side }) + '\n```'];
     if (has('REVIEWFAIL2') || (has('REVIEWFAIL') && round === 1)) set('c1', 'fail', `가짜 불합격 사유 ${round}회차`);
     // REVIEWSAME: 늘 c1 불합격이고 근거도 회차마다 같다(공백·전각만 다르게. 진전 없음, 결정 0028)
     if (has('REVIEWSAME')) set('c1', 'fail', round % 2 ? '가짜: 같은 이유로  걸림 (src/app.js:3)' : '가짜: 같은 이유로 걸림 （src/app.js:3）');
@@ -404,7 +412,7 @@ async function pump() {
   } else if (req.includes('SESSIONLIMIT') && !text.includes('[이어받기]')) {
     // "session" 이 들어간 한도 문구(이어하기 실패로 오판하면 안 됨)
     out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Session limit reached', session_id: sid, usage: {} });
-  } else if ((text.includes('QUOTAFAIL') || (reviewTurn && goalLine.includes('REVIEWQUOTA') && !lifted)) && !text.includes('[이어받기]')) {
+  } else if ((text.includes('QUOTAFAIL') || (reviewTurn && goalLine.includes('REVIEWQUOTA') && !lifted) || (redTurn && goalLine.includes('REDQUOTA') && !lifted)) && !text.includes('[이어받기]')) {
     // REVIEWQUOTA: 기준 판정 차례만 한도 오류(확정 목표 줄은 일 단계 프롬프트에도 들어가서 QUOTAFAIL 을 쓰면 일 단계까지 걸린다)
     // 실측 형식: 한도 초과 시 rate_limit_event(rejected) 뒤 오류 결과
     out({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', unifiedWindows: { five_hour: { utilization: 1, resetsAt: Math.floor(Date.now() / 1000) + 3600 } } } });
@@ -431,7 +439,7 @@ async function pump() {
     // 초기화 시각 없는 거절 이벤트가 연달아 온 뒤 정상 종료(쉬는 목록 알림이 매번 나가면 안 됨)
     for (let k = 0; k < 5; k++) { out({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour' } }); await sleep(5); }
     out({ type: 'result', subtype: 'success', is_error: false, session_id: sid, usage: { input_tokens: 1, output_tokens: 1 } });
-  } else if (req.includes('FAILME') || forkBy('FORKFAIL') || (redTurn && goalLine.includes('REDERR')) || (workTurn && myName && goalLine.includes(`MIXFAIL:${myName}`)) || (research && req.includes('RESEARCHFAIL')) || (rn === 1 && goalLine.includes('RFAIL')) || (cardId === 'k1' && goalLine.includes('CARDFAIL')) || (cardId === 'k1' && goalLine.includes('BACKFAIL') && text.includes('[지난 검수에서 걸린 것')) || by('FAILBY')) {
+  } else if (req.includes('FAILME') || forkBy('FORKFAIL') || (redTurn && goalLine.includes('REDERR')) || (reviewTurn && !redTurn && goalLine.includes('CHECKERR')) || (workTurn && myName && goalLine.includes(`MIXFAIL:${myName}`)) || (research && req.includes('RESEARCHFAIL')) || (rn === 1 && goalLine.includes('RFAIL')) || (cardId === 'k1' && goalLine.includes('CARDFAIL')) || (cardId === 'k1' && goalLine.includes('BACKFAIL') && text.includes('[지난 검수에서 걸린 것')) || by('FAILBY')) {
     out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: '가짜 실패', session_id: sid, usage: {} });
   } else if (req.includes('ZEROCRASH')) {
     // 충돌 흉내: 값이 모두 0인 오류 결과를 내고 누적을 저장하지 않은 채 끝난다

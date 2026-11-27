@@ -132,9 +132,9 @@ export function exportCleaner({ secrets = [], roots = [], dataDir = '', home = '
 }
 // 실패 종류(코드가 오류 문구로 가를 수 있는 것만): 사용량 한도 outside, 일시 장애 transient, 그 밖 unknown
 export const answerFail = (error) => (isQuotaError(error) ? 'outside' : isTransientError(error) ? 'transient' : 'unknown');
-// 본문을 빼면(body false) 사용자가 쓴 글도 뺀다: 세션 제목(첫 요청 앞부분), 진행 기록의 추가 지시 줄(글 없이 종류만), 완주 보고의 같은 줄.
-// 회의 질문에 사용자가 고른 답(decided, 답 줄)은 "사용자가 정한 것"이라 그대로 둔다
-const userText = (x) => x?.by === 'user' && x.kind === 'note';
+// 본문을 빼면(body false) 사용자가 쓴 글도 뺀다: 세션 제목(첫 요청 앞부분), 진행 기록의 추가 지시 줄과 판정 카드에 쓴 사유 줄(typed, 결정 0032)(글 없이 종류만), 완주 보고의 같은 줄.
+// 회의 질문에 사용자가 고른 답(decided, 답 줄)과 판정 카드에서 고른 것은 "사용자가 정한 것"이라 그대로 둔다
+const userText = (x) => x?.by === 'user' && (x.kind === 'note' || x.typed === true);
 export function exportRun({ s, m, nameOf = (id) => id, body = false, secrets = [], roots = [], dataDir = '', home = '', now = Date.now(), appVersion = '' }) {
   const clean = exportCleaner({ secrets, roots, dataDir, home });
   const deep = (v) => (typeof v === 'string' ? clean(v) : Array.isArray(v) ? v.map(deep) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, deep(x)])) : v);
@@ -150,7 +150,7 @@ export function exportRun({ s, m, nameOf = (id) => id, body = false, secrets = [
   if (report && !body && Array.isArray(report.user)) report.user = report.user.map((u) => (omit.has(u.text) ? { at: u.at, textOmitted: true } : u));
   const out = {
     format: EXPORT_FORMAT, version: EXPORT_VERSION, exportedAt: new Date(now).toISOString(), app: { version: appVersion }, body: !!body,
-    notes: { prompts: 'not-stored', paths: 'work-folder-relative', masked: ['secrets', 'token-like text', 'absolute paths'], ...(body ? {} : { omitted: ['answer text', 'request text', 'session title', 'extra instruction text', 'card closing lines'] }) },
+    notes: { prompts: 'not-stored', paths: 'work-folder-relative', masked: ['secrets', 'token-like text', 'absolute paths'], ...(body ? {} : { omitted: ['answer text', 'request text', 'session title', 'extra instruction text', 'judgment card reasons', 'card closing lines'] }) },
     session: { id: s.id, title: body ? s.title || '' : '' },
     goal: {
       id: m.id, status: m.status, goal: m.goal || '', work: m.work || 'stages', createdAt: m.createdAt || 0, confirmedAt: m.confirmedAt || 0, editedByUser: !!m.editedByUser,

@@ -433,37 +433,63 @@ export function returnPrompt(items, mark = randomBytes(4).toString('hex'), { ass
 export const CROSS_LOG_MAX = 20; // 목표 하나에 적어 두는 교차 검수 회차 기록(넘으면 오래된 것부터 버린다)
 export const SPLIT_NOTE = 200; // 판정 카드에서 사용자가 적는 사유 한 줄 최대 글자
 export const SPLIT_PICKS = ['fix', 'fold', 'hold']; // 고치기(불합격으로) · 접기(합격으로) · 보류(이번엔 넘기고 보고에 남김)
-// 확인할 수 있는 근거인가: 다른 사람이 그대로 따라가 볼 수 있는 것이 하나라도 있으면 true.
-// 파일 위치(폴더/파일.확장자, 파일.확장자:줄, 파일.확장자#L줄), 주소(http·https·www.), 백틱으로 감싼 명령·코드(두 글자 이상), 따옴표로 감싼 인용(네 글자 이상: "…" “…” 「…」 『…』),
-// 종료 코드(exit code n · exit status n · 종료 코드 n). 설명만 있는 글("기준에 안 맞아 보여")·파일 이름만("app.js 를 봤어")은 근거가 아니다
-const EVIDENCE = [/https?:\/\/\S/i, /\bwww\.[a-z0-9-]+(?:\.[a-z0-9-]+)+/i, /[\w.~\\/-]*\.[A-Za-z][A-Za-z0-9]{0,5}(?::\d+|#L\d+)/, /(?:[A-Za-z]:)?(?:[\w.~-]+[\\/])+[\w.-]*\.[A-Za-z][A-Za-z0-9]{0,5}\b/,
-  /`[^`\n]*[^`\s][^`\n]*[^`\s][^`\n]*`/, /["“]([^"”\n]{4,})["”]/, /[「『]([^」』\n]{4,})[」』]/, /(?:\bexit(?:ed)?\s+(?:code|status)|종료\s*코드)\s*:?\s*-?\d+/i];
-export const hasEvidence = (text) => { const s = String(text ?? ''); return !!s.trim() && EVIDENCE.some((re) => re.test(s)); };
+export const CROSS_WORST = 4; // 교차 검수 한 회차의 최악 호출: 두 검수자가 판정 블록을 한 번씩 다시 받는 경우(둘째를 쓰기 전에 이만큼 남았는지 본다)
+// 확인할 수 있는 근거의 꼴인가: 다른 사람이 그대로 따라가 볼 수 있는 것의 꼴이 하나라도 있으면 true. 코드는 꼴만 본다(그 파일·줄·출력이 정말 있는지는 확인하지 않는다).
+// 파일 위치(폴더/파일.확장자, 파일.확장자:줄, 파일.확장자#L줄. 한글 같은 유니코드 이름도), 주소(http:// · https:// 로 시작), 백틱으로 감싼 명령·코드(세 글자 이상이고 공백·경로 문자·괄호·점 같은 것이 든 것),
+// 따옴표로 감싼 인용(열두 글자 이상: "…" “…” 「…」 『…』), 종료 코드(exit code n · exit status n · 종료 코드 n).
+// 기준 id 와 판정 낱말(pass·fail·ok·합격·불합격 등)만 든 백틱·인용, 설명만 있는 글("기준에 안 맞아 보여"), 파일 이름만("app.js 를 봤어"), 문장 사이의 점("input/output.Then")은 근거가 아니다
+const EV_QUOTE_MIN = 12;
+const EV_URL = /\bhttps?:\/\/[^\s/]+/i;
+const EV_EXIT = /(?:\bexit(?:ed)?\s+(?:code|status)|종료\s*코드)\s*:?\s*-?\d+/i;
+// 파일 위치(줄까지): 이름.확장자:줄 · 이름.확장자#L줄. 이름 끝 조각과 확장자가 둘 다 한 글자면(e.g:1) 낱말 줄임으로 본다
+const EV_LINE = /(?<![\p{L}\p{N}_~.-])([\p{L}\p{N}_~.-]*?)\.([A-Za-z][A-Za-z0-9]{0,5})(?::\d+|#L\d+)/gu;
+// 폴더/파일.확장자(구분자 / 또는 \ 가 하나 이상)
+const EV_PATH = /(?:[\p{L}\p{N}_~.-]+[\\/])+([\p{L}\p{N}_~-][\p{L}\p{N}_~.-]*?)\.([A-Za-z][A-Za-z0-9]{0,5})(?![\p{L}\p{N}])/gu;
+const EV_EXT = /^(?:[a-z][a-z0-9]*|[A-Z][A-Z0-9]*)$/; // 확장자는 소문자만 또는 대문자만("output.Then" 의 Then 은 확장자가 아니다)
+const EV_CODE = /`([^`\n]+)`/g;
+const EV_CODE_MARK = /[\s\\/()[\]{}.:=<>|$#-]/; // 백틱 안이 명령·경로·코드로 보이는 글자
+const EV_QUOTES = [/["“]([^"”\n]+)["”]/gu, /[「『]([^」』\n]+)[」』]/gu];
+// 기준 id·판정 낱말·문장 부호·공백을 지우고 남는 게 없으면 판정을 되풀이한 것뿐이다
+const EV_WORDS = /\b(?:c\d+|pass(?:ed|es)?|fail(?:ed|s|ure|ing)?|ok(?:ay)?|unknown|yes|no|true|false)\b|불합격|합격|통과|실패|모름|확인\s*못\s*함|[\s\p{P}\p{S}]/giu;
+const onlyWords = (s) => !String(s).replace(EV_WORDS, '');
+const evFile = (stem, ext) => EV_EXT.test(ext) && (ext.length >= 2 || (stem.split(/[.]/).at(-1) || '').length >= 2);
+export function hasEvidence(text) {
+  const s = String(text ?? '');
+  if (!s.trim()) return false;
+  if (EV_URL.test(s) || EV_EXIT.test(s)) return true;
+  for (const re of [EV_LINE, EV_PATH]) for (const m of s.matchAll(re)) if (evFile(m[1], m[2])) return true;
+  for (const m of s.matchAll(EV_CODE)) { const c = m[1].trim(); if ([...c].length >= 3 && EV_CODE_MARK.test(c) && !onlyWords(c)) return true; }
+  for (const re of EV_QUOTES) for (const m of s.matchAll(re)) { const q = m[1].trim(); if ([...q].length >= EV_QUOTE_MIN && !onlyWords(q)) return true; }
+  return false;
+}
 
 // 둘째 검수자(레드팀) 고르기: 팀원 중 진행자도 첫째 검수자도 아닌 사람, 지금 AI 가 로그인된 사람만(usable). 팀 밖에서는 고르지 않는다(결정 0007).
 // 고르는 순서: 일을 하지 않는 사람(검수 역할) 먼저, 그다음 첫째와 다른 회사 AI(aiKey 가 다름. 자동 라우팅은 회사를 몰라서 같은 회사로 친다), 그다음 팀에 적힌 순서.
-// → { secondId, why: ''(찾음)|'none'(첫째 검수자가 없음)|'few'(진행자·첫째 말고 팀원이 없음)|'signin'(있지만 로그인된 사람이 없음), sameAi(첫째와 같은 회사 AI 이거나 모름) }
+// → { secondId, why: ''(찾음)|'none'(첫째 검수자가 없음)|'few'(진행자·첫째 말고 팀원이 없음)|'signin'(있지만 로그인된 사람이 없음), sameAi(첫째와 같은 회사 AI 이거나 모름),
+//     worked(둘째가 검수 역할만 있는 단계가 아닌 팀 단계에도 있다: 그 일을 한 사람일 수 있다. 일 카드면 검수 역할이 아닌 팀원은 카드를 맡을 수 있다) }
 export function crossPlan(team, agents, { leadId = null, reviewerId = null, usable = () => true } = {}) {
-  if (!reviewerId) return { secondId: null, why: 'none', sameAi: false };
+  if (!reviewerId) return { secondId: null, why: 'none', sameAi: false, worked: false };
   const byId = new Map((agents || []).map((a) => [String(a.id), a]));
   const skip = new Set([String(leadId ?? ''), String(reviewerId)]);
   const seen = new Set();
   const pool = (team?.stages || []).flatMap((st) => (st.agentIds || []).map(String)).filter((id) => byId.has(id) && !skip.has(id) && !seen.has(id) && seen.add(id)).map((id) => byId.get(id));
-  if (!pool.length) return { secondId: null, why: 'few', sameAi: false };
+  if (!pool.length) return { secondId: null, why: 'few', sameAi: false, worked: false };
   const ok = pool.filter((a) => usable(a));
-  if (!ok.length) return { secondId: null, why: 'signin', sameAi: false };
+  if (!ok.length) return { secondId: null, why: 'signin', sameAi: false, worked: false };
   const company = (a) => (!a || a.routing === 'auto' ? '' : aiKey(a));
   const first = company(byId.get(String(reviewerId)));
   const same = (a) => !first || !company(a) || company(a) === first;
   const rank = (a) => (roleKind(a.role) === 'review' ? 0 : 2) + (same(a) ? 1 : 0);
   const best = ok.reduce((b, a) => (rank(a) < rank(b) ? a : b));
-  return { secondId: String(best.id), why: '', sameAi: same(best) };
+  // 일하는 단계: 지금 있는 담당 중에 검수 역할이 아닌 사람이 있는 단계(reviewPlan 의 검수 단계가 아닌 것)
+  const work = (team?.stages || []).map((st) => (st.agentIds || []).map(String).filter((id) => byId.has(id))).filter((ids) => ids.some((id) => roleKind(byId.get(id).role) !== 'review'));
+  return { secondId: String(best.id), why: '', sameAi: same(best), worked: work.some((ids) => ids.includes(String(best.id))) };
 }
 
 // 두 판정 합치기(코드가 한다. 모델에게 합쳐 달라고 하지 않는다). ids: 코드가 가진 기준 id, a: 검증 검수자, b: 레드팀 검수자의 parseReview 결과({ results, omitted }) 또는 null(블록을 못 받음).
 // 기준마다: 둘 다 합격 = 합격 / 하나라도 확인할 수 있는 근거(hasEvidence)가 있는 불합격 = 불합격 / 불합격인데 근거가 없음(한쪽이든 둘 다든) = 엇갈림(split, 사람에게. 정하기 전 값은 확인 못 함) /
 // 그 밖(한쪽이라도 확인 못 함) = 확인 못 함. 한쪽이 그 기준을 빼먹었거나 블록이 깨졌으면 다른 쪽 판정 그대로(한 명 검수와 같다) + one('a'|'b', 한 명만 봄). 둘 다 빼먹었으면 확인 못 함.
-// → [{ id, verdict, evidence, a: { verdict, evidence }|null, b: …|null, split?, one? }](a·b 는 판정 카드에 나란히 보인다)
+// → [{ id, verdict, evidence, a: { verdict, evidence }|null, b: …|null, split?, splitWhy?, one? }](a·b 는 판정 카드에 나란히 보인다)
 export function mergeReviews(ids, a, b) {
   const of = (side, id) => (side && !(side.omitted || []).includes(id) ? (side.results || []).find((r) => r.id === id) || null : null);
   const view = (r) => (r ? { verdict: r.verdict, evidence: r.evidence || '' } : null);
@@ -477,7 +503,8 @@ export function mergeReviews(ids, a, b) {
     const kx = kind(x);
     const ky = kind(y);
     if (kx === 'failE' || ky === 'failE') return { ...base, verdict: 'fail', evidence: (kx === 'failE' ? x : y).evidence };
-    if (kx === 'failN' || ky === 'failN') return { ...base, verdict: 'unknown', evidence: (kx === 'failN' ? x : y).evidence, split: true };
+    // 엇갈린 모양(splitWhy, 판정 카드의 설명): 'pass' 한쪽 합격 · 'both' 둘 다 근거 없는 불합격 · 'unknown' 다른 쪽은 확인 못 함
+    if (kx === 'failN' || ky === 'failN') return { ...base, verdict: 'unknown', evidence: (kx === 'failN' ? x : y).evidence, split: true, splitWhy: kx === ky ? 'both' : [kx, ky].includes('pass') ? 'pass' : 'unknown' };
     if (kx === 'pass' && ky === 'pass') return { ...base, verdict: 'pass', evidence: x.evidence };
     const u = kx === 'unknown' ? x : y;
     return { ...base, verdict: 'unknown', evidence: u.evidence || (u === x ? y : x).evidence || '' };

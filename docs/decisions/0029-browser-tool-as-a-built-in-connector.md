@@ -6,14 +6,15 @@
 
 ## Revision (2026-11-27): checked once with real CLIs on Windows
 
-Six real calls in a separate data folder (Claude Code with Claude Sonnet 5.5, Codex with GPT-6.1 Sol), one of each with the switch on and the "Allow file edits" permission, asked to open a page and take a screenshot.
+Real calls in a separate data folder (Claude Code with Claude Sonnet 5.5, Codex with GPT-6.1 Sol), one of each with the switch on and the "Allow file edits" permission, asked to open a page and take a screenshot.
 
 - `npx` started from both CLIs as configured, without a `cmd /c` wrapper.
 - Both ran `browser_navigate` and `browser_take_screenshot` without a permission error, and the screenshot landed in the output folder under the name the app picks up (`page-<time>.png`); the tool block got its image.
 - The real result of `browser_take_screenshot` has no "Page" section (only navigation-like tools report the address and title), so the recorded screen had an empty address and title. Fixed: within one CLI call the app keeps the last address and title that a browser tool's result reported in its "Page" or "Open tabs" section, and uses them when a screenshot's own result has none. An address the agent only passed as input isn't kept, and nothing carries over to the next call. It is still only shown as text; it can be stale when the page or the tab changed in between, and a page that fakes a single "Page" section in a result that has none can set it.
 - Codex wrote its files relative to the output folder (its working folder), as intended. Claude's paths were relative to the work folder, as written under "Not checked" below.
 - Download: the `npx` cache grew by about 19 MB in this run. The Playwright browser folder was 715 MB afterwards; its size before the run wasn't measured, so what the first run downloads is still not known.
-- Still not checked: that the deny list and the `filename` rules hold when an agent tries the blocked tools, and other operating systems.
+- The blocked tools, in a second run (one call each): asked to use `browser_evaluate` and `browser_file_upload`, Claude got "No such tool available" for both and Codex wasn't offered them. Asked for a screenshot with a `filename`, Claude's call was denied by the `filename` rule; Codex took it, and the file landed inside the output folder (its working folder), not in the work folder, which stayed unchanged.
+- Still not checked: `browser_run_code_unsafe`, `browser_drop` and `browser_set_storage_state` by name, a `filename` with a path that points outside the output folder on Codex, Claude under "allow everything", and other operating systems.
 
 ## Context
 

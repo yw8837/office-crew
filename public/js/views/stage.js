@@ -227,7 +227,7 @@ function Say({ m }) {
 
 function Station({ st, small }) {
   const info = stationInfo(st.state);
-  const tip = [st.names.join(', '), st.memo, ...(st.cards || []).map((c) => `${c.id} · ${c.title}`)].filter(Boolean).join('\n');
+  const tip = [st.names.join(', '), st.memo, ...(st.cards || []).map((c) => `${c.id} · ${c.title}${c.lead ? ` · ${t('진행자에게 질문 중')}` : ''}`)].filter(Boolean).join('\n');
   // 정체(결정 0028): 입장이 앞 바퀴와 그대로라 판정 없이 결론으로 간 회의. 결론 차례 동안은 회의 표식 뒤에, 끝난 뒤에는 표식 하나로
   const tag = st.meeting ? html`<span class="tag">${st.meeting.label}${st.stall ? ` · ${t('정체')}` : ''}</span>`
     : st.ret ? html`<span class="tag ret"><${Ico} n="ret" />${t('되돌림 {n}/{of}', st.ret)}</span>`

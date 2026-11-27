@@ -524,6 +524,24 @@ test('35. 끊긴 목표가 되돌림 중이었어도 그 뒤의 다른 실행 �
   assert.deepEqual(st(own, 2).ret, { n: 1, of: 1 });
 });
 
+test('38. 두 갈래(결정 0031): 회의 결론 뒤 고르기 대기는 그 회의 역 안의 내 차례(답 창은 채팅의 카드). 진행자에게 묻는 카드의 담당은 "진행자 답 기다림"', () => {
+  const fork = model({ run: runOf(['done', 'done', 'pending', 'pending'], { missionId: 'G', status: 'waiting', stageIndex: 1, hold: { reason: 'fork', step: 'pick', stageIndex: 1, msgId: 'fk1', at: 1 } }), mission: M({ status: 'waiting' }) });
+  assert.deepEqual([fork.ask.kind, fork.ask.target, fork.ask.msgId, fork.ask.station, st(fork, 1).state, st(fork, 1).ask, gates(fork)], ['fork', 'card', 'fk1', 1, 'wait', true, []]);
+  assert.ok(fork.ask.short.includes('기획 회의'));
+  const offer = model({ run: runOf(['done', 'done', 'pending', 'pending'], { missionId: 'G', status: 'waiting', stageIndex: 1, hold: { reason: 'fork', step: 'offer', stageIndex: 1, msgId: 'fk1', at: 1 } }), mission: M({ status: 'waiting' }) });
+  assert.ok(offer.ask.short.includes('요약을 받을까'));
+  assert.equal(goalWait(runOf(['done', 'done', 'pending', 'pending'], { status: 'waiting', hold: { reason: 'fork', stageIndex: 1 } }), 1), '🔀');
+  // 진행자에게 묻는 일 카드(k1)의 담당 m: 그 사람만 "진행자 답 기다림"(색만이 아니라 아이콘·글도 다르다), 카드 목록에 표시
+  const run = { ...cardRun('running'), status: 'running', hold: null };
+  const asking = model({ run, mission: M({ cards: [{ id: 'k1', ownerId: 'm', status: 'running', lead: { question: '어느 쪽?' } }, { id: 'k2', ownerId: 'w', status: 'running' }] }), live: { m: { state: 'waiting' }, w: { state: 'thinking' } } });
+  assert.deepEqual([who(st(asking, 1), 'm').st, who(st(asking, 1), 'w').st], ['lead', 'think']);
+  assert.deepEqual(personInfo({ st: 'lead' }), { cls: 'wait', icon: 'chat', text: '진행자 답 기다림' });
+  assert.deepEqual(st(asking, 1).cards.map((c) => [c.id, !!c.lead]), [['k1', true], ['k2', false]]);
+  assert.equal(asking.ask, null, '내 차례가 아니다(진행자가 답한다)');
+  const ended = model({ run: { ...run, status: 'done', endedAt: 5 }, mission: M({ cards: [{ id: 'k1', ownerId: 'm', status: 'running', lead: { question: '?' } }] }) });
+  assert.equal(st(ended, 1).cards[0].lead, undefined, '끝난 실행에는 그리지 않는다');
+});
+
 // ── 서버가 실제로 만드는 실행 모양(가짜 CLI) ──
 let t = null;
 const app = async () => (t ||= await startTestApp());

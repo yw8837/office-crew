@@ -182,7 +182,9 @@ function cleanTeam(t) {
   })).filter((s) => s.agentIds.length).map((s) => ({ ...s, meeting: normMeeting(s.meeting, s.agentIds) }));
   if (!stages.length) throw new HttpError(400, tr('단계가 최소 1개, 단계마다 에이전트가 최소 1명 필요해.'));
   // 사다리 팀(결정 0024·0027): ladder 가 true 일 때만 escalateAfter(1~5, 기본 2)와 같이 남긴다(아니면 저장할 때 합쳐도 지워지게 undefined)
-  return { id: t.id, name: String(t.name).trim().slice(0, 40), description: String(t.description || '').slice(0, 300), stages, ladder: undefined, escalateAfter: undefined, ...cleanLadder(t) };
+  // 두 갈래(결정 0031): 목표 모드의 회의가 두 안으로 갈리면 'auto'(바로 요약) · 'off'(안 함). 기본인 묻고 시작('ask')은 적지 않는다(옛 팀과 같은 모양)
+  const fork = t.fork === 'auto' || t.fork === 'off' ? t.fork : undefined;
+  return { id: t.id, name: String(t.name).trim().slice(0, 40), description: String(t.description || '').slice(0, 300), stages, ladder: undefined, escalateAfter: undefined, ...cleanLadder(t), fork };
 }
 
 function openTerminal(command, env = null) {

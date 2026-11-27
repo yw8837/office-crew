@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { tr } from '../server/i18n.js';
 import en from '../public/js/i18n/en.js';
 import { blockedRule, outsideRule, resumeSent, tailRule, ASSUME, goalBlock, researchBlock, planBlock, reviewBlock, planPrompt, reviewPrompt, researchPrompt, questionsPrompt, scanPrompt, cardPrompt, failuresPrompt, transientSent } from '../server/mission.js';
+import { forkPrompt, leadRule, leadPrompt, leadReply, smallOpinionPrompt, smallConcludePrompt } from '../server/mission.js'; // 두 갈래·진행자에게 질문(결정 0031)
 import { verdictBlock, checkBlock } from '../server/meeting.js';
 import { startTestApp } from './helpers.js';
 
@@ -33,6 +34,9 @@ const pure = () => ({
   failuresPrompt: failuresPrompt([{ key: 'x', line: '', n: 0, goals: [] }], M8),
   // 일시 장애로 자동으로 다시 도는 사람의 맨 앞 한 줄(결정 0030): 다시 도는 그 차례에만
   transientHead: transientSent(),
+  // 두 갈래·진행자에게 질문(결정 0031): 요약 프롬프트, 일 카드에 붙는 사용법, 진행자 답 차례(물을 수 있고 작은 회의를 청할 수 있을 때, 명단 둘), 카드에 이어 주는 글, 작은 회의 의견·결론
+  forkPrompt: forkPrompt({ mark: M8 }), leadRule: leadRule(2), leadPrompt: leadPrompt({ card: {}, roster: [{ name: '', role: '' }, { name: '', role: '' }], mark: M8 }),
+  leadReply: leadReply({ mark: M8 }), smallOpinion: smallOpinionPrompt({ mark: M8 }), smallConclude: smallConcludePrompt({ said: [{ name: '', text: '' }], mark: M8 }),
 });
 
 // 실행 기록에서 뗀 프롬프트 부분: 무작위 표식(8자리) 사이의 글(참석자의 말·질문)은 빼고 표식은 고정 값으로

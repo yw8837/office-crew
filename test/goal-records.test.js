@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import { bindLang } from '../server/i18n.js';
 import {
   BLOCK_ACCEPTS, BLOCK_NAMES, blocksIn, foreignBlocks, blockPart, parseBlocked, blockedRule, BLOCKED_KINDS, outsideRule, resumeSent, parseReview,
-  goalBlock, questionsPrompt, scanPrompt, researchPrompt, planPrompt, reviewPrompt,
+  goalBlock, questionsPrompt, scanPrompt, researchPrompt, planPrompt, reviewPrompt, forkPrompt, leadRule, leadPrompt, smallOpinionPrompt, smallConcludePrompt,
 } from '../server/mission.js';
 import { askNote } from '../server/ask.js';
 import { verdictBlock, checkBlock } from '../server/meeting.js';
@@ -84,8 +84,8 @@ async function teamCards(tag) {
 }
 
 test('1. 대목마다 받는 블록 표(순수 함수): 실제로 쓰는 블록만, 표에 없는 블록을 찾고, 대목마다 프롬프트가 보여 주는 블록은 표 안에 있다', () => {
-  assert.deepEqual(Object.keys(BLOCK_ACCEPTS).sort(), ['cards', 'goal', 'meeting', 'plan', 'questions', 'research', 'review', 'scan', 'work']);
-  assert.deepEqual([...BLOCK_NAMES].sort(), ['oc-ask', 'oc-blocked', 'oc-cards', 'oc-check', 'oc-goal', 'oc-research', 'oc-review', 'oc-verdict']);
+  assert.deepEqual(Object.keys(BLOCK_ACCEPTS).sort(), ['cards', 'fork', 'goal', 'lead', 'meet', 'meeting', 'plan', 'questions', 'research', 'review', 'scan', 'work']); // fork·lead·meet: 두 갈래 요약, 진행자 답, 작은 회의(결정 0031)
+  assert.deepEqual([...BLOCK_NAMES].sort(), ['oc-ask', 'oc-blocked', 'oc-cards', 'oc-check', 'oc-goal', 'oc-lead', 'oc-meet', 'oc-research', 'oc-review', 'oc-verdict']);
   assert.ok(!BLOCK_NAMES.includes(['oc', 'plan'].join('-')), '쓰이지 않는 이름은 없다'); // 조각을 잇는다: 위생 검사의 계획 문서 이름 무늬
   assert.deepEqual(blocksIn('앞\n```oc-cards\n{}\n```\n```oc-ask\n{}\n```\n```oc-cards\n{}\n```'), ['oc-cards', 'oc-ask'], '같은 블록은 한 번');
   assert.deepEqual(foreignBlocks('review', '```oc-research\n{}\n```\n\n```oc-review\n{}\n```'), ['oc-research']);
@@ -108,8 +108,11 @@ test('1. 대목마다 받는 블록 표(순수 함수): 실제로 쓰는 블록�
   fits('meeting', `${verdictBlock()}\n${checkBlock()}`);
   fits('plan', planPrompt({ ...o, roster: [{ name: '가', role: '조사' }] }));
   fits('work', `${blockedRule()}\n${askNote()}`);
-  fits('cards', `${blockedRule()}\n${askNote()}`);
+  fits('cards', `${blockedRule()}\n${askNote()}\n${leadRule(2)}`); // 진행자에게 묻기(결정 0031)
+  fits('lead', leadPrompt({ head: '[확정된 목표]', id: 'k1', card: { title: '제목' }, question: '질문', roster: [{ name: '가', role: '정리' }, { name: '나', role: '조사' }] }));
+  fits('meet', `${smallOpinionPrompt({ topic: '주제' })}\n${smallConcludePrompt({ topic: '주제', said: [{ name: '가', text: '의견' }] })}`);
   fits('review', reviewPrompt({ goal: 'g', criteria: [{ id: 'c1', text: '기준' }], nonce: 'n' }));
+  fits('fork', forkPrompt({ head: '[확정된 목표]', label: '회의', key: 'A', mine: 'A안', other: 'B안' })); // 두 갈래 요약(결정 0031): 블록 예시가 없다
 });
 
 test('2. 표에 없는 블록이 답에 섞이면 그 블록은 읽지 않고(답의 나머지는 지금처럼) 진행 기록에 한 줄', async () => {

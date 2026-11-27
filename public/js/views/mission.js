@@ -7,8 +7,9 @@ import { get, post, put } from '../api.js';
 import { t, locale } from '../i18n/index.js';
 import { sumEstimate, limitRows, recordAge } from '../mission-numbers.js';
 import { WIN_LABEL } from './session.js'; // 한도 창 이름(세션 화면의 계정 한도와 같은 이름)
-import { answerNames, durationWords, unverifiedLines, failWords, raisedWords } from '../report-lines.js'; // 완주 보고의 글줄(서버가 기억에 넣는 글 판과 같은 함수, 결정 0025)
+import { answerRows, durationWords, unverifiedLines, failWords, raisedWords, forkLines } from '../report-lines.js'; // 완주 보고의 글줄(서버가 기억에 넣는 글 판과 같은 함수, 결정 0025)
 import { goalEndWord, raiseChoices, gateKeys } from '../stage-model.js'; // 끝 상태 이름(흐름 무대의 끝 깃발과 같은 말), 넘기기 보기·번호 키(결정 0027)
+import { forkDigest } from '../fork-hash.js'; // 두 갈래 카드의 본 것 해시(서버 forkHash 와 같은 글, 결정 0031)
 
 const CRIT_COUNT = 7; // 서버와 같은 상한(server/mission.js)
 const lines = (text) => String(text || '').split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
@@ -236,6 +237,8 @@ export const cardChip = (status) => ({ waiting: [t('기다림'), ''], running: [
 const KIND = () => ({ research: t('조사'), write: t('글'), build: t('만들기'), check: t('확인') });
 // 윗등급에게 넘긴 카드(결정 0027): "↑ 앞 담당 → 새 담당"(여러 번 넘겼으면 차례대로)
 const raisedChain = (c) => (c?.raised?.length ? `↑ ${[c.raised[0].from, ...c.raised.map((r) => r.to)].map((id) => agentById(id)?.name || id).join(' → ')}` : '');
+// 진행자에게 질문 중인 카드(결정 0031). 질문 글은 카드 담당이 쓴 것이라 툴팁에 글로만. 물은 횟수는 끝난 뒤에도 작게
+const LeadChip = ({ c }) => (c?.lead ? html` <span class="chip warn" title=${c.lead.question || ''}>🧭 ${t('진행자에게 질문 중')}</span>` : c?.leadAsks ? html` <span class="chip">${t('진행자 질문 {n}번', { n: c.leadAsks })}</span>` : '');
 const RaisedChip = ({ c }) => (c?.raised?.length ? html` <span class="chip accent" title=${`${t('윗등급에게 넘긴 카드')}: ${raisedChain(c)}`}>${raisedChain(c)}</span>` : '');
 // 기다리는 카드가 무엇을 기다리는지(앞 카드가 다 끝났으면 차례를 기다림)
 const waitWords = (c, cards) => {
@@ -264,7 +267,7 @@ export function PlanCard({ m }) {
       const now = live.find((x) => x.id === c.id);
       const [label, cls] = now ? cardChip(now.status) : ['', ''];
       return html`<li>
-        <div><b>${c.id}</b> · ${c.title} <span class="muted">— ${agentById(c.ownerId)?.name || c.owner} · ${KIND()[c.kind] || c.kind}</span>${now && html` <span class=${`chip${cls}`}>${label}</span>`}<${RaisedChip} c=${now} /></div>
+        <div><b>${c.id}</b> · ${c.title} <span class="muted">— ${agentById(c.ownerId)?.name || c.owner} · ${KIND()[c.kind] || c.kind}</span>${now && html` <span class=${`chip${cls}`}>${label}</span>`}<${RaisedChip} c=${now} /><${LeadChip} c=${now} /></div>
         ${c.needs?.length > 0 && html`<div class="small muted">${t('{ids}의 결과를 기다려', { ids: c.needs.join(', ') })}</div>`}
         ${c.done && html`<div class="small muted">${t('끝 기준')}: ${c.done}</div>`}
         <div class="small muted">${t('맡을 파일')}: ${c.files?.length ? c.files.join(', ') : t('(적지 않음)')}${c.solo ? ` · ${t('파일을 안 적어서 혼자 돌아')}` : ''}</div>
@@ -312,7 +315,7 @@ export function ReportCard({ m }) {
   const pass = crit.filter((c) => c.status === 'pass').length;
   const used = m.calls?.used ?? 0;
   const calls = m.estimate ? t('실제 호출 {k}번(어림 {min}~{max}번)', { k: used, min: m.estimate.min, max: m.estimate.max }) : t('실제 호출 {k}번', { k: used });
-  const names = answerNames(t);
+  const rows = answerRows(t, m.answers);
   const left = unverifiedLines(t, m);
   const fails = failWords(t, m.fails);
   const memOn = state.settings.memory === true;
@@ -343,8 +346,11 @@ export function ReportCard({ m }) {
     <div id=${bodyId} class="report-body" role="region" aria-label=${t('완주 보고 자세히')} hidden=${!open}>
       <div class="goal-sec"><div class="small muted"><b>${t('호출')}</b></div>
         <div class="small">${calls} · ${t('상한 {cap}번', { cap: m.calls?.cap ?? 0 })}</div>
-        <div class="small">${t('종류별 답 수')}: ${Object.keys(names).map((k) => `${names[k]} ${m.answers?.[k] || 0}`).join(' · ')}${m.answerFails > 0 ? ` ${t('(오류·중지로 끝난 답 {n}개 포함)', { n: m.answerFails })}` : ''}</div>
+        <div class="small">${t('종류별 답 수')}: ${rows.map(([k, name]) => `${name} ${m.answers?.[k] || 0}`).join(' · ')}${m.answerFails > 0 ? ` ${t('(오류·중지로 끝난 답 {n}개 포함)', { n: m.answerFails })}` : ''}</div>
         <div class="small muted">${t('메시지 표시로 센 답 수야(오류·중지로 끝난 답도 들어가). 다시 요청·이어받기는 한 답 안에서 호출이 더 들 수 있어.')}</div></div>
+      ${m.forks?.length > 0 && html`<div class="goal-sec"><div class="small muted"><b>${t('두 갈래')}</b> · ${t('입장은 에이전트가 씀')}</div>
+        <ul class="small">${forkLines(t, m.forks).map((x) => html`<li>${x}</li>`)}</ul>
+        <div class="small muted">${t('고른 안은 뒤 단계에 사용자가 정한 것으로 갔고, 버린 안은 여기에만 남아.')}</div></div>`}
       ${m.raised?.length > 0 && html`<div class="goal-sec"><div class="small muted"><b>${t('윗등급에게 넘긴 카드')}</b></div>
         <div class="small">${raisedWords(t, m.raised)}</div>
         <div class="small muted">${t('카드 기록에서 코드가 모았어(넘기기는 질문 창에서 고른 것).')}</div></div>`}
@@ -373,6 +379,65 @@ export function ReportCard({ m }) {
   </div></div>`;
 }
 
+// ── 두 갈래(결정 0031) ──
+const FORK_WORD = () => ({ ask: t('묻고 요약 받기'), auto: t('바로 요약 받기'), off: t('두 갈래 안 함') });
+// 화면이 보여 준 글로 해시를 만든다(서버 forkHash 와 같은 모듈 fork-hash.js 의 글: 안마다 [키, 입장, 요약]). 서버는 저장된 요약으로 다시 만든 값과 대조하고 다르면 반영하지 않는다.
+// 브라우저가 못 하면(안전하지 않은 주소 등) 서버가 카드에 실어 준 값
+async function seenHash(m) {
+  try { return await forkDigest(m.options || []); } catch { return m.hash || ''; }
+}
+const FORK_CHIP = () => ({ offer: [t('요약을 받을지 물어봄'), ' warn'], writing: [t('요약 쓰는 중'), ' accent'], open: [t('고르기 기다림'), ' warn'], picked: [t('골랐어'), ' ok'], team: [t('팀이 정함'), ''],
+  failed: [t('요약 못 받음'), ' warn'], skipped: [t('상한으로 안 엶'), ' warn'], cancelled: [t('닫힘'), ''] });
+const OPT_STATE = () => ({ pending: t('아직'), writing: t('쓰는 중'), failed: t('못 받음') });
+// 회의가 두 안으로 갈린 카드: 갈린 곳(입장)을 먼저, 안마다 민 사람과 한 장 요약(에이전트가 씀), 추가 호출 수, 고르기(그 카드를 기다리는 대기가 있을 때만 단추)
+export function ForkCard({ m }) {
+  const sid = state.route.id;
+  const s = state.sessionData[sid];
+  const run = s?.runs?.[s.runs.length - 1];
+  const hold = run && !run.endedAt && run.status === 'waiting' && run.hold?.reason === 'fork' && run.hold.msgId === m.id ? run.hold : null;
+  const [busy, setBusy] = useState(false);
+  const name = (id) => agentById(id)?.name || id;
+  const [label, cls] = FORK_CHIP()[m.status] || [m.status, ''];
+  const live = ['offer', 'writing', 'open'].includes(m.status);
+  const cut = live && !hold && s?.mission?.status === 'cut' && s.mission.forkAt?.msgId === m.id;
+  const send = async (pick) => {
+    if (busy || !hold) return;
+    setBusy(true);
+    try {
+      const body = { action: 'fork', pick, msgId: m.id, ...(hold.step === 'pick' && pick !== 'team' ? { hash: await seenHash(m) } : {}) };
+      const r = await post(`/api/sessions/${sid}/control`, body);
+      if (r?.ok === false) toast(r.reason || t('지금은 고를 수 없어.'), 'error');
+    } catch (e) { toast(e.message, 'error'); }
+    setBusy(false);
+  };
+  const key = (o) => String(o.key || '').toUpperCase();
+  return html`<div class="msg proposal"><div class="hire goal-card fork-card" role="group" aria-label=${t('두 갈래')}>
+    <div class="hire-head"><b>🔀 ${t('두 갈래')} — ${t('회의 "{label}"', { label: m.label || '' })}</b><span class=${`chip${cls}`}>${label}</span>
+      <span class="small muted">${t('입장·요약은 에이전트가 씀 · 사용자 확인 안 함')}</span></div>
+    <div class="small">${m.stall ? t('입장이 두 바퀴째 그대로라 회의가 두 안으로 갈린 채 끝났어.') : t('결론에 남은 이견이 있고 참석자의 입장이 두 안으로 갈렸어.')} ${t('진행자 결론은 그대로 있어. 안을 고르면 그 안이 뒤 단계에 사용자가 정한 것으로 가.')}</div>
+    <div class="fork-opts">
+      ${(m.options || []).map((o) => html`<div class="fork-opt" role="group" aria-label=${t('안 {key}', { key: key(o) })}>
+        <div class="small"><b>${t('안 {key}', { key: key(o) })}</b> · ${t('입장')}: <span class="fork-pos">${o.position}</span></div>
+        <div class="small muted">${t('민 사람: {names}', { names: (o.agentIds || []).map(name).join(', ') })}</div>
+        ${o.state === 'done' ? html`<div class="small fork-sum">${o.summary}</div>` : html`<div class="small muted">${t('요약')}: ${OPT_STATE()[o.state] || o.state}</div>`}
+        ${o.msgId && html`<button type="button" class="btn ghost sm" onClick=${() => jump(o.msgId)}>${t('요약 답 보기')}</button>`}
+      </div>`)}
+    </div>
+    <div class="small muted">${m.status === 'offer' ? t('요약을 받으면 추가 호출 약 {n}번이 들어(안마다 그 안을 민 사람이 한 번, 읽기 전용).', { n: m.calls || 2 }) : t('추가로 든 호출 {n}번', { n: m.spent || 0 })}</div>
+    ${m.status === 'picked' && html`<div class="notice" role="status">${t('안 {key}를 골랐어. 뒤 단계는 이 안을 사용자가 정한 것으로 받아. 다른 안은 버린 안으로 완주 보고에 남아.', { key: String(m.picked || '').toUpperCase() })}</div>`}
+    ${m.status === 'team' && html`<div class="notice" role="status">${t('고르지 않고 팀이 정하게 했어(진행자 결론대로).')}</div>`}
+    ${cut && html`<div class="small muted" role="note">${t('앱이 꺼져서 끊겼어. 끊긴 목표를 이어서 하면 이 카드를 다시 띄워.')}</div>`}
+    ${live && !hold && !cut && m.status !== 'writing' && html`<div class="small muted" role="note">${t('지금은 이 카드를 기다리지 않아.')}</div>`}
+    ${hold && hold.step === 'offer' && html`<div class="hire-acts">
+      <button type="button" class="btn primary sm" disabled=${busy} onClick=${() => send('write')}>${t('요약 받아 보기 (추가 호출 약 {n}번)', { n: m.calls || 2 })}</button>
+      <button type="button" class="btn sm" disabled=${busy} onClick=${() => send('team')}>${t('팀이 정해 (진행자 결론대로)')}</button></div>`}
+    ${hold && hold.step === 'pick' && html`<div class="hire-acts">
+      ${(m.options || []).map((o, k) => html`<button type="button" class=${`btn sm${k === 0 ? ' primary' : ''}`} disabled=${busy} onClick=${() => send(o.key)}>${t('{key}로', { key: key(o) })}</button>`)}
+      <button type="button" class="btn sm" disabled=${busy} onClick=${() => send('team')}>${t('팀이 정해 (진행자 결론대로)')}</button></div>`}
+    ${m.conclusionId && html`<div><button type="button" class="btn ghost sm" onClick=${() => jump(m.conclusionId)}>${t('회의 결론 보기')}</button></div>`}
+  </div></div>`;
+}
+
 // ── 목표 카드 ──
 export function GoalCard({ m }) {
   const sid = state.route.id;
@@ -388,6 +453,7 @@ export function GoalCard({ m }) {
   const [workShown, setWorkShown] = useState(null); // 일 카드를 지금 팀으로 못 쓸 때 서버가 준 지금 값(결정 0018)
   const [workSel, setWorkSel] = useState(null); // 사용자가 고른 일하는 방식('cards' | 'stages', 없으면 카드의 기본값)
   const [estShown, setEstShown] = useState(null); // 확인이 어긋났을 때 서버가 준 지금 팀의 호출 어림 조각(결정 0019)
+  const [forkSel, setForkSel] = useState(null); // 사용자가 고른 두 갈래 값(결정 0031. 없으면 카드의 기본값 = 팀 설정)
   const goalIn = useRef(null);
   const editBtn = useRef(null);
   const editing = !!edit;
@@ -407,6 +473,7 @@ export function GoalCard({ m }) {
       ${mission && 'reviewerId' in mission && mission.status !== 'unreviewed' && html`<div class="small muted">${mission.reviewerId ? t('검수: {name}이(가) 기준마다 판정해.', { name: agentById(mission.reviewerId)?.name || mission.reviewerId }) : t('검수할 다른 팀원이 없어서 판정 없이 끝나고 네게 물어.')}${mission.dropped?.length ? ` · ${t('기준 판정으로 대신해서 건너뛰는 단계: {labels}', { labels: mission.dropped.join(', ') })}` : ''}</div>`}
       ${m.prepChosen && html`<div class="small muted">${prepWords(m.prepChosen)}</div>`}
       ${m.workChosen && html`<div class="small muted">${m.workChosen === 'cards' ? t('일 카드로 나눠 해.') : t('팀 단계표대로 해.')}</div>`}
+      ${m.forkChosen && m.fork?.can && html`<div class="small muted">${t('회의가 두 안으로 갈리면: {mode}', { mode: FORK_WORD()[m.forkChosen] || m.forkChosen })}</div>`}
       ${mission?.status === 'unreviewed' && html`<div class="notice">${t('일은 끝났어. 기준 판정은 아직 없어.')}</div>`}
       ${mission?.status === 'done' && html`<div class="notice">✅ ${t('기준 {n}개를 모두 통과해서 끝냈어.', { n: mission.criteria.length })}</div>`}
       ${mission?.status === 'accepted' && html`<div class="notice">${t('받아들여서 끝냈어 · 남은 기준 {n}개', { n: left })}</div>`}
@@ -457,15 +524,18 @@ export function GoalCard({ m }) {
   const work = wk ? (workSel || wk.on) : undefined;
   // 호출 어림(결정 0019): 보여 주는 범위의 두 숫자도 보낸다(지금 팀으로 다시 센 값과 다르면 서버가 409 와 지금 조각을 준다). 옛 카드(이 칸 없음)는 보내지 않는다
   const est = estShown || m.estimate || null;
-  const estPick = { work: work === 'cards' ? 'cards' : 'stages', research: !!prep?.research, meeting: !!prep?.meeting, kept };
+  // 두 갈래(결정 0031): 갈릴 수 있는 회의가 있는 카드만 고르게 하고 보낸다(옛 카드·못 갈리는 팀은 보내지 않는다: 서버가 팀 설정을 쓴다)
+  const fk = m.fork?.can ? m.fork : null;
+  const fork = fk ? forkSel || fk.mode : undefined;
+  const estPick = { work: work === 'cards' ? 'cards' : 'stages', research: !!prep?.research, meeting: !!prep?.meeting, kept, ...(fork ? { fork } : {}) };
   const seen = est ? sumEstimate(est, estPick) : null;
   const estimate = seen ? { estimate: { min: seen.min, max: seen.max } } : {};
-  const start = () => send('confirm', { missionId: m.missionId, expected: v, review, prep, ...(wk ? { work } : {}), ...estimate });
+  const start = () => send('confirm', { missionId: m.missionId, expected: v, review, prep, ...(wk ? { work } : {}), ...(fork ? { fork } : {}), ...estimate });
   // 고친 값: 기준 줄과 같은 줄의 확인 방법을 짝지어 빈 기준은 그 확인 방법과 같이 뺀다
   const pairs = edit ? String(edit.criteria).split(/\r?\n/).map((c, i) => [c.trim(), (String(edit.checks || '').split(/\r?\n/)[i] || '').trim()]).filter(([c]) => c) : [];
   const edited = edit && { goal: edit.goal.trim(), criteria: pairs.map((x) => x[0]), checks: pairs.map((x) => x[1]), outOfScope: lines(edit.outOfScope), userDecides: lines(edit.userDecides), keep: lines(edit.keep) };
   const canEdited = !!edited && !!edited.goal && edited.criteria.length > 0;
-  const startEdited = () => { if (canEdited) send('confirm', { missionId: m.missionId, expected: v, edited, review, prep, ...(wk ? { work } : {}), ...estimate }); };
+  const startEdited = () => { if (canEdited) send('confirm', { missionId: m.missionId, expected: v, edited, review, prep, ...(wk ? { work } : {}), ...(fork ? { fork } : {}), ...estimate }); };
   const names = (who) => who.map((w) => agentById(w.id)?.name || w.name || w.id).join(', ');
   const prepLine = pp && html`<div class="goal-sec goal-prep">
     <div class="small muted"><b>${t('조사·회의 먼저')}</b></div>
@@ -502,6 +572,12 @@ export function GoalCard({ m }) {
     <label class="goal-keep small"><input type="radio" name=${`work-${m.id}`} checked=${work !== 'cards'} disabled=${busy} onChange=${() => setWorkSel('stages')} />
       <span><b>${t('팀 단계표대로')}</b> — ${t('팀에 짜 둔 단계를 순서대로 돌아.')}</span></label>
   </div>`;
+  // 두 갈래 줄(결정 0031): 회의가 두 안으로 갈리면 묻고 요약 받기(기본) · 바로 요약 받기 · 안 하기. 기본값은 팀 설정
+  const forkLine = fk && html`<div class="goal-sec goal-fork" role="radiogroup" aria-label=${t('회의가 두 안으로 갈리면')}>
+    <div class="small muted"><b>${t('회의가 두 안으로 갈리면')}</b></div>
+    ${['ask', 'auto', 'off'].map((v0) => html`<label class="goal-keep small"><input type="radio" name=${`fork-${m.id}`} checked=${fork === v0} disabled=${busy} onChange=${() => setForkSel(v0)} />
+      <span><b>${FORK_WORD()[v0]}</b> — ${{ ask: t('정체로 끝났거나 남은 이견이 있고 입장이 두 안이면, 안마다 한 장 요약을 받을지 먼저 물어(받으면 추가 호출 약 {n}번).', { n: fk.calls }), auto: t('묻지 않고 바로 안마다 한 장 요약을 받아 나란히 보여 줘(추가 호출 약 {n}번).', { n: fk.calls }), off: t('지금처럼 진행자 결론대로 가.') }[v0]}</span></label>`)}
+  </div>`;
   // 호출 어림(결정 0019): 조사·회의 체크, 일하는 방식, 남기기를 바꾸면 바로 다시 더한다(옛 카드는 이 칸이 없어 안 보인다). 구독 한도는 받은 기록이 있을 때만
   const estLine = est && html`<${EstimateLine} est=${est} pick=${estPick} ladder=${!!(state.teams || []).find((x) => x.id === s?.teamId)?.ladder} />`;
   const limLine = html`<${LimitLine} providers=${m.providers} ask=${s?.capAsk} />`;
@@ -536,13 +612,14 @@ export function GoalCard({ m }) {
         ${workLine}
         ${reviewLine}
         ${prepLine}
+        ${forkLine}
         ${estLine}
         ${limLine}
         <div class="hire-acts">
           <button class="btn primary sm" disabled=${busy || !canEdited} onClick=${startEdited}>${t('이 내용으로 시작')}</button>
           <button class="btn sm" disabled=${busy} onClick=${closeEdit}>${t('고치기 취소')}</button>
         </div>
-      </div>` : html`<${CardBody} v=${v} />${workLine}${reviewLine}${prepLine}${estLine}${limLine}`}
+      </div>` : html`<${CardBody} v=${v} />${workLine}${reviewLine}${prepLine}${forkLine}${estLine}${limLine}`}
     ${!editing && html`<div class="hire-acts">
       <button class="btn primary sm" disabled=${busy || stale || !v.goal || !v.criteria.length} onClick=${start}>${t('이대로 시작')}</button>
       <button class="btn sm" ref=${editBtn} disabled=${busy || stale} aria-expanded=${editing ? 'true' : 'false'} onClick=${openEdit}>${t('고쳐서 시작')}</button>
@@ -732,7 +809,7 @@ function CardList({ m }) {
     ${cards.map((c) => {
       const [label, cls] = cardChip(c.status);
       return html`<div class="crit" role="listitem">
-        <div class="crit-head"><span class=${`chip${cls}`}>${label}</span><span><b>${c.id}</b> · ${c.title} <span class="muted">— ${agentById(c.ownerId)?.name || c.ownerId}</span><${RaisedChip} c=${c} /></span></div>
+        <div class="crit-head"><span class=${`chip${cls}`}>${label}</span><span><b>${c.id}</b> · ${c.title} <span class="muted">— ${agentById(c.ownerId)?.name || c.ownerId}</span><${RaisedChip} c=${c} /><${LeadChip} c=${c} /></span></div>
         ${c.status === 'waiting' && html`<div class="small muted crit-ev">${waitWords(c, cards)}</div>`}
         ${c.status === 'blocked' && c.reason && html`<div class="small muted crit-ev">${c.reason}</div>`}
         ${c.status === 'hole' && c.by === 'blocked' && html`<div class="small muted crit-ev">${t('막혀서 뺐어: {reason}', { reason: c.reason || '' })}</div>`}

@@ -41,7 +41,8 @@ export function hideAsks(text, asks = [], streaming = false) {
     at = a.to;
   }
   const tail = src.slice(at);
-  return out + (streaming ? tail.replace(/```oc-ask[\s\S]*$/, '') : tail);
+  // 쓰는 중에는 끝에 오는 질문 블록과 진행자에게 묻는 블록·작은 회의 블록(결정 0031)도 감춘다(서버가 읽기 전. 다 쓴 뒤 받지 않은 블록은 그대로 보인다)
+  return out + (streaming ? tail.replace(/```oc-(?:ask|lead|meet)[\s\S]*$/, '') : tail);
 }
 
 // 회의 차례 답 끝의 질문 블록(oc-check)은 글 아래 "확인 필요" 줄로 보여 주니 본문에서는 뺀다(hideAsks 와 같은 방식).
@@ -110,9 +111,11 @@ export function routeTip(route, { t = (s) => s, label = (p) => p } = {}) {
   return [t('요청: {ai}', { ai: ai(a) }), t('이유: {why}', { why: why.length ? why.map((w) => W[w] || w).join(', ') : t('기록된 이유 없음') })].join('\n');
 }
 
-// 답 머리에 "에이전트가 씀 · 사용자 확인 안 함"을 붙일 답인가(결정 0022): 목표 일 실행의 일 단계·일 카드 답과 회의 결론만.
+// 답 머리에 "에이전트가 씀 · 사용자 확인 안 함"을 붙일 답인가(결정 0022): 목표 일 실행의 일 단계·일 카드 답과 회의 결론,
+// 두 갈래의 한 장 요약·진행자 답·작은 회의의 의견과 결론(결정 0031. 사용자가 고르거나 카드 담당이 받아 쓰는 글이다).
 // 조사·계획·검수·회의 차례, 목표 차례, 목표가 아닌 실행의 답은 아니다. run: 그 답의 실행(실행 기록이 잘렸으면 없고, 그때는 일 카드 답만 안다)
 export function agentWrote(m, run) {
   if (!m || (!m.card && run?.mission !== 'work')) return false;
+  if (['fork', 'lead', 'meet'].includes(m.prep?.kind)) return true;
   return m.meeting ? m.meeting.phase === 'conclude' : !m.review && !m.prep && !m.once;
 }

@@ -4,6 +4,10 @@
 - Date: 2026-11-15
 - Related: `server/ask.js`, `server/orchestrator.js` (`#ask`, the ask loop in `#runAgent`, `control` action `answer`), `server/store.js` (`attentionOf`), `public/js/views/session.js` (`AskPanel`), `public/js/chat-tools.js` (`hideAsks`), `test/agent-asks.test.js`
 
+## Revision 2026-11-26: the lead can ask through the same box for a task card
+
+([0031](0031-two-options-and-asking-the-lead.md)) A task card owner can ask the goal's lead with an `oc-lead` block; the lead answers in a run-once, read-only turn whose prompt explains `oc-ask` (and `oc-meet`) under the conditions above. The code shows the lead's first question in this box on the lead's answer, stores the answer as a decision the user made (`mission.decided` with `card`), and gives it to the card owner as the next turn of the same conversation. A small meeting the lead asks for is offered to the user in this box too (open it, or continue with the lead's answer). The 3-card limit per run still counts the owner's own questions across the lead's answers.
+
 ## Revision 2026-11-26: a meeting's chair can ask through the same box
 
 ([0028](0028-stalled-meetings-and-asking-the-user.md)) Meeting turns still don't get the "how to ask" lines and an `oc-ask` block in a meeting is still not read. The chair can ask instead with `verdict: "ask"` and one question with 2 to 4 choices inside its `oc-verdict` block, in a verdict or instead of its conclusion (then the conclusion is written once more after the answer); the code checks it with the cleaning of `parseAsk` and shows it in this box (numbered choices, typed answer, skip) on the chair's verdict message, at most 2 times per meeting, under the conditions above (the setting, no scheduled run, no handoff note, no session override). The answer is stored as a decision the user made, not sent back to the chair's conversation. A goal cut while such a question waits asks it again when continued.

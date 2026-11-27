@@ -4,10 +4,11 @@
 // 서버가 카드에 실어 준 어림 조각(estimateParts)을 사용자가 고른 값으로 더한다. 예측이 아니라 대략치다.
 // est: { spent(목표 잡기에 이미 쓴 호출), cap, research: { can, min, max }, meeting: { can, min, max }, review(기준 판정 0|1), returns(자동 되돌림 최대 횟수),
 //        cards: null | { min, max, last }, stages: [{ index, min, max, review(검수 단계), drop(기준 판정으로 대신해 빠질 수 있는 단계), last(되돌림 때 드는 호출) }] }
-// pick: { work: 'cards'|'stages', research, meeting, kept: 사용자가 "남기기"를 고른 팀 단계 번호 }
+// pick: { work: 'cards'|'stages', research, meeting, kept: 사용자가 "남기기"를 고른 팀 단계 번호, fork?: 두 갈래 'ask'|'auto'|'off'(결정 0031) }
 // 되돌림 한 번 = 마지막 일 단계(남은 단계 중 검수 단계가 아닌 마지막, 없으면 남은 마지막. 서버의 reviewPlan 과 같은 규칙) + 기준 판정.
+// 두 갈래: 갈릴 수 있는 회의(est.fork: { calls, prep, stages })마다 최대에만 calls(갈리지 않으면 안 든다). fork 가 없거나 'off' 면 더하지 않는다
 // → { min, max, returns, cap, spent }
-export function sumEstimate(est, { work = 'stages', research = false, meeting = false, kept = [] } = {}) {
+export function sumEstimate(est, { work = 'stages', research = false, meeting = false, kept = [], fork = '' } = {}) {
   const e = est && typeof est === 'object' ? est : {};
   const n = (v) => (Number.isFinite(v) ? v : 0);
   let min = n(e.spent);
@@ -30,6 +31,7 @@ export function sumEstimate(est, { work = 'stages', research = false, meeting = 
   const returns = n(e.returns);
   min += review;
   max += review + returns * (last + review);
+  if (fork && fork !== 'off' && e.fork) max += n(e.fork.calls) * ((meeting && e.meeting?.can && e.fork.prep ? 1 : 0) + (work === 'cards' && e.cards ? 0 : n(e.fork.stages)));
   return { min, max, returns, cap: n(e.cap), spent: n(e.spent) };
 }
 

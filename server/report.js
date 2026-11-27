@@ -3,7 +3,7 @@
 // 에이전트가 쓴 글(기준의 근거, 회의 결론의 결정·남은 이견)은 따로 표시를 달고 길이 상한까지만. 바뀐 파일 목록은 오케스트레이터가 git 으로 채운다.
 // 글 판(reportText)은 사용자가 "기억에 넣기"를 누를 때 프로젝트 기억에 넣는 글이다: 코드가 모은 사실과 기준별 결과만(회의 결론·조사 노트는 넣지 않는다)
 import { tr } from './i18n.js';
-import { verdictWord, answerNames, durationWords, unverifiedLines, failWords, raisedWords } from '../public/js/report-lines.js'; // 화면과 같은 글줄
+import { verdictWord, answerRows, durationWords, unverifiedLines, failWords, raisedWords, forkLines } from '../public/js/report-lines.js'; // 화면과 같은 글줄
 import { answerKind, weighted } from '../public/js/usage-numbers.js'; // 답의 종류는 세션의 "어디에 썼는지"와 같은 함수(결정 0026)
 import { redact } from './memory.js'; // 실행 기록 내보내기의 비밀 가리기는 기억과 같은 함수(결정 0030)
 import { isQuotaError, isTransientError } from './failover.js';
@@ -38,7 +38,9 @@ export function buildReport({ m, messages = [], runs = [], now = Date.now(), nam
     if (x.role !== 'agent' || !ids.has(x.runId)) continue;
     // 이 목표의 실행에서 고른 답이라 표시 없는 답은 일 단계. 팀 초안·인수인계 메모는 목표 실행에 생기지 않는다(생겨도 일 단계로 센다)
     const k = answerKind(x, { goal: true });
-    answers[k in answers ? k : 'work']++;
+    // 갈래 요약·진행자 답(결정 0031)은 있을 때만 칸을 만든다(옛 보고·그런 답이 없는 보고의 모양은 그대로)
+    const key = k in answers || k === 'fork' || k === 'lead' ? k : 'work';
+    answers[key] = (answers[key] || 0) + 1;
     if (x.status !== 'done') answerFails++;
   }
   const log = m.log || [];
@@ -77,6 +79,8 @@ export function buildReport({ m, messages = [], runs = [], now = Date.now(), nam
     raised: (m.cards || []).filter((c) => c.raised?.length).map((c) => ({ id: c.id, chain: [c.raised[0].from, ...c.raised.map((r) => r.to)].map((id) => String(nameOf(id) || id)) })),
     logCut: log[0]?.kind === 'skip' ? Number(log[0].n) || 0 : 0,
     meetings: [...meet.values()].map((x) => ({ ...(x.prep ? { prep: true } : { stageIndex: x.stageIndex, label: String(lastWork?.stages?.[x.stageIndex]?.label || '') }), msgId: x.msgId, decision: x.decision || '', dissent: [...(x.dissent || [])] })),
+    // 두 갈래(결정 0031): 회의마다 사용자가 고른 안과 버린 안(입장 글은 에이전트가 쓴 것), 팀에 맡긴 것. 있을 때만
+    ...(m.forks?.length ? { forks: m.forks.map((f) => ({ label: f.label || '', picked: f.picked, chosen: f.chosen || '', dropped: [...(f.dropped || [])], msgId: f.msgId })) } : {}),
   };
 }
 
@@ -181,13 +185,12 @@ export function reportText(r, { missionId = '' } = {}) {
   const p = (x) => String(x).padStart(2, '0');
   const time = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   const a = r.answers || {};
-  const names = answerNames(tr);
   const lines = [
     tr('[완주 보고 — 코드가 모은 기록]'),
     tr('출처: 완주 보고(report) · 목표 {id} · {time} · 사용자가 확정하지 않은 기록', { id: missionId, time }),
     `${tr('목표')}: ${cut(r.goal, 200)}`,
     `${tr('끝 상태')}: ${endWord(r.end)} · ${tr('확인부터 끝까지 {t}', { t: durationWords(tr, (r.to || 0) - (r.from || 0)) })} · ${r.estimate ? tr('실제 호출 {k}번(어림 {min}~{max}번)', { k: r.calls?.used ?? 0, min: r.estimate.min, max: r.estimate.max }) : tr('실제 호출 {k}번', { k: r.calls?.used ?? 0 })} · ${tr('상한 {cap}번', { cap: r.calls?.cap ?? 0 })}`,
-    `${tr('종류별 답 수')}: ${Object.keys(names).map((k) => `${names[k]} ${a[k] || 0}`).join(' · ')}${r.answerFails ? ` ${tr('(오류·중지로 끝난 답 {n}개 포함)', { n: r.answerFails })}` : ''}`,
+    `${tr('종류별 답 수')}: ${answerRows(tr, a).map(([k, name]) => `${name} ${a[k] || 0}`).join(' · ')}${r.answerFails ? ` ${tr('(오류·중지로 끝난 답 {n}개 포함)', { n: r.answerFails })}` : ''}`,
     `${tr('기준별 결과')}:`,
     ...(r.criteria || []).map((c) => `- ${c.id} ${verdictWord(tr, c.status)}: ${cut(c.text, 300)}${c.evidence ? `\n  ${tr('근거(에이전트가 씀)')}: ${c.evidence}` : ''}`),
   ];
@@ -199,6 +202,8 @@ export function reportText(r, { missionId = '' } = {}) {
   if (r.routes) lines.push(tr('배정이 평소와 달랐던 답: {n}개', { n: r.routes }));
   const up = raisedWords(tr, r.raised);
   if (up) lines.push(up);
+  const fk = forkLines(tr, r.forks);
+  if (fk.length) lines.push(`${tr('두 갈래(입장은 에이전트가 씀)')}:`, ...fk.map((x) => `- ${x}`));
   if (r.files?.list?.length) lines.push(`${tr('바뀐 파일(git)')}: ${r.files.list.slice(0, 20).join(', ')}${r.files.list.length > 20 || r.files.more ? ` ${tr('…(그 밖에 {n}개)', { n: r.files.list.length - Math.min(20, r.files.list.length) + (r.files.more || 0) })}` : ''}`);
   const text = [...lines.join('\n')];
   return text.length > REPORT_TEXT_MAX ? text.slice(0, REPORT_TEXT_MAX).join('') : text.join('');

@@ -304,6 +304,10 @@ function TeamEditor({ team, onClose }) {
         <option value="ask">${t('묻고 요약 받기')}</option><option value="auto">${t('바로 요약 받기')}</option><option value="off">${t('두 갈래 안 함')}</option></select>
       <div class="hint">${t('정체로 끝났거나 결론에 남은 이견이 있고, 진행자·반대편을 뺀 참석자의 입장이 정확히 두 안이면 안마다 한 장 요약을 받아 네가 고르게 해(요약 한 번에 호출 1번씩, 참석자 넷 이상인 회의만). 목표 카드에서 목표마다 바꿀 수 있어.')}</div>
     </div>
+    <div class="field">
+      <div class="row"><${Toggle} checked=${!!tm.crossReview} title=${t('교차 검수 기본값')} onChange=${(v) => setT({ ...tm, crossReview: v })} />
+        <div><b>${t('교차 검수 기본값')}</b><div class="hint">${t('켜 두면 목표 카드의 "교차 검수" 스위치가 켜진 채로 떠(목표마다 끌 수 있어). 둘째 검수자가 레드팀으로 따로 판정하고, 검수마다 호출이 1번 더 들어.')}</div></div></div>
+    </div>
     <div class="pipeline-editor">
       ${tm.stages.map((st, i) => html`<div class="stage-row">
         <div class="stage-num">${i + 1}</div>

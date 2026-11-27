@@ -5,8 +5,8 @@
 export const verdictWord = (t, s) => ({ pass: t('통과'), fail: t('불합격'), unknown: t('확인 못 함') }[s] || t('판정 안 됨'));
 export const failName = (t, k) => ({ review: t('검수에서 걸림'), outside: t('바깥 장애'), blocked: t('막힘'), hole: t('구멍'), keep: t('지킬 것 어김'), input: t('넘겨받음'), unknown: t('원인 모름'), transient: t('일시 장애') }[k] || k);
 export const answerNames = (t) => ({ goal: t('목표 잡기'), research: t('조사'), meeting: t('회의'), plan: t('계획'), cards: t('일 카드'), work: t('일 단계'), review: t('검수') });
-// 있을 때만 싣는 종류(결정 0031): 갈래 요약. 옛 보고와 그런 답이 없는 보고는 줄이 그대로다
-export const answerExtra = (t) => ({ fork: t('갈래 요약'), lead: t('진행자 답') });
+// 있을 때만 싣는 종류: 교차 검수의 둘째 검수(결정 0032), 갈래 요약·진행자 답(결정 0031). 옛 보고와 그런 답이 없는 보고는 줄이 그대로다
+export const answerExtra = (t) => ({ cross: t('교차 검수(레드팀)'), fork: t('갈래 요약'), lead: t('진행자 답') });
 // 종류별 답 수 줄의 항목: 늘 싣는 종류 + 그 보고에 수가 있는 추가 종류. → [[키, 이름]]
 export const answerRows = (t, answers = {}) => [...Object.entries(answerNames(t)), ...Object.entries(answerExtra(t)).filter(([k]) => (answers?.[k] || 0) > 0)];
 
@@ -14,6 +14,20 @@ export const answerRows = (t, answers = {}) => [...Object.entries(answerNames(t)
 export const forkLines = (t, forks) => (forks || []).map((f) => (f.picked === 'team'
   ? t('회의 "{label}": 두 안 중에 고르지 않고 팀이 정하게 했어(진행자 결론대로)', { label: f.label || '' })
   : t('회의 "{label}": 안 {key}({chosen})를 골랐어 · 버린 안: {dropped}', { label: f.label || '', key: String(f.picked || '').toUpperCase(), chosen: f.chosen || '', dropped: (f.dropped || []).join(', ') })));
+
+// 교차 검수 줄들(결정 0032): 검수자 둘, 회차, 한 명만 검수한 회차, 엇갈린 기준 수, 판정 카드에서 사용자가 정한 것, 보류한 기준, 한 명만 본 기준(마지막 회차). 교차 검수가 없었으면 []
+export function crossWords(t, c) {
+  if (!c) return [];
+  const p = c.picks || {};
+  return [
+    t('검수자 둘: {a}(검증) · {b}(레드팀) · 교차 검수 {n}회차', { a: c.a, b: c.b, n: c.rounds || 0 }),
+    ...(c.single ? [t('둘째 검수 없이 한 명이 검수한 회차: {n}', { n: c.single })] : []),
+    t('두 검수자의 판정이 엇갈린 기준: {n}개', { n: c.splits || 0 }),
+    ...(p.fix || p.fold || p.hold ? [t('판정 카드에서 사용자가 정한 것: 고치기 {fix} · 접기 {fold} · 보류 {hold}', { fix: p.fix || 0, fold: p.fold || 0, hold: p.hold || 0 })] : []),
+    ...(c.held?.length ? [t('보류한 기준: {ids}', { ids: c.held.join(', ') })] : []),
+    ...(c.one?.length ? [t('한 명만 본 기준: {ids}', { ids: c.one.join(', ') })] : []),
+  ];
+}
 
 // 걸린 시간: 1분 안 · n분 · h시간 n분
 export function durationWords(t, ms) {

@@ -184,7 +184,8 @@ function cleanTeam(t) {
   // 사다리 팀(결정 0024·0027): ladder 가 true 일 때만 escalateAfter(1~5, 기본 2)와 같이 남긴다(아니면 저장할 때 합쳐도 지워지게 undefined)
   // 두 갈래(결정 0031): 목표 모드의 회의가 두 안으로 갈리면 'auto'(바로 요약) · 'off'(안 함). 기본인 묻고 시작('ask')은 적지 않는다(옛 팀과 같은 모양)
   const fork = t.fork === 'auto' || t.fork === 'off' ? t.fork : undefined;
-  return { id: t.id, name: String(t.name).trim().slice(0, 40), description: String(t.description || '').slice(0, 300), stages, ladder: undefined, escalateAfter: undefined, ...cleanLadder(t), fork };
+  // 교차 검수 기본값(결정 0032): true 일 때만 남긴다(목표 카드의 교차 검수 스위치가 켜진 채로 뜬다)
+  return { id: t.id, name: String(t.name).trim().slice(0, 40), description: String(t.description || '').slice(0, 300), stages, ladder: undefined, escalateAfter: undefined, ...cleanLadder(t), fork, crossReview: t.crossReview === true ? true : undefined };
 }
 
 function openTerminal(command, env = null) {
@@ -1030,9 +1031,10 @@ export function createApp({ home = homeDir(), port = PORT, detect = true, schedu
       const status = e.status || 500;
       if (status === 500) console.error('[오류]', e);
       // extra 에서는 정해 둔 값만 싣는다(목표 카드 대조가 어긋났을 때의 지금 초안 draft, 검수 줄 대조가 어긋났을 때의 지금 검수 줄 review,
-      // 조사·회의 먼저가 지금 팀으로 안 될 때의 지금 값 prep, 일 카드를 지금 팀으로 쓸 수 없을 때의 지금 값 work, 그때의 호출 어림 조각 estimate). error 는 덮이지 않게 맨 뒤에
+      // 조사·회의 먼저가 지금 팀으로 안 될 때의 지금 값 prep, 일 카드를 지금 팀으로 쓸 수 없을 때의 지금 값 work, 그때의 호출 어림 조각 estimate,
+      // 교차 검수의 둘째 검수자가 어긋났을 때의 지금 값 cross(결정 0032)). error 는 덮이지 않게 맨 뒤에
       const pick = (k) => (e.extra?.[k] && typeof e.extra[k] === 'object' ? { [k]: e.extra[k] } : {});
-      if (!res.headersSent) send(res, status, { ...pick('draft'), ...pick('review'), ...pick('prep'), ...pick('work'), ...pick('estimate'), error: e.message || String(e) });
+      if (!res.headersSent) send(res, status, { ...pick('draft'), ...pick('review'), ...pick('prep'), ...pick('work'), ...pick('estimate'), ...pick('cross'), error: e.message || String(e) });
       else try { res.end(); } catch { /* 이미 닫힘 */ }
     }
   });

@@ -28,6 +28,8 @@ const pure = () => ({
   blockedRule: blockedRule(), outsideAsk: outsideRule(true), outsideNoAsk: outsideRule(false), resumeSent: resumeSent(), tailRule: tailRule(), assume: ASSUME(),
   goalBlock: goalBlock(), researchBlock: researchBlock(), planBlock: planBlock(), reviewBlock: reviewBlock('0'.repeat(16)), verdictBlock: verdictBlock(), checkBlock: checkBlock(),
   planPrompt: planPrompt({ mark: M8 }), reviewPrompt: reviewPrompt({ nonce: '0'.repeat(16), mark: M8 }), researchPrompt: researchPrompt({ mark: M8 }),
+  // 교차 검수의 둘째 검수자(레드팀) 프롬프트(결정 0032): 검수자 문장 하나만 레드팀 문장으로 바뀐다. 교차 검수를 켠 목표에서 검수마다 한 번 더 간다
+  reviewRedPrompt: reviewPrompt({ nonce: '0'.repeat(16), mark: M8, role: 'red' }),
   questionsPrompt: questionsPrompt({ mark: M8 }), scanPrompt: scanPrompt({}), cardPrompt: cardPrompt({ card: { id: 'k1', title: '', kind: 'build', files: [], done: '', not: '' }, mark: M8 }),
   resumeHead: tr(RESUME),
   // 반복 실패 줄(결정 0030): 되풀이된 실패가 있을 때만 일 단계에 붙는 블록. 줄 하나(글 없이 "- (목표 n개에서 m번)" 틀만)로 잰다

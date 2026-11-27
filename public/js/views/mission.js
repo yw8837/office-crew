@@ -1,13 +1,13 @@
 // 목표 모드 화면(결정 0014): 채팅의 목표 카드(확인·고쳐서 확인·그만, 끊긴 목표 이어서·버리기)와 오른쪽 패널의 "진행 기록" 탭.
 // 카드는 서버가 저장한 초안을 그대로 보여 주고, 확인할 때 보여 주던 값 전체를 같이 보낸다(서버가 저장된 초안과 글자까지 대조한다)
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { html, ProviderChip } from '../ui.js';
+import { html, ProviderChip, Toggle } from '../ui.js';
 import { state, changed, toast, agentById } from '../state.js';
 import { get, post, put } from '../api.js';
 import { t, locale } from '../i18n/index.js';
 import { sumEstimate, limitRows, recordAge } from '../mission-numbers.js';
 import { WIN_LABEL } from './session.js'; // 한도 창 이름(세션 화면의 계정 한도와 같은 이름)
-import { answerRows, durationWords, unverifiedLines, failWords, raisedWords, forkLines } from '../report-lines.js'; // 완주 보고의 글줄(서버가 기억에 넣는 글 판과 같은 함수, 결정 0025)
+import { answerRows, durationWords, unverifiedLines, failWords, raisedWords, forkLines, crossWords } from '../report-lines.js'; // 완주 보고의 글줄(서버가 기억에 넣는 글 판과 같은 함수, 결정 0025)
 import { goalEndWord, raiseChoices, gateKeys } from '../stage-model.js'; // 끝 상태 이름(흐름 무대의 끝 깃발과 같은 말), 넘기기 보기·번호 키(결정 0027)
 import { forkDigest } from '../fork-hash.js'; // 두 갈래 카드의 본 것 해시(서버 forkHash 와 같은 글, 결정 0031)
 
@@ -119,11 +119,14 @@ export function ResearchCard({ m }) {
 }
 
 // 기준 한 줄: 칩, 기준(사용자 확인), 근거(에이전트가 씀)
+// 교차 검수(결정 0032)의 표시: 한 명만 본 기준, 판정 카드에서 사용자가 정한 것(사유는 사용자 글)
+const PICK = () => ({ fix: t('불합격으로 고치기'), fold: t('합격으로 접기'), hold: t('보류') });
 function CritRow({ c, n }) {
   const [label, cls] = verdictChip(c.status);
   return html`<div class="crit" role="listitem">
-    <div class="crit-head"><span class=${`chip${cls}`}>${label}</span><span>${n ? `${n}. ` : ''}${c.text || c.id}</span></div>
+    <div class="crit-head"><span class=${`chip${cls}`}>${label}</span><span>${n ? `${n}. ` : ''}${c.text || c.id}</span>${c.one && html` <span class="chip" title=${t('다른 검수자의 판정을 받지 못한 기준이야.')}>${t('한 명만 봄')}</span>`}${c.user && html` <span class="chip accent">${t('사용자가 정함: {pick}', { pick: PICK()[c.user.pick] || c.user.pick })}</span>`}</div>
     ${c.evidence && html`<div class="small muted crit-ev">${c.evidence} <span class="crit-who">· ${t('에이전트가 씀 · 사용자 확인 안 함')}</span></div>`}
+    ${c.user?.note && html`<div class="small crit-ev">${t('사유')}: ${c.user.note} <span class="crit-who muted">· ${t('사용자가 씀')}</span></div>`}
   </div>`;
 }
 
@@ -134,8 +137,10 @@ export function ReviewTable({ r }) {
   if (r.missing) return html`<div class="notice">🎯 ${t('이 답에서는 판정 블록을 받지 못했어(판정 없음).')}</div>`;
   const t2 = { pass: 0, fail: 0, unknown: 0 };
   for (const x of r.results) t2[x.verdict] = (t2[x.verdict] || 0) + 1;
+  // 교차 검수(결정 0032): 어느 쪽 검수자의 판정인지(합치기 전 한 사람의 판정이다)
+  const who = r.role === 'red' ? t('레드팀 판정 · 합치기 전') : r.role === 'check' ? t('검증 판정 · 합치기 전') : '';
   return html`<div class="crit-table" role="list" aria-label=${t('기준 판정')}>
-    <div class="small muted">${t('기준 {total}개 중 통과 {pass} · 불합격 {fail} · 확인 못 함 {unknown}', { total: r.results.length, pass: t2.pass, fail: t2.fail, unknown: t2.unknown })}</div>
+    <div class="small muted">${who ? html`<span class="chip">${who}</span> ` : ''}${t('기준 {total}개 중 통과 {pass} · 불합격 {fail} · 확인 못 함 {unknown}', { total: r.results.length, pass: t2.pass, fail: t2.fail, unknown: t2.unknown })}</div>
     ${r.results.map((x) => html`<${CritRow} c=${{ status: x.verdict, text: x.text ? `${x.id}. ${x.text}` : x.id, evidence: x.evidence, id: x.id }} />`)}
   </div>`;
 }
@@ -224,6 +229,13 @@ function CardBody({ v }) {
     <${Section} title=${t('사용자가 정할 것')} items=${v.userDecides} empty=${t('없음')} />
     ${v.keep?.length > 0 && html`<${Section} title=${t('바뀌면 안 되는 것')} items=${v.keep} empty=${t('없음')} />`}`;
 }
+
+// 교차 검수를 못 하는 까닭(결정 0032)
+const crossWhy = (why) => ({
+  none: t('검수자가 없어서 교차 검수는 못 해.'),
+  few: t('진행자와 첫째 검수자 말고 검수할 팀원이 없어서 교차 검수는 못 해.'),
+  signin: t('둘째로 검수할 팀원의 AI가 로그인돼 있지 않아서 교차 검수는 못 해.'),
+}[why] || t('지금은 교차 검수를 못 해.'));
 
 // ── 일 카드(결정 0018) ──
 // 일하는 방식을 못 쓰는 이유
@@ -356,6 +368,9 @@ export function ReportCard({ m }) {
         <div class="small muted">${t('카드 기록에서 코드가 모았어(넘기기는 질문 창에서 고른 것).')}</div></div>`}
       <div class="goal-sec"><div class="small muted"><b>${t('기준별 최종 판정')}</b></div>
         ${crit.length ? html`<div class="crit-table" role="list" aria-label=${t('기준별 최종 판정')}>${crit.map((c, i) => html`<${CritRow} c=${c} n=${i + 1} />`)}</div>` : html`<div class="small muted">${t('없음')}</div>`}</div>
+      ${m.cross && html`<div class="goal-sec"><div class="small muted"><b>${t('교차 검수')}</b></div>
+        <ul class="small">${crossWords(t, m.cross).map((x) => html`<li>${x}</li>`)}</ul>
+        <div class="small muted">${t('회차 기록과 기준의 표시에서 코드가 모았어(판정 카드의 고치기·접기·보류는 사용자가 고른 것).')}</div></div>`}
       <div class="goal-sec"><div class="small muted"><b>${t('사용자가 확정한 것')}</b></div>
         ${m.user?.length ? html`<ul class="small">${m.user.map((x) => html`<li>${x.text}</li>`)}</ul>` : html`<div class="small muted">${t('없음')}</div>`}
         ${m.userMore > 0 && html`<div class="small muted">${t('그 앞의 {n}줄은 줄였어.', { n: m.userMore })}</div>`}
@@ -454,6 +469,8 @@ export function GoalCard({ m }) {
   const [workSel, setWorkSel] = useState(null); // 사용자가 고른 일하는 방식('cards' | 'stages', 없으면 카드의 기본값)
   const [estShown, setEstShown] = useState(null); // 확인이 어긋났을 때 서버가 준 지금 팀의 호출 어림 조각(결정 0019)
   const [forkSel, setForkSel] = useState(null); // 사용자가 고른 두 갈래 값(결정 0031. 없으면 카드의 기본값 = 팀 설정)
+  const [crossShown, setCrossShown] = useState(null); // 교차 검수의 둘째 검수자가 어긋났을 때 서버가 준 지금 값(결정 0032)
+  const [crossSel, setCrossSel] = useState(null); // 사용자가 고친 교차 검수 스위치(없으면 카드의 기본값: 팀 설정)
   const goalIn = useRef(null);
   const editBtn = useRef(null);
   const editing = !!edit;
@@ -474,6 +491,7 @@ export function GoalCard({ m }) {
       ${m.prepChosen && html`<div class="small muted">${prepWords(m.prepChosen)}</div>`}
       ${m.workChosen && html`<div class="small muted">${m.workChosen === 'cards' ? t('일 카드로 나눠 해.') : t('팀 단계표대로 해.')}</div>`}
       ${m.forkChosen && m.fork?.can && html`<div class="small muted">${t('회의가 두 안으로 갈리면: {mode}', { mode: FORK_WORD()[m.forkChosen] || m.forkChosen })}</div>`}
+      ${m.crossChosen && mission?.cross?.secondId && html`<div class="small muted">${t('교차 검수: {name}이(가) 레드팀으로 따로 판정해.', { name: agentById(mission.cross.secondId)?.name || mission.cross.secondId })}</div>`}
       ${mission?.status === 'unreviewed' && html`<div class="notice">${t('일은 끝났어. 기준 판정은 아직 없어.')}</div>`}
       ${mission?.status === 'done' && html`<div class="notice">✅ ${t('기준 {n}개를 모두 통과해서 끝냈어.', { n: mission.criteria.length })}</div>`}
       ${mission?.status === 'accepted' && html`<div class="notice">${t('받아들여서 끝냈어 · 남은 기준 {n}개', { n: left })}</div>`}
@@ -507,6 +525,8 @@ export function GoalCard({ m }) {
       if (e.data?.work) { setWorkShown(e.data.work); setWorkSel(e.data.work.can ? null : 'stages'); }
       // 팀이 바뀌어 어긋났으면 호출 어림도 지금 팀의 조각으로 다시 더한다
       if (e.data?.estimate) setEstShown(e.data.estimate);
+      // 교차 검수의 둘째 검수자가 바뀌었으면 지금 값으로 다시 그린다(이제 못 하면 스위치를 끈다)
+      if (e.data?.cross) { setCrossShown(e.data.cross); setCrossSel((o) => !!(o ?? e.data.cross.on) && !!e.data.cross.can); }
       toast(e.message, 'error');
       setBusy(false);
       return false;
@@ -523,19 +543,23 @@ export function GoalCard({ m }) {
   const wk = workShown || m.work || null;
   const work = wk ? (workSel || wk.on) : undefined;
   // 호출 어림(결정 0019): 보여 주는 범위의 두 숫자도 보낸다(지금 팀으로 다시 센 값과 다르면 서버가 409 와 지금 조각을 준다). 옛 카드(이 칸 없음)는 보내지 않는다
+  // 교차 검수(결정 0032): 스위치 값과 카드가 보여 준 둘째 검수자를 같이 보낸다(서버가 지금 팀·로그인으로 다시 고른 사람과 대조한다). 옛 카드(이 칸 없음)는 보내지 않는다(한 명 검수)
+  const cx = crossShown || m.cross || null;
+  const crossOn = !!cx?.can && !!(crossSel ?? cx.on);
+  const cross = cx ? { cross: { on: crossOn, secondId: cx.secondId || null } } : {};
   const est = estShown || m.estimate || null;
   // 두 갈래(결정 0031): 갈릴 수 있는 회의가 있는 카드만 고르게 하고 보낸다(옛 카드·못 갈리는 팀은 보내지 않는다: 서버가 팀 설정을 쓴다)
   const fk = m.fork?.can ? m.fork : null;
   const fork = fk ? forkSel || fk.mode : undefined;
-  const estPick = { work: work === 'cards' ? 'cards' : 'stages', research: !!prep?.research, meeting: !!prep?.meeting, kept, ...(fork ? { fork } : {}) };
+  const estPick = { work: work === 'cards' ? 'cards' : 'stages', research: !!prep?.research, meeting: !!prep?.meeting, kept, ...(fork ? { fork } : {}), cross: crossOn };
   const seen = est ? sumEstimate(est, estPick) : null;
   const estimate = seen ? { estimate: { min: seen.min, max: seen.max } } : {};
-  const start = () => send('confirm', { missionId: m.missionId, expected: v, review, prep, ...(wk ? { work } : {}), ...(fork ? { fork } : {}), ...estimate });
+  const start = () => send('confirm', { missionId: m.missionId, expected: v, review, prep, ...(wk ? { work } : {}), ...(fork ? { fork } : {}), ...cross, ...estimate });
   // 고친 값: 기준 줄과 같은 줄의 확인 방법을 짝지어 빈 기준은 그 확인 방법과 같이 뺀다
   const pairs = edit ? String(edit.criteria).split(/\r?\n/).map((c, i) => [c.trim(), (String(edit.checks || '').split(/\r?\n/)[i] || '').trim()]).filter(([c]) => c) : [];
   const edited = edit && { goal: edit.goal.trim(), criteria: pairs.map((x) => x[0]), checks: pairs.map((x) => x[1]), outOfScope: lines(edit.outOfScope), userDecides: lines(edit.userDecides), keep: lines(edit.keep) };
   const canEdited = !!edited && !!edited.goal && edited.criteria.length > 0;
-  const startEdited = () => { if (canEdited) send('confirm', { missionId: m.missionId, expected: v, edited, review, prep, ...(wk ? { work } : {}), ...(fork ? { fork } : {}), ...estimate }); };
+  const startEdited = () => { if (canEdited) send('confirm', { missionId: m.missionId, expected: v, edited, review, prep, ...(wk ? { work } : {}), ...(fork ? { fork } : {}), ...cross, ...estimate }); };
   const names = (who) => who.map((w) => agentById(w.id)?.name || w.name || w.id).join(', ');
   const prepLine = pp && html`<div class="goal-sec goal-prep">
     <div class="small muted"><b>${t('조사·회의 먼저')}</b></div>
@@ -557,7 +581,18 @@ export function GoalCard({ m }) {
     <div class="small muted"><b>${t('검수')}</b></div>
     ${rvShown && html`<div class="notice" role="status">${t('검수자나 건너뛸 단계가 바뀌어서 지금 값으로 다시 그렸어. 다시 확인해 줘.')}</div>`}
     <div>${rv.reviewerId ? t('검수: {name}이(가) 기준마다 판정해.', { name: rv.reviewerName || agentById(rv.reviewerId)?.name || rv.reviewerId }) : t('검수할 다른 팀원이 없어서 판정 없이 끝나고 네게 물어.')}</div>
-    ${rv.reviewerId && m.reviewerReadOnly !== undefined && html`<div class="small">${m.reviewerReadOnly ? t('읽기 전용이라 명령·테스트를 못 돌려. 파일을 읽어서 확인하는 데까지만 판정해.') : t('명령·테스트를 돌려 확인할 수 있어.')}</div>`}
+    ${rv.reviewerId && m.reviewerReadOnly !== undefined && !crossOn && html`<div class="small">${m.reviewerReadOnly ? t('읽기 전용이라 명령·테스트를 못 돌려. 파일을 읽어서 확인하는 데까지만 판정해.') : t('명령·테스트를 돌려 확인할 수 있어.')}</div>`}
+    ${rv.reviewerId && cx && html`<div class="goal-cross">
+      ${crossShown && html`<div class="notice" role="status">${t('교차 검수의 둘째 검수자가 바뀌어서 지금 값으로 다시 그렸어. 다시 확인해 줘.')}</div>`}
+      <div class="goal-keep small">
+        <${Toggle} checked=${crossOn} disabled=${busy || !cx.can} title=${t('교차 검수')} onChange=${(on) => setCrossSel(on)} />
+        <span><b>${t('교차 검수')}</b> · ${t('검수마다 호출 +1')} — ${!cx.can ? crossWhy(cx.why)
+          : t('{name}({ai})이(가) 레드팀으로 따로 판정해: 기준이 깨지는 경우·빠진 것·증거 없는 주장을 찾아. 두 판정은 코드가 합치고, 엇갈리면 판정 카드로 물어.', { name: agentById(cx.secondId)?.name || cx.secondName, ai: cx.ai })}
+          ${cx.can && crossOn && html`<span class="muted goal-keep-ins">${t('두 검수자 모두 그 실행만 읽기 전용으로 돌아(명령·테스트를 못 돌려). 서로의 글은 보지 않아.')}</span>`}
+          ${cx.can && cx.sameAi && html`<span class="muted goal-keep-ins">${t('둘째 검수자도 첫째와 같은 회사 AI(또는 모르는 AI)라서 교차가 약해.')}</span>`}
+          ${cx.can && cx.worked && html`<span class="muted goal-keep-ins">${t('둘째 검수자가 팀의 일 단계에도 있어서 자기가 한 일을 검수할 수 있어.')}</span>`}</span>
+      </div>
+    </div>`}
     ${work !== 'cards' && (rv.droppable || []).map((d) => html`<label class="goal-keep small">
       <input type="checkbox" checked=${kept.includes(d.index)} disabled=${busy} onChange=${(e) => keep(d.index, e.target.checked)} />
       <span><b>${t('남기기')}</b> · "${d.label}"${d.names?.length ? ` (${d.names.join(', ')})` : ''} — ${kept.includes(d.index) ? t('남겨서 그대로 돌려.') : t('이 단계는 기준 판정으로 대신해서 건너뛰어.')}
@@ -633,6 +668,7 @@ export function GoalCard({ m }) {
 export function MissionGate({ s, run }) {
   const hold = run.hold;
   const [busy, setBusy] = useState(false);
+  const [picks, setPicks] = useState({}); // 판정 카드(결정 0032)에서 고르는 중인 값 { [기준 id]: { pick, note } }
   const ctl = async (action, extra = {}) => {
     if (busy) return;
     setBusy(true);
@@ -767,6 +803,42 @@ export function MissionGate({ s, run }) {
       <div class="ask-foot"><span class="grow"></span><button type="button" class="btn sm danger" disabled=${busy} onClick=${() => ctl('stop')}>${t('그만')}</button></div>
     </div>`;
   }
+  // 교차 검수의 판정 카드(결정 0032): 기준마다 두 검수자의 판정과 근거(에이전트가 쓴 글)를 나란히. 엇갈린 기준은 고치기·접기·보류 중 하나와 한 줄 사유(선택)를 골라 확정.
+  // 엇갈리지 않은 기준은 합친 결과만 보인다(코드가 정한 것). 다 고르기 전에는 확정을 누를 수 없다(기본값을 미리 골라 두지 않는다)
+  if (hold.kind === 'split') {
+    const items = hold.items || [];
+    const splits = items.filter((x) => x.split);
+    const ready = splits.every((x) => picks[x.id]?.pick);
+    const set = (id, v) => setPicks({ ...picks, [id]: { ...(picks[id] || {}), ...v } });
+    const opts = [['fix', PICK().fix, t('마지막 일 단계가 고쳐(되돌림이 남았으면 저절로).')], ['fold', PICK().fold, t('이 기준은 채운 걸로 봐.')], ['hold', PICK().hold, t('이번엔 넘겨. 되돌리지 않고 완주 보고에 남겨.')]];
+    // 엇갈린 모양마다 한 줄(mergeReviews 의 splitWhy. 옛 카드 값에 없으면 한쪽 합격으로 본다)
+    const splitLine = (x) => ({ both: t('두 검수자 모두 불합격이라고 했는데, 둘 다 확인할 수 있는 근거의 꼴이 없어.'), unknown: t('한쪽은 불합격(확인할 수 있는 근거의 꼴 없음), 다른 쪽은 확인 못 함이라고 했어.') }[x.splitWhy]
+      || t('한쪽은 합격, 다른 쪽은 불합격이라고 했는데 그 불합격에 확인할 수 있는 근거의 꼴이 없어.'));
+    const side = (label, name, r) => html`<div class="split-side">
+      <div class="small"><b>${label}</b> · ${name}</div>
+      ${r ? html`<div><span class=${`chip${verdictChip(r.verdict)[1]}`}>${verdictChip(r.verdict)[0]}</span></div>${r.evidence ? html`<div class="small muted crit-ev">${r.evidence}</div>` : html`<div class="small muted">${t('근거 없음')}</div>`}`
+        : html`<div class="small muted">${t('이 기준의 판정이 없어(빼먹었거나 판정 블록을 못 받음).')}</div>`}
+    </div>`;
+    const confirm = () => { if (ready) ctl('judge', { round: hold.round, picks: Object.fromEntries(splits.map((x) => [x.id, { pick: picks[x.id].pick, ...(picks[x.id].note?.trim() ? { note: picks[x.id].note.trim() } : {}) }])) }); };
+    return html`<div class="ask-panel mission-gate split-card" role="group" aria-label=${t('판정 카드')}>
+      <div class="ask-head"><span class="ask-who">⚖️ ${t('판정 카드')} · ${t('검수 {r}회차', { r: hold.round })}</span></div>
+      <div class="ask-question">${t('두 검수자의 판정이 엇갈린 기준이 {n}개 있어. 기준마다 정해 줘.', { n: splits.length })}</div>
+      <div class="small muted">${t('엇갈림: 불합격이라고 한 쪽의 근거에 확인할 수 있는 꼴(파일 위치·주소·백틱 명령·긴 인용·종료 코드)이 없어. 코드는 근거의 꼴만 보고, 그 파일·출력이 정말 있는지는 확인하지 않아. 판정과 근거는 에이전트가 쓴 글이야(사용자 확인 안 함).')}</div>
+      <div class="small muted">${t('사유는 "불합격으로 고치기"를 고른 기준만 고칠 에이전트에게 사용자 글로 가. 다른 선택의 사유는 진행 기록에만 남아.')}</div>
+      <div class="split-list">${items.map((x) => html`<fieldset class=${`split-row${x.split ? ' open' : ''}`}>
+        <legend class="small"><b>${x.id}</b>. ${x.text}</legend>
+        <div class="split-two">${side(t('검증'), hold.names?.a || '', x.a)}${side(t('레드팀'), hold.names?.b || '', x.b)}</div>
+        ${x.split ? html`<div class="small split-why">${splitLine(x)}</div><div class="split-picks" role="radiogroup" aria-label=${t('{id} 어떻게 할까', { id: x.id })}>
+            ${opts.map(([v, label, desc]) => html`<label class="goal-keep small"><input type="radio" name=${`split-${run.id}-${hold.round}-${x.id}`} value=${v} checked=${picks[x.id]?.pick === v} disabled=${busy} onChange=${() => set(x.id, { pick: v })} /><span><b>${label}</b> — ${desc}</span></label>`)}
+            <input class="input" maxlength="200" placeholder=${t('사유 한 줄(선택)')} aria-label=${t('{id} 사유 한 줄(선택)', { id: x.id })} value=${picks[x.id]?.note || ''} disabled=${busy} onInput=${(e) => set(x.id, { note: e.target.value })} />
+          </div>`
+          : html`<div class="small"><span class=${`chip${verdictChip(x.verdict)[1]}`}>${t('합친 결과')}: ${verdictChip(x.verdict)[0]}</span>${x.one ? html` <span class="chip">${t('한 명만 봄')}</span>` : ''}</div>`}
+      </fieldset>`)}</div>
+      <div class="ask-foot"><button type="button" class="btn primary sm" disabled=${busy || !ready} onClick=${confirm}>${t('확정')}</button>
+        ${!ready && html`<span class="small muted">${t('엇갈린 기준마다 하나씩 골라 줘.')}</span>`}
+        <span class="grow"></span><button type="button" class="btn sm danger" disabled=${busy} onClick=${() => ctl('stop')}>${t('그만')}</button></div>
+    </div>`;
+  }
   const notes = hold.kind === 'notes';
   const left = hold.left || [];
   const q = notes ? t('반영 안 한 추가 지시가 {n}개 있어. 어떻게 할까?', { n: hold.notes })
@@ -784,7 +856,7 @@ export function MissionGate({ s, run }) {
       ${row(1, notes ? t('그대로 끝') : t('받아들이기'), notes ? t('추가 지시는 반영하지 않고 지금 판정으로 끝내.') : t('남은 기준은 판정 그대로 두고 끝내.'), 'accept')}
       ${hold.more !== false && row(2, notes ? t('반영해서 한 번 더') : t('한 번 더'), notes ? (hold.reviewer === false ? t('마지막 일 단계가 추가 지시를 넣어 다시 해. 검수할 사람이 없어서 그 뒤에 판정 없이 다시 물어.') : t('마지막 일 단계가 추가 지시를 넣어 다시 하고, 다시 검수해.')) : t('마지막 일 단계가 걸린 기준을 고친 뒤 다시 검수해.'), 'more')}
     </div>
-    ${hold.more === false && html`<div class="small muted">${t('검수할 다른 팀원이 없어서 다시 고쳐도 판정할 사람이 없어.')}</div>`}
+    ${hold.more === false && html`<div class="small muted">${hold.noReturn ? t('되돌릴 기준이 없어(판정 카드에서 보류한 기준은 되돌리지 않아). 받아들이거나 그만해.') : t('검수할 다른 팀원이 없어서 다시 고쳐도 판정할 사람이 없어.')}</div>`}
     <div class="ask-foot"><span class="grow"></span><button type="button" class="btn sm danger" disabled=${busy} onClick=${() => ctl('stop')}>${t('그만')}</button></div>
   </div>`;
 }
@@ -837,6 +909,7 @@ export function MissionLog({ s }) {
       <div>${m.goal || html`<span class="muted">${t('(아직 없음)')}</span>`}</div>
       <div class="small muted" style="margin-top:4px">${m.confirmedAt ? `${t('사용자 확인')}${m.editedByUser ? ` · ${t('고쳐서 확인')}` : ''}` : t('에이전트가 씀 · 사용자 확인 전')}</div>
       ${m.confirmedAt > 0 && 'reviewerId' in m && html`<div class="small muted">${m.reviewerId ? t('검수: {name}이(가) 기준마다 판정해.', { name: agentById(m.reviewerId)?.name || m.reviewerId }) : t('검수할 다른 팀원이 없어서 판정 없이 끝나고 네게 물어.')}</div>`}
+      ${m.confirmedAt > 0 && m.cross?.secondId && html`<div class="small muted">${t('교차 검수: {name}이(가) 레드팀으로 따로 판정해.', { name: agentById(m.cross.secondId)?.name || m.cross.secondId })}</div>`}
       ${m.confirmedAt > 0 && m.prep && html`<div class="small muted">${prepWords(m.prep)}</div>`}
       ${m.research?.questions?.length > 0 && (() => {
         const n = m.research.questions.length;

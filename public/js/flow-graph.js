@@ -1,5 +1,6 @@
 // 읽기 전용 흐름도(결정 0030): 목표 하나(세션의 mission·실행·메시지)를 마디와 선으로. DOM 없는 순수 함수라 화면(views/flowmap.js)과 시험(test/flow-graph.test.js)이 같이 쓴다.
-// 마디: 목표 잡기 → 조사 → 준비 회의 → 계획 → 카드들(물결마다 한 줄) 또는 팀의 일 단계 → 검수 → 완주 보고. 옆 마디: 회의에서 사용자에게 물은 것, 한도 대기.
+// 마디: 목표 잡기 → 조사 → 준비 회의 → 계획 → 카드들(물결마다 한 줄) 또는 팀의 일 단계 → 검수 → 완주 보고. 옆 마디: 회의에서 사용자에게 물은 것, 한도 대기,
+// 교차 검수(결정 0032)의 레드팀 검수와 판정 카드.
 // 선: 큰 흐름, 카드의 needs, 검수에서 되돌린 선(회차), 윗등급에게 넘긴 선(카드 스스로에게), 물음·한도 대기로 가는 옆 선.
 // 상태(대기·하는 중·끝·막힘·구멍·오류·건너뜀·멈춤)는 색만이 아니라 기호·낱말·테두리 모양으로도 가른다. 이름·목표 글은 바깥 글이라 화면은 글자로만 넣는다
 import { t } from './i18n/index.js';
@@ -154,6 +155,15 @@ export function flowModel({ mission: m = null, runs = [], messages = [], nameOf 
     const last = (messages || []).findLast((x) => x.role === 'agent' && x.review && x.missionId === m.id);
     add({ id: 'review', kind: 'review', label: t('검수'), sub: m.round ? t('기준 {pass}/{total} 통과', { pass: crit.filter((c) => c.status === 'pass').length, total: crit.length }) : '', state: combine(list) || 'wait', msgId: last?.id || null });
     for (const { i } of list) at.set(i, 'review');
+    // 교차 검수(결정 0032): 둘째 검수자(레드팀)와 판정 카드는 검수 옆 마디. 레드팀의 상태는 그 사람의 마지막 판정 답으로(아직 없으면 검수 단계를 따른다)
+    if (m.cross?.secondId) {
+      const red = (messages || []).findLast((x) => x.role === 'agent' && x.review?.role === 'red' && x.missionId === m.id);
+      const redState = red ? (red.status === 'streaming' ? 'run' : red.status === 'done' ? 'done' : red.status === 'stopped' ? 'stopped' : 'error') : combine(list) === 'run' ? 'run' : 'wait';
+      side('review', { id: 'review:red', kind: 'review', label: t('레드팀 검수'), who: nameOf(m.cross.secondId), state: redState, msgId: red?.id || null }, 'ask');
+      const asked = (m.crossLog || []).filter((r) => (r.splits || []).length).length + (m.split ? 1 : 0);
+      // 판정 카드는 메시지가 아니라 입력창 위 질문 창이라, 누르면 그 회차의 마지막 판정 답으로 간다
+      if (asked) side('review', { id: 'split', kind: 'ask', label: t('판정 카드 {n}번', { n: asked }), state: m.split ? 'wait' : 'done', msgId: red?.id || last?.id || null }, 'ask');
+    }
     flow('review');
     if (m.returns > 0 && lastWork.length) edges.push({ from: 'review', to: lastWork[0], kind: 'return', label: t('되돌림 {n}번 · 검수 {r}회차까지', { n: m.returns, r: m.round || m.returns + 1 }) });
     prev = ['review'];

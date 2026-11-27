@@ -554,6 +554,17 @@ pre.raw { background: var(--code-bg); padding: 10px 12px; border-radius: 10px; f
 .crit-who { white-space: nowrap; }
 .mission-gate .crit-table { max-height: 30vh; overflow: auto; }
 .chat-inner .mission-gate { margin: 14px 0 6px; max-width: none; }
+/* 교차 검수(결정 0032): 목표 카드의 스위치 줄, 판정 카드(기준마다 두 검수자의 판정을 나란히. 좁은 창에서는 위아래로) */
+.goal-cross { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.goal-cross .switch { flex: none; margin-top: 1px; }
+.split-list { display: flex; flex-direction: column; gap: 8px; max-height: 46vh; overflow: auto; }
+.split-row { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; margin: 0; min-width: 0; }
+.split-row.open { border-color: var(--warn, var(--border)); }
+.split-row legend { padding: 0 4px; overflow-wrap: anywhere; }
+.split-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.split-side { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.split-picks { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.split-picks .input { width: 100%; box-sizing: border-box; }
 /* 일하기 전 조사와 회의: 목표 카드의 "조사·회의 먼저" 줄, 조사 노트 카드, 진행자 답 아래의 조사 질문 목록 */
 .goal-prep { gap: 4px; }
 .research-q { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-top: 1px solid var(--border); }

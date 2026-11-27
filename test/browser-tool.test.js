@@ -349,6 +349,47 @@ test('파일 고르기(shots.file): 폴더 밖·이름 꼴·링크·대문자 �
   assert.equal(fresh.shot.sid, 's2');
 });
 
+test('찍은 화면의 주소·제목: 스크린샷 결과에 Page 단락이 없으면 그 에이전트가 바로 앞에 본 페이지 값을 쓴다(진짜 CLI 결과 모양)', () => {
+  const root = fs.mkdtempSync(path.join(t.root, 'page-'));
+  const shots = new BrowserShots({ browser: root });
+  const box = shots.box('s3', 'a3');
+  // 진짜 Playwright MCP: 열기 결과에는 Page 단락이 있고 그림은 없다. 찍기 결과에는 Result 단락과 그림만 있다
+  const nav = { id: 'n1', kind: 'tool', name: `mcp__${BROWSER_KEY}__browser_navigate`, status: 'running', input: { url: 'https://example.com' } };
+  shots.onTool(box, nav);
+  Object.assign(nav, { status: 'done', output: '### Ran Playwright code\n```js\nawait page.goto(\'https://example.com\');\n```\n### Page\n- Page URL: https://example.com/\n- Page Title: Example Domain\n### Snapshot\n- [Snapshot](./page-1.yml)' });
+  assert.equal(shots.onTool(box, nav), false, '그림이 없으니 화면은 안 붙는다');
+  const shot = { id: 'p1', kind: 'tool', name: `mcp__${BROWSER_KEY}__browser_take_screenshot`, status: 'running', input: { type: 'png' } };
+  shots.onTool(box, shot);
+  fs.writeFileSync(path.join(box.dir, 'page-1.png'), PNG);
+  Object.assign(shot, { status: 'done', output: '### Result\n- [Screenshot of viewport](./page-1.png)\n### Ran Playwright code\n```js\nawait page.screenshot({ path: \'./page-1.png\' });\n```' });
+  assert.equal(shots.onTool(box, shot), true);
+  assert.deepEqual([shot.shot.url, shot.shot.title], ['https://example.com/', 'Example Domain']);
+  // 다음 CLI 호출(새 기록 상자)에서도 같은 세션·에이전트면 이어 쓴다. 다른 에이전트의 값은 안 쓴다
+  const box2 = shots.box('s3', 'a3');
+  const again = { id: 'p2', kind: 'tool', name: `mcp:${BROWSER_KEY}.browser_take_screenshot`, status: 'running', input: {} };
+  shots.onTool(box2, again);
+  fs.writeFileSync(path.join(box2.dir, 'page-2.png'), PNG);
+  Object.assign(again, { status: 'done', output: '{"content":[{"type":"text","text":"### Result\n- [Screenshot of viewport](./page-2.png)"}]}' });
+  assert.equal(shots.onTool(box2, again), true);
+  assert.equal(again.shot.url, 'https://example.com/');
+  const other = shots.box('s3', 'b9');
+  const o = { id: 'p3', kind: 'tool', name: `mcp__${BROWSER_KEY}__browser_take_screenshot`, status: 'running', input: {} };
+  shots.onTool(other, o);
+  fs.writeFileSync(path.join(other.dir, 'page-3.png'), PNG);
+  Object.assign(o, { status: 'done', output: '### Result\n- [Screenshot of viewport](./page-3.png)' });
+  assert.equal(shots.onTool(other, o), true);
+  assert.deepEqual([o.shot.url, o.shot.title], ['', ''], '다른 에이전트가 본 페이지는 안 쓴다');
+  // 세션을 지우면 기억한 값도 지운다
+  shots.forget('s3');
+  const box3 = shots.box('s3', 'a3');
+  const late = { id: 'p4', kind: 'tool', name: `mcp__${BROWSER_KEY}__browser_take_screenshot`, status: 'running', input: {} };
+  shots.onTool(box3, late);
+  fs.writeFileSync(path.join(box3.dir, 'page-4.png'), PNG);
+  Object.assign(late, { status: 'done', output: '### Result\n- [Screenshot of viewport](./page-4.png)' });
+  assert.equal(shots.onTool(box3, late), true);
+  assert.equal(late.shot.url, '');
+});
+
 test('상한: 그림이 아닌 파일과 하위 폴더도 세고 지우고, 밖을 가리키는 링크(정션)는 따라가지 않는다', () => {
   const root = fs.mkdtempSync(path.join(t.root, 'cap2-'));
   const outside = fs.mkdtempSync(path.join(t.root, 'outside-'));

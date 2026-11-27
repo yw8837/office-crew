@@ -149,11 +149,13 @@ export class BrowserShots {
   constructor(dirs) {
     this.root = dirs.browser;
     this.used = new Map(); // 세션 → 에이전트 → 이미 화면으로 쓴(또는 지나간) 파일 이름. 세션을 지우면 비운다(forget)
+    this.pages = new Map(); // 세션 → 에이전트 → 그 에이전트의 브라우저 도구 결과가 마지막으로 알려 준 { url, title }. 세션을 지우면 비운다
   }
 
   // 세션을 지울 때(Store.onDelete), 그리고 실행이 끝났는데 세션이 없을 때: 그 세션의 폴더와 기록을 지운다
   forget(sid) {
     this.used.delete(String(sid));
+    this.pages.delete(String(sid));
     try { if (this.root && ID.test(String(sid))) fs.rmSync(path.join(this.root, String(sid)), { recursive: true, force: true }); } catch { /* 브라우저가 잡고 있으면 남는다 */ }
   }
 
@@ -176,6 +178,11 @@ export class BrowserShots {
     if (!box || b?.kind !== 'tool' || !isBrowserTool(b.name)) return false;
     if (b.status === 'running') { if (!box.started.has(b.id)) box.started.set(b.id, Date.now()); return false; }
     if (b.shot) return false;
+    // 진짜 Playwright MCP 의 찍기 결과에는 Page 단락이 없다(열기·누르기 결과에만 있다). 그래서 이 에이전트의 도구 결과가 마지막으로 알려 준 주소·제목을 적어 두고,
+    // 찍은 화면의 결과에 그 값이 없으면 적어 둔 것을 쓴다(화면에 글로만 보여 주는 값이다. 그 사이 페이지가 바뀌었으면 옛 값일 수 있다)
+    const info = pageInfo(b);
+    const seen = this.pages.get(box.sid) || new Map();
+    if (info.url && b.status === 'done') { seen.set(box.agentId, info); this.pages.set(box.sid, seen); }
     const since = (box.started.get(b.id) ?? box.opened) - 2000; // 파일 시각의 거친 단위를 감안
     let names;
     try { names = fs.readdirSync(box.dir); } catch { return false; }
@@ -194,7 +201,7 @@ export class BrowserShots {
     bySid.set(box.agentId, used);
     this.used.set(box.sid, bySid);
     // sid: 그 메시지가 속한 세션(화면이 그림 주소를 만들 때 쓴다)
-    b.shot = { file: fresh[0].n, agentId: box.agentId, sid: box.sid, at: Math.round(fresh[0].t), ...pageInfo(b) };
+    b.shot = { file: fresh[0].n, agentId: box.agentId, sid: box.sid, at: Math.round(fresh[0].t), ...(info.url ? info : seen.get(box.agentId) || info) };
     this.prune(box.sid);
     return true;
   }

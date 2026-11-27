@@ -4,6 +4,17 @@
 - Date: 2026-11-26 (security review the same day: file paths, file writes, permission levels, per-tool allow list)
 - Related: [0001](0001-no-runtime-dependencies.md) (no runtime dependencies), [0017](0017-goal-mode-research-and-meeting-first.md) (read-only goal turns), [0021](0021-no-demo-team.md) (the simulated AI), [0023](0023-prompt-assembly-for-cache-and-fresh-meeting-turns.md) (per-call lines at the front of the prompt), [0024](0024-team-proposal-from-a-document.md) (team drafts), `server/browser.js`, `server/orchestrator.js` (`#runAgent`, `#system`, `#onEvent`), `server/providers/claude.js`, `server/providers/codex.js` (`caps.browser`, `caps.mcpCwd`), `server/index.js` (`cleanAgent`, `PUT /api/settings`, `GET /api/browser/…`), `server/store.js` (`onDelete`), `server/catalog.js` (`importPlugin`), `public/js/views/browser.js`, `test/browser-tool.test.js`, `test/fake-cli/fake-claude.js`, `test/fake-cli/fake-codex.js`
 
+## Revision (2026-11-27): checked once with real CLIs on Windows
+
+Six real calls in a separate data folder (Claude Code with Claude Sonnet 5.5, Codex with GPT-6.1 Sol), one of each with the switch on and the "Allow file edits" permission, asked to open a page and take a screenshot.
+
+- `npx` started from both CLIs as configured, without a `cmd /c` wrapper.
+- Both ran `browser_navigate` and `browser_take_screenshot` without a permission error, and the screenshot landed in the output folder under the name the app picks up (`page-<time>.png`); the tool block got its image.
+- The real result of `browser_take_screenshot` has no "Page" section (only navigation-like tools report the address and title), so the recorded screen had an empty address and title. Fixed: the app keeps the last address and title an agent's browser tools reported in that session and uses them when a screenshot's own result has none. It is still only shown as text, and can be stale if the page changed in between.
+- Codex wrote its files relative to the output folder (its working folder), as intended. Claude's paths were relative to the work folder, as written under "Not checked" below.
+- Download: the `npx` cache grew by about 19 MB in this run. The Playwright browser folder was 715 MB afterwards; its size before the run wasn't measured, so what the first run downloads is still not known.
+- Still not checked: that the deny list and the `filename` rules hold when an agent tries the blocked tools, and other operating systems.
+
 ## Context
 
 People asked for what the Claude desktop app and the Codex app do: the agent works a web page by itself while the user watches next to the chat. The connector page already had a "Playwright browser" preset (`npx -y @playwright/mcp@latest`), but the version floated, nothing allowed the tools (Office Crew runs Claude with `--permission-prompts none`, and in Codex's `exec` mode an MCP approval request is cancelled because nobody can answer it, per the Codex source), screenshots came back as `[image]` or 4,000 characters of JSON, and nothing on screen showed the page.

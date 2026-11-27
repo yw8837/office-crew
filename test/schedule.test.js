@@ -181,7 +181,10 @@ test('같은 세션 모드에서 맡길 대상을 바꾸면 새 세션에서 새
 });
 
 test('PC 시계가 미래로 튀었다 돌아와도 다음 회차는 돈다', async () => {
-  const s = await create({ name: '시계 점프' });
+  // 예약 시각을 지금과 12시간 떨어지게 잡는다. 기본값(09:00)이면 현지 시각 09:00~09:10 에 이 시험을 돌릴 때 "400일 뒤 같은 시각"이
+  // 예정 시각의 여유(10분) 안에 들어와 놓침이 아니라 시작으로 처리된다(검사기에서 그 시각에 한 번 떨어졌다)
+  const far = new Date(Date.now() + 12 * 3600_000);
+  const s = await create({ name: '시계 점프', time: `${String(far.getHours()).padStart(2, '0')}:${String(far.getMinutes()).padStart(2, '0')}` });
   const future = Date.now() + 400 * 86400_000;
   t.app.scheduler.tick(future); // 1년 넘게 앞선 시계에서 한 번(그 시각 회차는 놓침으로 처리)
   assert.equal(get(s.id).lastRun.status, 'missed');

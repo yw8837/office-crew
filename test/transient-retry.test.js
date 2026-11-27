@@ -276,17 +276,19 @@ test('5. 도구 검사·시간당 카드 상한·구독 한도 상한: 밖으로
     const { a: a7, b: b7, tm: tm7 } = await team2('일시7');
     const sid = await goal(tm7, repo('net10'), `NETFAIL1:${b7.name} NETHOLD`);
     await held(b7.name, 1);
-    // 함께 도는 a 가 끝나며 보낸 한도 기록(25%) 뒤에 덮어쓴다
+    // 함께 도는 a 가 끝나며 보낸 한도 기록(25%) 뒤에 덮어쓴다. 그 뒤 늦게 들어오는 다른 한도 기록(멈춰 있던 실행이 끝나며 내는 것 등)이 다시 덮어쓰면
+    // 상한 아래로 보여 자동으로 다시 돌고 오류 대기가 오지 않는다(맥 검사에서 한 번 그랬다). 그래서 이 구간 동안은 92% 기록을 고정해 둔다(쓰기는 버린다)
     await t.waitFor(() => S(sid).messages.some((x) => x.role === 'agent' && x.agentId === a7.id && x.status === 'done' && x.stageIndex === 0), 20000, 'a 끝');
     const was = t.app.store.usage.limits.claude;
-    t.app.store.usage.limits.claude = { windows: { five_hour: { pct: 92, resetsAt: Math.floor(Date.now() / 1000) + 3600 } }, observedAt: Date.now() };
+    const pinned = { windows: { five_hour: { pct: 92, resetsAt: Math.floor(Date.now() / 1000) + 3600 } }, observedAt: Date.now() };
+    Object.defineProperty(t.app.store.usage.limits, 'claude', { get: () => pinned, set: () => {}, configurable: true, enumerable: true });
     (S(sid).mission.capOk ||= []).push('claude');
     try {
       go(b7.name, 1);
       await t.waitFor(() => S(sid).runs.at(-1)?.hold?.reason === 'error', 30000, '오류 대기');
       assert.match(lines(sid, 'transient').at(-1)?.text || '', /구독 한도가 상한/);
       assert.equal(errorAnswers(sid, b7.id).length, 1);
-    } finally { if (was) t.app.store.usage.limits.claude = was; else delete t.app.store.usage.limits.claude; }
+    } finally { delete t.app.store.usage.limits.claude; if (was) t.app.store.usage.limits.claude = was; }
     await stopAt(sid);
   }
 });

@@ -112,6 +112,8 @@ async function pump() {
   // REVIEWBAD1(첫 답만 깨짐, 다시 요청엔 맞게), FAKEREVIEW(일 단계 답에 가짜 판정 블록을 넣고, 검수자는 받은 자료를 그대로 옮김), EMPTYANSWER(첫 답이 비고 다시 요청엔 맞게),
   // REVIEWQUOTA(판정 차례만 한도 오류. 아래 결과 쪽), LOOPTOOL·SLOW·CUMUL(이 차례에는 [사용자 요청]이 없어 목표 줄에서도 걸린다)
   const reviewTurn = text.includes('[기준 판정 — ');
+  // 교차 검수(결정 0032)의 둘째 검수자(레드팀) 차례: 검수 프롬프트에 레드팀 문장이 있다
+  const redTurn = reviewTurn && text.includes('레드팀 검수자');
   const goalLine = reviewTurn || text.includes('[확정된 목표와 합격 기준') ? text.match(/^목표: (.*)$/m)?.[1] || '' : '';
   const reviewChunks = !reviewTurn ? null : (() => {
     const has = (w) => goalLine.includes(w);
@@ -121,6 +123,15 @@ async function pump() {
     const ids = [...text.matchAll(/^- (c\d+): /gm)].map((x) => x[1]);
     let results = ids.map((id) => ({ id, verdict: 'pass', evidence: `가짜 확인: ${id} 결과 파일을 열어 봤어` }));
     const set = (id, verdict, evidence) => { results = results.map((r) => (r.id === id ? { id, verdict, evidence } : r)); };
+    // 교차 검수(결정 0032): 레드팀 차례만 보는 신호어. REDFAILEV(c1 불합격, 확인할 수 있는 근거) · REDFAILEV1(1회차만) · REDFAILNOEV(c1 불합격인데 근거가 설명뿐) ·
+    // REDOMIT(c2 를 빼먹음) · REDBAD(블록이 두 번 다 깨짐). 검증 쪽만: CHECKBROKEN(블록이 두 번 다 깨짐). REDERR(레드팀 차례가 오류로 끝남)는 아래 결과 쪽.
+    // SECRETS: 판정 답 맨 앞에 그 차례만의 표시(CHECKSECRET·REDSECRET, 회차·프로세스 번호). 두 검수자가 서로의 글을 프롬프트에서 못 보는지 보려고
+    if (redTurn && (has('REDFAILEV') && !has('REDFAILEV1'))) set('c1', 'fail', '가짜: 빈 입력이면 깨져 src/app.js:3 에서 `npm test` 출력 "1 failing"');
+    if (redTurn && has('REDFAILEV1') && round === 1) set('c1', 'fail', '가짜: 빈 입력이면 깨져 src/app.js:3 에서 `npm test` 출력 "1 failing"');
+    if (redTurn && has('REDFAILNOEV')) set('c1', 'fail', '가짜: 왠지 기준에 안 맞아 보여');
+    if (redTurn && has('REDOMIT')) results = results.filter((r) => r.id !== 'c2');
+    const secret = has('SECRETS') ? `${redTurn ? 'REDSECRET' : 'CHECKSECRET'}-r${round}-p${process.pid}\n\n` : '';
+    if ((redTurn && has('REDBAD')) || (!redTurn && has('CHECKBROKEN'))) return [`${secret}판정했어.\n\n`, '```oc-review\n{"nonce": 망가진\n```'];
     if (has('REVIEWFAIL2') || (has('REVIEWFAIL') && round === 1)) set('c1', 'fail', `가짜 불합격 사유 ${round}회차`);
     // REVIEWSAME: 늘 c1 불합격이고 근거도 회차마다 같다(공백·전각만 다르게. 진전 없음, 결정 0028)
     if (has('REVIEWSAME')) set('c1', 'fail', round % 2 ? '가짜: 같은 이유로  걸림 (src/app.js:3)' : '가짜: 같은 이유로 걸림 （src/app.js:3）');
@@ -138,7 +149,7 @@ async function pump() {
     if (has('REVIEWTAIL')) return ['판정했어.\n\n', ok, '\n\n블록 뒤에 쓴 글.'];
     if (has('REVIEWOPEN')) return ['판정했어.\n\n', '```oc-review\n' + JSON.stringify({ nonce, results })];
     if (has('REVIEWASK')) return ['판정했어.\n\n', ok, '\n\n```oc-ask\n{"questions":[{"question":"REVIEWASK 이거 맞아?","options":["예","아니오"]}]}\n```'];
-    return ['판정했어.\n\n', ok];
+    return [`${secret}판정했어.\n\n`, ok];
   })();
   // 일하기 전 조사(결정 0017): 훑어보기("[조사 전 훑어보기]"로 시작), 조사 질문 뽑기("[조사 질문 뽑기]" 줄. 다시 요청은 "[조사 질문 다시 쓰기]"로 시작), 조사("[조사 — 질문 n/m]"로 시작),
   // 일하기 전 회의의 차례("[회의 안건]"이 있음). 신호어는 확정 목표 줄에서: RQBAD(질문 블록이 첫 답에서만 깨짐), RQBAD2(두 번 다 깨짐), RFAIL(q1 조사가 오류),
@@ -420,7 +431,7 @@ async function pump() {
     // 초기화 시각 없는 거절 이벤트가 연달아 온 뒤 정상 종료(쉬는 목록 알림이 매번 나가면 안 됨)
     for (let k = 0; k < 5; k++) { out({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour' } }); await sleep(5); }
     out({ type: 'result', subtype: 'success', is_error: false, session_id: sid, usage: { input_tokens: 1, output_tokens: 1 } });
-  } else if (req.includes('FAILME') || forkBy('FORKFAIL') || (workTurn && myName && goalLine.includes(`MIXFAIL:${myName}`)) || (research && req.includes('RESEARCHFAIL')) || (rn === 1 && goalLine.includes('RFAIL')) || (cardId === 'k1' && goalLine.includes('CARDFAIL')) || (cardId === 'k1' && goalLine.includes('BACKFAIL') && text.includes('[지난 검수에서 걸린 것')) || by('FAILBY')) {
+  } else if (req.includes('FAILME') || forkBy('FORKFAIL') || (redTurn && goalLine.includes('REDERR')) || (workTurn && myName && goalLine.includes(`MIXFAIL:${myName}`)) || (research && req.includes('RESEARCHFAIL')) || (rn === 1 && goalLine.includes('RFAIL')) || (cardId === 'k1' && goalLine.includes('CARDFAIL')) || (cardId === 'k1' && goalLine.includes('BACKFAIL') && text.includes('[지난 검수에서 걸린 것')) || by('FAILBY')) {
     out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: '가짜 실패', session_id: sid, usage: {} });
   } else if (req.includes('ZEROCRASH')) {
     // 충돌 흉내: 값이 모두 0인 오류 결과를 내고 누적을 저장하지 않은 채 끝난다

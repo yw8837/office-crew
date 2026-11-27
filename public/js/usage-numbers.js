@@ -40,10 +40,11 @@ const add = (a, u) => {
 // 목표 잡기 · 기준 판정(검수) · 계획 · 조사(훑어보기·조사 질문·조사, 회의 중 조사) · 팀 초안(결정 0024) · 회의(회의 차례 전부와 준비 회의) · 일 카드(끝 두 칸 다시 쓰기 포함) ·
 // 인수인계 메모 · 일 단계(목표의 일 실행 답: 단계표의 단계와 되돌림) · 보통 실행(그 밖).
 // goal: 부르는 쪽이 목표 실행의 답이라는 걸 이미 안다(완주 보고는 그 목표의 실행 기록으로 고른 답만 넘긴다). 목표 표시(missionId)가 없던 옛 답도 일 단계로 센다
-export const ANSWER_KINDS = ['normal', 'goal', 'research', 'meeting', 'plan', 'work', 'cards', 'review', 'team', 'handoff', 'fork', 'lead'];
+// 교차 검수(결정 0032)의 둘째 검수자(레드팀) 답은 검수와 따로 cross
+export const ANSWER_KINDS = ['normal', 'goal', 'research', 'meeting', 'plan', 'work', 'cards', 'review', 'cross', 'team', 'handoff', 'fork', 'lead'];
 export function answerKind(m, { goal = false } = {}) {
   if (m?.goalDraft) return 'goal';
-  if (m?.review) return 'review';
+  if (m?.review) return m.review.role === 'red' ? 'cross' : 'review';
   const pk = m?.prep?.kind;
   if (pk === 'plan') return 'plan';
   if (pk === 'fork') return 'fork'; // 두 갈래의 한 장 요약(결정 0031)

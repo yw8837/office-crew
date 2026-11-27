@@ -972,7 +972,7 @@ function Inspector({ s, agentId }) {
 
 // 이 세션에서 어디에 썼는지(결정 0026): 메시지마다 이미 있는 사용량을 종류별(메시지의 표시로, 완주 보고와 같은 answerKind)·에이전트별로 묶는다(새로 저장하지 않는다).
 // 목표가 있으면 그 목표의 답만(답에 단 목표 표시로) 볼 수 있다. "나눈 값 보기"를 켜면 줄마다 네 값을 보이는 줄로(키보드·화면 낭독기도 읽는다)
-const USE_LABEL = () => ({ normal: t('보통 실행'), goal: t('목표 잡기'), research: t('조사'), meeting: t('회의'), plan: t('계획'), work: t('일 단계'), cards: t('일 카드'), review: t('검수'), team: t('팀 초안'), handoff: t('인수인계 메모'), fork: t('갈래 요약'), lead: t('진행자 답') });
+const USE_LABEL = () => ({ normal: t('보통 실행'), goal: t('목표 잡기'), research: t('조사'), meeting: t('회의'), plan: t('계획'), work: t('일 단계'), cards: t('일 카드'), review: t('검수'), cross: t('교차 검수(레드팀)'), team: t('팀 초안'), handoff: t('인수인계 메모'), fork: t('갈래 요약'), lead: t('진행자 답') });
 function UseBreakdown({ s }) {
   const [mine, setMine] = useState(false);
   const [parts, setParts] = useState(false);

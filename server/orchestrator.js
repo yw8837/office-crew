@@ -29,6 +29,7 @@ import { ladderOf, cardCap, raiseTargets, raisedPrompt } from './mission.js'; //
 import { failKey, pickFails, failuresPrompt, envError, unsafeTools, transientSent } from './mission.js'; // 반복 실패 줄·일시 장애 자동 다시(결정 0030)
 import { FORK_CALLS, FORK_TEXT_MAX, forkMode, forkOptions, forkHash, forkPrompt, forkDecided, meetingRecord } from './mission.js'; // 두 갈래(결정 0031)
 import { LEAD_MAX, SMALL_MEET_MAX, parseLead, parseMeet, leadPrompt, leadRule, leadReply, smallMeetCalls, smallOpinionPrompt, smallConcludePrompt } from './mission.js'; // 진행자에게 질문(결정 0031)
+import { crossPlan, mergeReviews, applyPicks, cleanPicks, CROSS_LOG_MAX, EXTRA_COUNT } from './mission.js'; // 교차 검수(결정 0032)
 import { execFile } from 'node:child_process';
 import { gitState, gitDiffNames, changedSet, proofCheck, PROOF_KINDS, PROOF_TIMEOUT } from './proof.js';
 import { buildReport, reportText, reportLocal } from './report.js';
@@ -386,6 +387,8 @@ export class Orchestrator {
         ...(draft.checks ? { checks: draft.checks } : {}), ...(draft.keep ? { keep: draft.keep } : {}),
         review: reviewCard(team, agents, rpNow),
         reviewerReadOnly: !!rpNow.reviewerId && this.store.get('agents', rpNow.reviewerId)?.permission === 'plan',
+        // 교차 검수 줄(결정 0032): 둘째 검수자(레드팀)와 못 하는 까닭. 기본값은 팀 설정(crossReview)
+        cross: this.#crossCard(team, crossPlan(team, agents, { leadId: lead, reviewerId: rpNow.reviewerId, usable: (a) => this.#usable(a) })),
         prep: prepCard(team, agents, lead, got?.p.raw?.direct === true),
         work: workCard(team, agents),
         // 두 갈래 줄(결정 0031): 기본값은 팀 설정, 갈릴 수 있는 회의가 있는지(진행자·반대편 빼고 참석자 둘 이상), 한 번에 드는 추가 호출
@@ -467,14 +470,22 @@ export class Orchestrator {
     // 조사·회의를 고른 만큼 준비 대목을 맨 앞에 붙인다. 일 카드면 팀 단계 대신 계획 대목과 (계획 뒤에 채울) 일 단계 자리. 에이전트가 없으면 여기서 던진다(목표를 바꾸기 전에)
     const keep = now.droppable.filter((x) => !drop.includes(x));
     const rp = reviewPlan(team, agents, m.leadId, keep);
-    const plan = this.#missionPlan(team, rp, { ...prep, lead: m.leadId }, work === 'cards' ? { lead: m.leadId, cards: null } : null);
+    // 교차 검수(결정 0032): 화면이 켜서 보냈으면 그 둘째 검수자가 지금 팀·로그인으로 다시 고른 사람과 같아야 한다(아니면 409 와 지금 값). 꺼짐·없는 요청(옛 화면)은 한 명 검수
+    const cp = crossPlan(team, agents, { leadId: m.leadId, reviewerId: rp.reviewerId, usable: (a) => this.#usable(a) });
+    let crossOn = false;
+    if (body.cross !== undefined && body.cross !== null) {
+      const x = typeof body.cross === 'object' && !Array.isArray(body.cross) ? body.cross : {};
+      crossOn = x.on === true;
+      if (crossOn && (!cp.secondId || String(x.secondId ?? '') !== cp.secondId)) throw fail(409, tr('교차 검수의 둘째 검수자가 화면에 보이던 것과 달라(또는 지금 팀으로는 교차 검수를 못 해). 지금 값을 다시 보여 줄게.'), { cross: this.#crossCard(team, cp), estimate: estNow() });
+    }
+    const plan = this.#missionPlan(team, rp, { ...prep, lead: m.leadId }, work === 'cards' ? { lead: m.leadId, cards: null } : null, crossOn ? cp.secondId : null);
     const edited = !sameCard(final, draft);
     // 호출 어림(결정 0019): 확인 시점에 고른 값으로(카드가 보여 준 것과 같은 함수). 끝난 뒤 실제 호출 수 옆에 보인다
     const spentCalls = Number.isFinite(m.calls?.used) ? m.calls.used : 0;
     // 두 갈래(결정 0031): 화면이 고른 값(없으면 팀 설정). 어림에는 화면이 보낸 값만 넣는다(보내지 않는 옛 화면의 어림과 같게)
     const forkSent = body.fork !== undefined && body.fork !== null;
     const fork = forkMode(forkSent ? body.fork : team?.fork);
-    const estimate = estimateCalls(team, agents, { work, prep, keep, lead: m.leadId, spent: spentCalls, cap: Number.isFinite(m.calls?.cap) ? m.calls.cap : MISSION_CALL_CAP, ...(forkSent ? { fork } : {}) });
+    const estimate = estimateCalls(team, agents, { work, prep, keep, lead: m.leadId, spent: spentCalls, cap: Number.isFinite(m.calls?.cap) ? m.calls.cap : MISSION_CALL_CAP, ...(forkSent ? { fork } : {}), cross: crossOn });
     // 화면이 보여 주던 어림(estimate: { min, max })이 지금 팀으로 다시 센 값과 다르면 409 와 지금 조각(위의 대조에 안 걸리는 팀 변경: 단계에 사람이 늘거나 회의 바퀴 수가 바뀜 등).
     // estimate 가 없는 요청(옛 화면)은 그대로 통과한다
     if (body.estimate !== undefined && body.estimate !== null) {
@@ -500,12 +511,16 @@ export class Orchestrator {
       estimate, quota: { autos: 0 },
       // 두 갈래(결정 0031): 이 목표의 값(묻고 시작 ask · 바로 auto · 끔 off), 고른 기록, 묻던 자리
       forkMode: fork, forks: [], forkAt: undefined,
+      // 교차 검수(결정 0032): 켰을 때만 둘째 검수자. 끈 목표에는 칸 자체를 두지 않는다(지금과 같은 모양)
+      ...(crossOn ? { cross: { on: true, secondId: cp.secondId } } : {}),
     });
-    Object.assign(card, { status: 'confirmed', confirmed: { ...final }, edited, prepChosen: { research: prep.research, meeting: prep.meeting }, ...(body.work !== undefined ? { workChosen: work } : {}), ...(forkSent ? { forkChosen: fork } : {}), resolvedAt: Date.now() });
+    Object.assign(card, { status: 'confirmed', confirmed: { ...final }, edited, prepChosen: { research: prep.research, meeting: prep.meeting }, ...(body.work !== undefined ? { workChosen: work } : {}), ...(forkSent ? { forkChosen: fork } : {}),
+      ...(body.cross !== undefined && body.cross !== null ? { crossChosen: crossOn } : {}), resolvedAt: Date.now() });
     if (forkSent && fork !== forkMode(team?.fork)) userLine(m, 'confirm', tr('회의가 두 안으로 갈리면: {mode}', { mode: { ask: tr('묻고 요약 받기'), auto: tr('바로 요약 받기'), off: tr('두 갈래 안 함') }[fork] }), card.id);
     userLine(m, 'confirm', edited ? tr('사용자가 고쳐서 확인했어(기준 {n}개).', { n: final.criteria.length }) : tr('사용자가 목표를 확인했어(기준 {n}개).', { n: final.criteria.length }), card.id);
     logLine(m, 'confirm', rp.reviewerId ? tr('검수: {name}이(가) 기준마다 판정해.', { name: this.store.get('agents', rp.reviewerId)?.name || rp.reviewerId }) : tr('검수할 다른 팀원이 없어서 판정 없이 끝나고 네게 물어.'));
     if (m.dropped.length) userLine(m, 'confirm', tr('기준 판정으로 대신해서 건너뛰는 단계: {labels}', { labels: m.dropped.join(', ') }));
+    if (crossOn) userLine(m, 'confirm', tr('교차 검수: {name}이(가) 레드팀으로 따로 판정해. 두 검수자 모두 그 실행만 읽기 전용이야.', { name: this.store.get('agents', cp.secondId)?.name || cp.secondId }));
     // 조사·회의를 고르는 화면에서 온 확인만 한 줄(옛 화면의 확인은 예전 기록 그대로)
     if (body.prep !== undefined && body.prep !== null) userLine(m, 'confirm', prep.research && prep.meeting ? tr('일하기 전에 조사하고 회의해.') : prep.research ? tr('일하기 전에 조사해(회의는 안 해).') : prep.meeting ? tr('일하기 전에 회의해(조사는 안 해).') : tr('조사·회의 없이 바로 일해.'));
     // 일하는 방식을 고르는 화면에서 온 확인만 한 줄(옛 화면의 확인은 예전 기록 그대로)
@@ -584,7 +599,7 @@ export class Orchestrator {
       if (gone) throw changed(tr('카드 {id}의 담당({name})이 팀에 없어', { id: gone.id, name: name(gone.ownerId) }));
     }
     let plan;
-    try { plan = this.#missionPlan(team, rp, m.prep ? { ...m.prep, lead: m.leadId } : null, m.work === 'cards' ? { lead: m.leadId, cards: m.cards || null } : null); } catch { throw changed(tr('팀에 돌 수 있는 단계가 없어')); }
+    try { plan = this.#missionPlan(team, rp, m.prep ? { ...m.prep, lead: m.leadId } : null, m.work === 'cards' ? { lead: m.leadId, cards: m.cards || null } : null, m.cross?.secondId || null); } catch { throw changed(tr('팀에 돌 수 있는 단계가 없어')); }
     const cutRun = s.runs.findLast((r) => r.mission === 'work' && r.missionId === m.id);
     if (!cutRun) throw fail(409, tr('끊긴 실행 기록을 찾지 못해서 이어 갈 수 없어. 버리고 요청을 다시 보내 줘.'));
     const diff = stageDiff(plan.stages, cutRun.stages);
@@ -746,6 +761,7 @@ export class Orchestrator {
       }
       const left = (m.notes || []).filter((n) => !n.used).length;
       if (left) logLine(m, 'note', tr('반영하지 못한 추가 지시가 {n}개 있어.', { n: left }));
+      delete m.split; // 판정 카드에서 그만을 골랐으면 그 카드 값은 더 쓰지 않는다(결정 0032)
       // 일 카드(결정 0018): 목표가 끝났는데 하는 중·기다림으로 남은 카드는 건너뜀으로(그만·받아들이기 뒤에 칩이 남지 않게)
       const open = (m.cards || []).filter((c) => c.status === 'running' || c.status === 'waiting');
       for (const c of open) c.status = 'skipped';
@@ -928,7 +944,8 @@ export class Orchestrator {
   // prep({ research, meeting, lead }, 결정 0017): 고른 준비 대목을 맨 앞에 붙인다(훑어보기 → 조사 질문 → 조사 → 회의). 할 수 없게 된 대목은 붙이지 않는다(이어서 할 때 단계표 대조가 잡는다).
   // → { teamId, stages, prep: 맨 앞 준비 대목 수 }
   // cards({ lead, cards }, 결정 0018): 일 카드로 나눠 하기. 팀 단계 대신 계획 대목(진행자)과, 계획한 카드가 있으면 그 단계(물결)들, 없으면 계획 뒤에 채울 빈 일 단계 하나
-  #missionPlan(team, rp, prep = null, cards = null) {
+  // crossId(결정 0032): 교차 검수의 둘째 검수자. 기준 판정 단계의 담당 둘째 자리(이어서 할 때 단계표 대조가 둘째도 본다). 지워진 에이전트면 넣지 않는다
+  #missionPlan(team, rp, prep = null, cards = null, crossId = null) {
     const agents = (ids) => ids.filter((id) => this.store.get('agents', id));
     const stages = cards ? [{ label: tr('계획'), agentIds: [String(cards.lead)], approve: false, instruction: '', meeting: null, mission: 'plan' },
       ...(cards.cards?.length ? waveStages(cards.cards) : [{ label: tr('일'), agentIds: [], approve: false, instruction: '', meeting: null, mission: 'cards', cardIds: [] }])]
@@ -936,7 +953,7 @@ export class Orchestrator {
         .filter((st) => st.agentIds.length && !rp.dropped.includes(st.index))
         .map(({ index, ...st }) => ({ ...st, meeting: normMeeting(st.meeting, st.agentIds) }));
     if (!stages.length) throw Object.assign(new Error(tr('에이전트가 하나도 없어. 에이전트를 먼저 만들어줘.')), { status: 400 });
-    if (rp.reviewerId) stages.push({ label: tr('기준 판정'), agentIds: [rp.reviewerId], approve: false, instruction: '', meeting: null, mission: 'review' });
+    if (rp.reviewerId) stages.push({ label: tr('기준 판정'), agentIds: crossId && this.store.get('agents', crossId) ? [rp.reviewerId, String(crossId)] : [rp.reviewerId], approve: false, instruction: '', meeting: null, mission: 'review' });
     const pre = [];
     if (prep?.research || prep?.meeting) {
       const pp = prepPlan(team, this.store.all('agents'), prep.lead);
@@ -1232,7 +1249,9 @@ export class Orchestrator {
     // done 은 기준이 전부 통과이고 열린 질문이 없고 바뀌면 안 되는 것을 어긴 게 없을 때만
     const close = () => { ctx.missionEnd = allPass(m) && !ctx.asks.size && !m.keepBroken?.length ? 'done' : 'accepted'; };
     let resumeBack = !!from && from.phase === 'work' && from.back;
-    let skipCheck = from?.wait?.reason === 'mission' && from.phase === 'review';
+    // 교차 검수의 판정 카드에서 끊겼으면(결정 0032) 검수를 다시 하지 않고 저장해 둔 카드(mission.split)를 호출 없이 다시 띄운다. 카드 값이 없는 자리면 검수부터 다시
+    let splitAgain = from?.wait?.reason === 'mission' && from.wait.kind === 'split' && from.phase === 'review' && !!m.split && rv >= 0;
+    let skipCheck = from?.wait?.reason === 'mission' && from.phase === 'review' && (from.wait.kind !== 'split' || splitAgain);
     // 이어서: 기준 판정의 한도 대기에서 끊겼으면 판정 전에 호출 없이 같은 질문부터(결정 0019)
     let reviewQuota = from?.phase === 'review' && from.wait?.reason === 'quota' && rv >= 0 ? from.wait : null;
     while (!ctx.stopped) {
@@ -1265,6 +1284,11 @@ export class Orchestrator {
           if (rv >= 0) await this.#reviewStage(ctx, rv);
           else this.#noReviewer(ctx);
           if (ctx.quotaAccept) { ctx.quotaAccept = false; close(); break; } // 판정의 한도 대기에서 받아들이기(결정 0019)
+        } else if (splitAgain) {
+          splitAgain = false;
+          const d = m.split;
+          if (!(await this.#splitAsk(ctx, rv, d))) { run.stages[rv].status = 'stopped'; break; }
+          this.#reviewApply(ctx, rv, d);
         }
         skipCheck = false;
         if (ctx.stopped) break;
@@ -2691,6 +2715,8 @@ export class Orchestrator {
 
   // 기준 판정 단계: 검수자를 한 번 실행으로 돌린다(대화 번호를 읽지도 저장하지도 않고, 질문 창은 끈다). 판정 블록은 일회용 값과 맞아야 받는다.
   // 형식이 깨졌으면 새 일회용 값으로 한 번 다시(새 메시지). 그래도 안 되면 판정 없음(기준은 모두 확인 못 함). 오류·건너뛰기도 판정 없음, 중지면 그대로 멈춘다
+  // 교차 검수(결정 0032): 단계의 둘째 담당이 레드팀 검수자. 둘이 서로의 글을 보지 않고(같은 자료로 따로 만든 프롬프트, 각자 새 대화, 둘 다 그 실행만 읽기 전용) 동시에 판정하고,
+  // 코드가 기준마다 합친다(mergeReviews). 엇갈린 기준이 있으면 판정 카드로 묻는다(#splitAsk). 둘째를 이번 회차에 못 쓰면(#crossOk) 한 명 검수로 가고 진행 기록에 까닭 한 줄
   async #reviewStage(ctx, i) {
     const { s, run } = ctx;
     const m = ctx.mission;
@@ -2703,14 +2729,13 @@ export class Orchestrator {
     }
     if (!(await this.#capCheck(ctx, i, 1, 'review'))) return;
     if (!(await this.#limitCheck(ctx, i, [rid], { phase: 'review' }))) return; // 구독 한도 상한(결정 0026)
-    m.phase = 'review';
     const round = (m.round || 0) + 1; // 끊긴 검수를 이어서 하면 그 회차를 다시 센다(round 는 끝난 검수만 센 값)
+    const rid2 = st.agentIds[1] ? await this.#crossOk(ctx, i, String(st.agentIds[1]), String(rid), round) : null;
+    m.phase = 'review';
     st.status = 'running';
     this.#emitRun(ctx);
     this.emitMission(s);
     this.#missionAt(ctx, { stageIndex: i, phase: 'review' }); // 검수자는 CLI 를 띄울 때 working 에 들어간다(이어서 할 때는 새 대화로 바꿀 것이 없다)
-    let base = this.store.get('agents', rid);
-    if (base && s.agentOverride && typeof s.agentOverride === 'object') base = { ...base, ...s.agentOverride };
     // 남은 일 단계마다 가장 최근 답(되돌린 단계는 다시 한 답만. 앞 답은 outputs 에서 덮였다).
     // 되돌린 단계 뒤에 있고 다시 돌지 않은 단계의 답은 되돌림 전 결과를 보고 쓴 낡은 답이라 넣지 않고, 그렇다고만 적는다.
     // 일하기 전 조사·회의(결정 0017)는 넣지 않는다(검수는 결과물과 기준만)
@@ -2737,55 +2762,166 @@ export class Orchestrator {
     // 작업 폴더가 git 저장소면 바뀐 파일 목록(최대 50줄)을 검수 자료에 넣는다(결정 0015 개정). git 이 없거나 실패하면 조용히 뺀다
     const changed = await this.#gitChanged(this.cwdOf(s));
     if (changed?.tests.length) logLine(m, 'git', tr('테스트로 보이는 파일이 바뀌었어: {files}', { files: changed.tests.slice(0, 5).join(', ') + (changed.tests.length > 5 ? ` …(+${changed.tests.length - 5})` : '') }));
-    const prevFail = new Set(m.round > 0 ? m.criteria.filter((c) => c.status === 'fail').map((c) => c.id) : []);
-    const prevCrit = m.round > 0 ? m.criteria.map((c) => ({ id: c.id, status: c.status, evidence: c.evidence || '' })) : []; // 진전 없음(결정 0028)을 볼 앞 회차의 판정
-    let got = null;
-    let extra = { extras: [], broken: [] };
-    let last = null;
-    let why = '';
-    let quotaHit = null; // 검수자가 사용량 한도에 걸렸고 이어받을 AI 도 없었다(결정 0019)
-    for (let n = 0; n < 2 && !ctx.stopped; n++) {
-      const nonce = randomBytes(8).toString('hex');
-      const prompt = reviewPrompt({ goal: m.goal, criteria: m.criteria.map((c) => ({ id: c.id, text: c.text, ...(c.check ? { check: c.check } : {}) })), outOfScope: m.outOfScope || [], keep: m.mustKeep || [], cwd: this.cwdOf(s), round, works, readOnly: base?.permission === 'plan', nonce, retry: n > 0, changed, decided: m.decided || [] });
-      const mark = s.messages.length;
-      ctx.onceAgents.add(rid); // 그사이 이 에이전트를 골라 보낸 지시는 검수에 넣지 않고 목표의 추가 지시로 받는다(control steer)
-      const r = await this.#runAgent(ctx, i, rid, null, { once: { prompt, phase: 'review', round, retried: n > 0 } })
-        .catch((e) => ({ agent: base, error: tr('내부 오류: {msg}', { msg: e.message }) }))
-        .finally(() => ctx.onceAgents.delete(rid));
-      ctx.outputs[i] = [r];
-      const msg = s.messages.slice(mark).find((x) => x.role === 'agent' && x.runId === run.id && x.stageIndex === i && x.agentId === rid);
-      if (msg) last = msg;
-      const mark2 = (fields) => { if (!msg) return; msg.review = { round, ...fields, ...(n ? { retried: true } : {}) }; this.bus.emit('message', { sessionId: s.id, message: msg }); this.store.saveSession(s, 100); };
-      if (ctx.stopped) { mark2({ results: [], missing: true }); break; }
-      if (r.error || r.stopped) {
-        why = r.skipped || r.stopped ? 'skipped' : isQuotaError(r.error || '') ? 'outside' : 'error';
-        if (why === 'outside') quotaHit = { agent: r.agent || base, error: r.error };
-        mark2({ results: [], missing: true, ...(why === 'outside' ? { quota: true } : {}) }); // 한도로 중단된 판정 답(같은 회차를 다시 하면 화면이 회차를 겹쳐 보이지 않게 표시)
-        break;
+    // 검수자 한 명의 판정(형식이 깨지면 새 일회용 값으로 한 번 다시). role: ''(한 명 검수: 지금 그대로) | 'check'(교차 검수의 검증) | 'red'(레드팀).
+    // 교차 검수의 두 검수자는 그 실행만 읽기 전용으로 돈다(저장된 권한은 그대로). 두 사람의 프롬프트는 같은 자료로 따로 만들어서 서로의 답이 들어갈 길이 없다.
+    // → { agentId, p(받은 판정: parseReview 결과) | null, last(마지막 판정 답), why(마지막 실패 까닭), quotaHit, r }
+    const side = async (agentId, role) => {
+      let base = this.store.get('agents', agentId);
+      if (base && s.agentOverride && typeof s.agentOverride === 'object') base = { ...base, ...s.agentOverride };
+      let p0 = null;
+      let last = null;
+      let why = '';
+      let quotaHit = null; // 검수자가 사용량 한도에 걸렸고 이어받을 AI 도 없었다(결정 0019)
+      let r = null;
+      for (let n = 0; n < 2 && !ctx.stopped; n++) {
+        const nonce = randomBytes(8).toString('hex');
+        const prompt = reviewPrompt({ goal: m.goal, criteria: m.criteria.map((c) => ({ id: c.id, text: c.text, ...(c.check ? { check: c.check } : {}) })), outOfScope: m.outOfScope || [], keep: m.mustKeep || [], cwd: this.cwdOf(s), round, works, readOnly: !!role || base?.permission === 'plan', nonce, retry: n > 0, changed, decided: m.decided || [], role: role === 'red' ? 'red' : '' });
+        const mark = s.messages.length;
+        ctx.onceAgents.add(agentId); // 그사이 이 에이전트를 골라 보낸 지시는 검수에 넣지 않고 목표의 추가 지시로 받는다(control steer)
+        r = await this.#runAgent(ctx, i, agentId, null, { once: { prompt, phase: 'review', round, retried: n > 0, ...(role ? { role, readOnly: true } : {}) } })
+          .catch((e) => ({ agent: base, error: tr('내부 오류: {msg}', { msg: e.message }) }))
+          .finally(() => ctx.onceAgents.delete(agentId));
+        const msg = s.messages.slice(mark).find((x) => x.role === 'agent' && x.runId === run.id && x.stageIndex === i && x.agentId === agentId);
+        if (msg) last = msg;
+        const mark2 = (fields) => { if (!msg) return; msg.review = { round, ...(role ? { role } : {}), ...fields, ...(n ? { retried: true } : {}) }; this.bus.emit('message', { sessionId: s.id, message: msg }); this.store.saveSession(s, 100); };
+        if (ctx.stopped) { mark2({ results: [], missing: true }); break; }
+        if (r.error || r.stopped) {
+          why = r.skipped || r.stopped ? 'skipped' : isQuotaError(r.error || '') ? 'outside' : 'error';
+          if (why === 'outside') quotaHit = { agent: r.agent || base, error: r.error };
+          mark2({ results: [], missing: true, ...(why === 'outside' ? { quota: true } : {}) }); // 한도로 중단된 판정 답(같은 회차를 다시 하면 화면이 회차를 겹쳐 보이지 않게 표시)
+          break;
+        }
+        const p = msg ? parseReview(msg.text, { nonce, ids }) : { error: 'none' };
+        if (!p.error) {
+          p0 = p;
+          msg.reviewBlock = { from: p.from, to: p.to }; // 화면이 그 자리를 감추고 기준표로 보여 준다
+          mark2({ results: p.results.map((x) => ({ ...x, text: textOf.get(x.id) || '' })), missing: false, ...(p.extras?.length ? { extras: p.extras } : {}), ...(p.broken?.length ? { keepBroken: p.broken } : {}) });
+          break;
+        }
+        if (msg) this.#notice(s, msg, n === 0 ? tr('답 끝에서 판정 블록(oc-review)을 받지 못해서 새 일회용 값으로 한 번 다시 요청했어.') : tr('다시 요청했는데도 판정 블록을 받지 못했어. 이번 검수는 판정 없이 끝나.'));
+        mark2({ results: [], missing: true });
+        why = 'format';
       }
-      const p = msg ? parseReview(msg.text, { nonce, ids }) : { error: 'none' };
-      if (!p.error) {
-        got = p.results;
-        extra = { extras: p.extras || [], broken: p.broken || [] };
-        msg.reviewBlock = { from: p.from, to: p.to }; // 화면이 그 자리를 감추고 기준표로 보여 준다
-        mark2({ results: got.map((x) => ({ ...x, text: textOf.get(x.id) || '' })), missing: false, ...(extra.extras.length ? { extras: extra.extras } : {}), ...(extra.broken.length ? { keepBroken: extra.broken } : {}) });
-        break;
-      }
-      if (msg) this.#notice(s, msg, n === 0 ? tr('답 끝에서 판정 블록(oc-review)을 받지 못해서 새 일회용 값으로 한 번 다시 요청했어.') : tr('다시 요청했는데도 판정 블록을 받지 못했어. 이번 검수는 판정 없이 끝나.'));
-      mark2({ results: [], missing: true });
-      why = 'format';
+      return { agentId: String(agentId), p: p0, last, why, quotaHit, r };
+    };
+    let d;
+    if (!rid2) {
+      const A = await side(rid, '');
+      ctx.outputs[i] = [A.r];
+      // 교차 검수를 켰는데 이번 회차는 둘째를 못 썼다(#crossOk 가 까닭을 적었다): 회차 기록에만 한 명 검수로
+      d = { round, got: A.p?.results || null, extras: A.p?.extras || [], broken: A.p?.broken || [], why: A.why, lastId: A.last?.id || null, quotaHit: A.quotaHit, ...(st.agentIds[1] ? { cross: { a: String(rid), b: null, single: true } } : {}) };
+    } else {
+      const [A, B] = await Promise.all([side(rid, 'check'), side(rid2, 'red')]);
+      ctx.outputs[i] = [A.r, B.r];
+      d = this.#crossMerge(ctx, round, A, B);
     }
     if (ctx.stopped) { st.status = 'stopped'; return; }
-    // 한도 대기(결정 0019): 판정 없이 넘어가지 않고 묻는다. 다시 하면(지금 다시·초기화 뒤 자동) 같은 회차의 판정을 처음부터 다시 한다.
+    // 한도 대기(결정 0019): 판정 없이 넘어가지 않고 묻는다. 다시 하면(지금 다시·초기화 뒤 자동) 같은 회차의 판정을 처음부터 다시 한다(교차 검수면 두 검수자 모두).
     // 받아들이기는 예전 "판정 없음" 뒤의 받아들이기와 같다: 이번 검수를 판정 없이 적고(아래) 목표를 받아들임으로 끝낸다(#missionRun 이 ctx.quotaAccept 를 본다)
-    if (quotaHit) {
+    if (d.quotaHit) {
       st.status = 'error';
       this.#emitRun(ctx);
-      const q = await this.#quotaAsk(ctx, i, { phase: 'review', failed: [quotaHit] });
+      const q = await this.#quotaAsk(ctx, i, { phase: 'review', failed: [d.quotaHit] });
       if (q === 'stop') { st.status = 'stopped'; return; }
       if (q === 'retry') return this.#reviewStage(ctx, i);
       ctx.quotaAccept = true;
     }
+    // 교차 검수에서 엇갈린 기준이 있으면 판정 카드로 묻고(호출 없음), 고른 것을 합친 판정에 적는다
+    if (d.cross?.splits?.length && !(await this.#splitAsk(ctx, i, d))) { st.status = 'stopped'; return; }
+    this.#reviewApply(ctx, i, d);
+  }
+
+  // 교차 검수의 두 판정을 합친다(결정 0032, 코드가 한다). 한쪽만 판정이 오면 그쪽 판정 + 한 명만 봄(못 받은 쪽의 까닭은 진행 기록 한 줄, 실패 종류는 판정이 없을 때의 그것),
+  // 둘 다 못 오면 지금의 검수 실패 처리 그대로(검증 검수자의 까닭. 한도면 한도 대기). → #reviewApply 가 받는 값 d
+  #crossMerge(ctx, round, A, B) {
+    const m = ctx.mission;
+    const ids = m.criteria.map((c) => c.id);
+    const name = (id) => this.store.get('agents', id)?.name || id;
+    const count = (p) => { const n = { pass: 0, fail: 0, unknown: 0 }; for (const r of p.results) n[r.verdict] = (n[r.verdict] || 0) + 1; return n; };
+    const lastId = A.last?.id || B.last?.id || null;
+    const cross = { a: A.agentId, b: B.agentId, counts: { a: A.p ? count(A.p) : null, b: B.p ? count(B.p) : null } };
+    if (!A.p && !B.p) return { round, got: null, extras: [], broken: [], why: A.why, lastId, quotaHit: A.quotaHit, cross: { ...cross, none: true } };
+    const FAIL = { format: 'hole', error: 'unknown', outside: 'outside' };
+    const WHY = { format: tr('판정 블록을 받지 못했어'), error: tr('검수가 오류로 끝났어'), skipped: tr('검수자를 건너뛰었어'), outside: tr('사용량 한도에 걸렸어') };
+    for (const [x, y] of [[A, B], [B, A]]) {
+      if (x.p) continue;
+      const line = logLine(m, 'cross', tr('교차 검수 {n}회차: {name} — {why}. {other}의 판정만 썼어(한 명만 봄).', { n: round, name: name(x.agentId), why: WHY[x.why] || WHY.error, other: name(y.agentId) }), (x.last || y.last)?.id || null);
+      if (FAIL[x.why]) line.fail = FAIL[x.why];
+    }
+    const items = mergeReviews(ids, A.p, B.p);
+    const both = (k) => [...new Set([...(A.p?.[k] || []), ...(B.p?.[k] || [])])].slice(0, EXTRA_COUNT);
+    return {
+      round, got: null, extras: both('extras'), broken: both('broken'), why: A.p ? A.why : '', lastId, quotaHit: null,
+      cross: { ...cross, items, splits: items.filter((x) => x.split).map((x) => x.id), one: items.filter((x) => x.one).map((x) => x.id) },
+    };
+  }
+
+  // 교차 검수의 판정 카드(결정 0032): 엇갈린 기준마다 두 검수자의 판정과 근거(에이전트가 쓴 글)를 나란히 보이고, 사용자가 고치기·접기·보류와 한 줄 사유(선택)를 고른다.
+  // 카드 값은 mission.split 에 두고 끊긴 자리를 이 카드로 적는다(끊겼다 이어서 하면 호출 없이 같은 카드). 대기는 판정 뒤 묻기(mission)의 한 종류(kind 'split'): 사이드바·알림은 목표 판정.
+  // 받는 제어는 judge(그 회차, 엇갈린 기준을 다 정한 값)와 stop 뿐. 고른 것은 d.cross.items 에 적는다. → 계속하면 true, 그만·앱 끄기면 false
+  async #splitAsk(ctx, i, d) {
+    const m = ctx.mission;
+    const x = d.cross;
+    const ids = x.items.filter((y) => y.split).map((y) => y.id);
+    m.split = JSON.parse(JSON.stringify({ ...d, quotaHit: null }));
+    m.status = 'waiting';
+    logLine(m, 'ask', tr('교차 검수 {n}회차에서 두 검수자의 판정이 엇갈린 기준 {k}개({ids})를 판정 카드로 물어봤어.', { n: d.round, k: ids.length, ids: ids.join(', ') }), d.lastId);
+    this.emitMission(ctx.s);
+    this.#missionAt(ctx, { stageIndex: i, phase: 'review', wait: { reason: 'mission', kind: 'split' } });
+    const name = (id) => this.store.get('agents', id)?.name || id;
+    const textOf = new Map(m.criteria.map((c) => [c.id, c.text]));
+    const res = await this.#hold(ctx, 'waiting', { reason: 'mission', kind: 'split', stageIndex: i, round: d.round, names: { a: name(x.a), b: name(x.b) },
+      items: x.items.map((y) => ({ id: y.id, text: textOf.get(y.id) || '', verdict: y.verdict, ...(y.split ? { split: true } : {}), ...(y.one ? { one: y.one } : {}), a: y.a, b: y.b })) });
+    if (ctx.stopped || res?.action !== 'judge') { ctx.stopped = true; return false; }
+    x.items = applyPicks(x.items, res.picks);
+    x.picks = res.picks;
+    m.status = 'active';
+    const word = { fix: tr('불합격으로 고치기'), fold: tr('합격으로 접기'), hold: tr('보류') };
+    userLine(m, 'answer', tr('판정 카드에서 정했어: {list}', { list: ids.map((id) => `${id} ${word[res.picks[id].pick]}${res.picks[id].note ? ` — ${tr('사유: {note}', { note: res.picks[id].note })}` : ''}`).join(' · ') }), d.lastId);
+    this.emitMission(ctx.s);
+    return true;
+  }
+
+  // 목표 카드의 교차 검수 줄(결정 0032): 할 수 있는지, 기본 켜짐(팀 설정 crossReview), 둘째 검수자와 그 AI(이름·AI 는 카드를 만들 때의 값), 첫째와 같은 회사 AI 인지, 못 하는 까닭
+  #crossCard(team, cp) {
+    const a = cp.secondId ? this.store.get('agents', cp.secondId) : null;
+    return { can: !!cp.secondId, on: !!cp.secondId && team?.crossReview === true, secondId: cp.secondId || null, secondName: a?.name || '', ai: a ? (a.routing === 'auto' ? tr('자동 라우팅') : aiText(aiOf(a))) : '', sameAi: !!cp.sameAi, why: cp.why };
+  }
+
+  // 교차 검수의 둘째 검수자를 이번 회차에 쓸 수 있는가(결정 0032). 못 쓰면 묻지 않고 한 명 검수로 가고 진행 기록에 까닭 한 줄(null):
+  // 팀에 없거나 첫째와 같은 사람, AI 가 로그인돼 있지 않음, 호출 상한까지 남은 호출이 둘째 몫(1)까지는 없음, 둘째가 돌 AI(#capTarget)의 한도가 이미 다 찼거나 구독 한도 상한을 넘음
+  // (이 목표에서 "계속"을 고른 AI 는 묻지 않은 것처럼 그대로). 첫째의 호출 상한·구독 한도 상한은 지금처럼 그 앞에서 묻는다
+  async #crossOk(ctx, i, id, rid, round) {
+    const m = ctx.mission;
+    const a = this.store.get('agents', id);
+    const name = a?.name || id;
+    const team = this.store.get('teams', ctx.s.teamId);
+    const no = (why) => { logLine(m, 'cross', tr('교차 검수 {n}회차: {why} 그래서 이번 회차는 한 명이 검수해.', { n: round, why })); this.emitMission(ctx.s); return null; };
+    if (!a || id === rid || !(team?.stages || []).some((st) => (st.agentIds || []).map(String).includes(id))) return no(tr('둘째 검수자({name})가 팀에 없어.', { name }));
+    if (!this.#usable(a)) return no(tr('둘째 검수자({name})의 AI가 로그인돼 있지 않아.', { name }));
+    const c = m.calls;
+    if (c && c.cap - c.used < 2) return no(tr('호출 상한까지 남은 호출이 {left}번뿐이라 둘째 검수 몫이 없어(상한 {cap}번).', { left: Math.max(0, c.cap - c.used), cap: c.cap }));
+    const pv = await this.#capTarget(ctx, i, id, 'review');
+    const ai = PROVIDERS[pv]?.label || pv;
+    if (pv && this.#capFull(pv)) return no(tr('둘째 검수자({name})의 AI({ai}) 한도가 이미 다 찼어.', { name, ai }));
+    const cap = Number(this.store.settings.limitCap);
+    if (cap > 0 && this.#capOver(pv, cap, new Set(m.capOk || []))) return no(tr('둘째 검수자({name})의 AI({ai})가 구독 한도 상한 {cap}%를 넘었어.', { name, ai, cap }));
+    return id;
+  }
+
+  // 검수 한 회차의 결과를 목표에 적는다(한 명 검수·교차 검수·판정 카드 뒤·끊겼다 이어서 다시 띄운 카드 뒤 모두). d: { round, got, extras, broken, why, lastId, cross? }
+  #reviewApply(ctx, i, d) {
+    const { s, run } = ctx;
+    const m = ctx.mission;
+    const st = run.stages[i];
+    const round = d.round;
+    const extra = { extras: d.extras || [], broken: d.broken || [] };
+    const why = d.why;
+    const last = d.lastId ? { id: d.lastId } : null;
+    // 교차 검수는 합친 판정(판정 카드에서 고른 것까지)을 기준마다(한 명만 봄·사용자가 정한 것 표시와 함께)
+    const got = d.cross?.items ? d.cross.items.map(({ id, verdict, evidence, one: o, user }) => ({ id, verdict, evidence, ...(o ? { one: o } : {}), ...(user ? { user } : {}) })) : d.got;
+    const prevFail = new Set(m.round > 0 ? m.criteria.filter((c) => c.status === 'fail').map((c) => c.id) : []);
+    const prevCrit = m.round > 0 ? m.criteria.map((c) => ({ id: c.id, status: c.status, evidence: c.evidence || '' })) : []; // 진전 없음(결정 0028)을 볼 앞 회차의 판정
     m.round = round;
     const t = applyReview(m, got || []);
     // 남은 일(기준 밖에서 본 문제, 막지 않는다)과 바뀌면 안 되는 것을 어긴 것(묻는다)은 이번 회차 값으로. 같은 기준이 두 회차 연속 불합격이면 다음 되돌림에 "가정 적기"
@@ -2797,6 +2933,8 @@ export class Orchestrator {
     st.status = got || why === 'format' ? 'done' : why === 'skipped' ? 'skipped' : 'error';
     if (!got) st.note = tr('판정 없음');
     else delete st.note;
+    if (d.cross) this.#crossRecord(ctx, d, t);
+    delete m.split; // 판정 카드 값은 반영한 뒤 지운다(끊겼다 이어서 다시 띄울 일이 없다)
     const words = { n: round, total: t.total, pass: t.pass, fail: t.fail, unknown: t.unknown };
     const line = logLine(m, 'review', got ? tr('검수 {n}회차: 기준 {total}개 중 통과 {pass} · 불합격 {fail} · 확인 못 함 {unknown}', words)
       : why === 'format' ? tr('검수 {n}회차: 판정 블록을 받지 못해서 판정 없이 끝남', words)
@@ -2810,6 +2948,23 @@ export class Orchestrator {
     for (const x of m.keepBroken) logLine(m, 'keep', tr('지키기로 한 것을 어김: {text}', { text: x }), last?.id || null).fail = 'keep';
     this.#emitRun(ctx);
     this.emitMission(s);
+  }
+
+  // 교차 검수 한 회차의 기록(결정 0032): 회차 기록(mission.crossLog, CROSS_LOG_MAX 회차)과 진행 기록 줄(검수자별 판정 수와 합친 결과, 한 명만 본 기준).
+  // 둘째를 못 쓴 회차(single)는 까닭을 #crossOk 가 이미 적었고, 둘 다 판정을 못 낸 회차(none)는 그렇다고 한 줄
+  #crossRecord(ctx, d, t) {
+    const m = ctx.mission;
+    const x = d.cross;
+    const name = (id) => this.store.get('agents', id)?.name || id;
+    const rec = { round: d.round, a: x.a, b: x.b || null, ...(x.single ? { single: true } : {}), ...(x.none ? { none: true } : {}), splits: [...(x.splits || [])], one: [...(x.one || [])],
+      ...(x.counts ? { counts: x.counts } : {}), ...(x.picks ? { picks: Object.fromEntries(Object.entries(x.picks).map(([k, v]) => [k, v.pick])) } : {}) };
+    (m.crossLog ||= []).push(rec);
+    if (m.crossLog.length > CROSS_LOG_MAX) m.crossLog.splice(0, m.crossLog.length - CROSS_LOG_MAX);
+    if (x.single) return;
+    if (x.none) { logLine(m, 'cross', tr('교차 검수 {n}회차: 두 검수자 모두 판정을 내지 못했어.', { n: d.round }), d.lastId); return; }
+    const side = (id, c) => (c ? tr('{name} 통과 {pass}·불합격 {fail}·확인 못 함 {unknown}', { name: name(id), pass: c.pass || 0, fail: c.fail || 0, unknown: c.unknown || 0 }) : tr('{name} 판정 없음', { name: name(id) }));
+    logLine(m, 'cross', tr('교차 검수 {n}회차: {a} / {b}. 합친 결과 통과 {pass}·불합격 {fail}·확인 못 함 {unknown}·엇갈림 {split}', { n: d.round, a: side(x.a, x.counts?.a), b: side(x.b, x.counts?.b), pass: t.pass, fail: t.fail, unknown: t.unknown, split: (x.splits || []).length }), d.lastId);
+    if (x.one?.length) logLine(m, 'cross', tr('한 명만 본 기준: {ids}', { ids: x.one.join(', ') }), d.lastId);
   }
 
   // 작업 폴더의 git 이 알려 주는 바뀐 파일(결정 0015 개정): git status --porcelain -z 의 경로를 최대 50개. 테스트로 보이는 파일(testLike)은 따로.
@@ -3940,8 +4095,8 @@ export class Orchestrator {
     // 일 카드의 계획 대목(결정 0018)도 조사 질문처럼 그 실행만 읽기 전용
     // savedPermission: 시스템 지시의 권한 문장은 저장된 권한으로 고정한다(결정 0023. 이 실행만 읽기 전용이라는 문장은 프롬프트 앞머리로)
     // 문서로 팀 짜기의 초안(결정 0024)도 그 실행만 읽기 전용이고, 역할 노트·스킬·커넥터 없이(코드의 지시와 문서만) 돈다
-    // 두 갈래의 한 장 요약(결정 0031)도 그 실행만 읽기 전용(파일을 고치지 않는다)
-    if (base && (researchTurn || goalMeetTurn || ['questions', 'plan', 'team', 'fork', 'lead', 'meet'].includes(given?.prep?.kind))) base = { ...base, permission: 'plan', readOnlyRun: researchTurn ? 'research' : 'talk', savedPermission: base.permission };
+    // 두 갈래의 한 장 요약(결정 0031)도 그 실행만 읽기 전용(파일을 고치지 않는다). 교차 검수의 두 검수자(결정 0032, given.readOnly)도 그 실행만 읽기 전용(한 명 검수는 지금처럼 자기 권한)
+    if (base && (researchTurn || goalMeetTurn || ['questions', 'plan', 'team', 'fork', 'lead', 'meet'].includes(given?.prep?.kind) || given?.readOnly === true)) base = { ...base, permission: 'plan', readOnlyRun: researchTurn ? 'research' : 'talk', savedPermission: base.permission };
     if (base && given?.prep?.kind === 'team') base = { ...base, noNotes: true, skills: [], connectors: [] };
     // 배정 기록의 "요청한 AI"(결정 0022)는 아래에서 바꾸기 전의 설정으로 적는다
     const asked = base;
@@ -3982,7 +4137,8 @@ export class Orchestrator {
     if (ctx.missionTurn === 'goal') msg.goalDraft = true; // 목표 카드 초안을 쓴 답(에이전트에게 넘기는 대화·기억에 싣지 않는다. 결정 0014)
     // 목표 실행(목표 잡기·일 실행)의 답: 어느 목표 것인지(결정 0026). 사용량의 종류(일 단계)와 "이 목표 것만"이 실행 기록(30개까지) 대신 이 표시를 본다
     if (ctx.missionTurn && ctx.mission?.id) msg.missionId = ctx.mission.id;
-    if (once?.phase === 'review') msg.review = { round: once.round, ...(once.retried ? { retried: true } : {}) }; // 기준 판정 답(기억에 넣지 않는다. 끝나면 판정으로 채운다)
+    // 기준 판정 답(기억에 넣지 않는다. 끝나면 판정으로 채운다). role: 교차 검수의 검증('check')·레드팀('red', 사용량 종류 cross, 결정 0032)
+    if (once?.phase === 'review') msg.review = { round: once.round, ...(once.role ? { role: once.role } : {}), ...(once.retried ? { retried: true } : {}) };
     if (once) msg.once = true; // 한 번 실행의 답: 이 에이전트의 CLI 대화에 없다(놓친 대화·인수인계 메모 자격을 셀 때 뺀다)
     if (once?.fresh) msg.freshMeet = true; // 긴 세션의 보통 회의 차례(결정 0023): 목표의 회의와 달리 넘기는 대화에서 빼지 않는다(notTalk)
     if (once?.prep) msg.prep = { ...once.prep }; // 일하기 전 조사·회의의 답(훑어보기·조사 질문·조사·준비 회의, 결정 0017. 기억에 넣지 않는다)
@@ -5389,7 +5545,7 @@ ${lead.reply}`;
   }
 
   // ── 개입 ──
-  control(sessionId, { action, agentId = null, text = '', askId = null, answers = null, skip = false, to = null, pick = null, hash = null, msgId = null }) {
+  control(sessionId, { action, agentId = null, text = '', askId = null, answers = null, skip = false, to = null, pick = null, hash = null, msgId = null, round = null, picks = null }) {
     const ctx = this.ctx.get(sessionId);
     if (!ctx) throw Object.assign(new Error(tr('진행 중인 작업이 없어.')), { status: 409 });
     const { s } = ctx;
@@ -5399,11 +5555,13 @@ ${lead.reply}`;
     // 구독 한도 상한(limitcap, 결정 0026): 계속(accept)·초기화 뒤 이어서(later)·그만. retry 는 자동 이어서 타이머가 다시 보게 한다
     // 윗등급에게 넘기기(raise, 결정 0027): 되풀이 상한·막힘 질문에 넘기기 보기가 있을 때만
     // 두 갈래(fork, 결정 0031): 묻기(step offer)는 요약 받기(write)·팀이 정해(team), 고르기(step pick)는 안 A·B(a·b)·팀이 정해. 안을 고를 때는 본 요약의 해시가 저장된 것과 같아야 한다
-    const ALLOWED = { approve: ['approve', 'reject', 'retry', 'stop'], error: ['retry', 'skip', 'stop'], pause: ['resume', 'stop'], mission: ['accept', 'more', 'raise', 'stop'], cap: ['more', 'stop'], quota: ['later', 'retry', 'skip', 'accept', 'stop'], limitcap: ['accept', 'later', 'retry', 'stop'], fork: ['fork', 'stop'] };
+    // 교차 검수의 판정 카드(mission 의 kind 'split', 결정 0032): judge(고른 값)와 stop 만. judge 는 다른 대기(판정 뒤 묻기 등)에서는 안 받는다
+    const ALLOWED = { approve: ['approve', 'reject', 'retry', 'stop'], error: ['retry', 'skip', 'stop'], pause: ['resume', 'stop'], mission: ['accept', 'more', 'raise', 'judge', 'stop'], cap: ['more', 'stop'], quota: ['later', 'retry', 'skip', 'accept', 'stop'], limitcap: ['accept', 'later', 'retry', 'stop'], fork: ['fork', 'stop'] };
     const gate = (d) => {
       if (!ctx.gate) return false;
       const reason = ctx.run.hold?.reason;
       if (reason && !ALLOWED[reason]?.includes(d.action)) return false;
+      if (reason === 'mission' && d.action !== 'stop' && (d.action === 'judge') !== (ctx.run.hold?.kind === 'split')) return false;
       if (d.action === 'raise' && !this.#raiseOffered(ctx.run.hold, d.to)) return false; // 고른 후보가 지금 질문 창의 보기에 있어야 한다(지금도 후보인지는 #raiseAsk 가 다시 본다)
       if (d.action === 'more' && ctx.run.hold?.more === false) return false; // 되돌릴 수 없는 대기(검수자가 없는 팀의 판정 대기)
       if (d.action === 'later' && (!ctx.run.hold?.canAuto || ctx.run.hold?.autoAt)) return false; // 시각을 모르거나, 자동 횟수를 다 썼거나, 이미 골랐다
@@ -5564,6 +5722,16 @@ ${lead.reply}`;
           }
         }
         return { ok: gate({ action: 'fork', pick: p }) };
+      }
+      case 'judge': {
+        // 교차 검수의 판정 카드(결정 0032): 지금 열린 카드의 회차(round)와 엇갈린 기준마다 고른 값(picks). 다른 대기·다른 회차의 카드면 ok:false(이미 반영한 같은 요청도),
+        // 엇갈린 기준을 다 정하지 않았거나 모르는 값·모르는 기준이면 400
+        const h = ctx.run.hold;
+        if (!ctx.gate || h?.reason !== 'mission' || h.kind !== 'split') return { ok: false, reason: tr('지금은 판정 카드를 기다리고 있지 않아.') };
+        if (!Number.isInteger(round) || round !== h.round) return { ok: false, reason: tr('지금 판정 카드의 회차가 아니야.') };
+        const c = cleanPicks(picks, (h.items || []).filter((x) => x.split).map((x) => x.id));
+        if (c.error) throw Object.assign(new Error(tr('엇갈린 기준마다 고치기·접기·보류 중 하나를 골라 줘.')), { status: 400 });
+        return { ok: gate({ action: 'judge', picks: c.picks }) };
       }
       default: throw Object.assign(new Error(tr('모르는 동작: {action}', { action })), { status: 400 });
     }

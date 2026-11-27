@@ -1,6 +1,6 @@
 # 0015: Goal mode checks each confirmed criterion with a fresh reviewer, returns the work once, then asks
 
-- Status: Accepted
+- Status: Replaced by [0032](0032-goal-mode-criteria-check-and-cross-review.md)
 - Date: 2026-11-20
 - Related: [0009](0009-agents-ask-with-a-marked-block.md) (marked blocks; the criteria check doesn't ask), [0012](0012-claude-usage-counts-the-whole-tree.md) (usage baseline), [0013](0013-agents-keep-role-notes.md) (role notes), [0014](0014-goal-mode-confirmed-goal-card.md) (the goal card), `server/mission.js` (`reviewPlan`, `reviewCard`, `parseReview`, `reviewPrompt`, `reviewBlock`, `applyReview`, `tally`, `allPass`, `returnItems`, `returnPrompt`, `prevPrompt`, `sameDroppable`, `MISSION_CALL_CAP`), `server/orchestrator.js` (`confirmMission`, `#missionPlan`, `#runStage`, `#missionRun`, `#missionWork`, `#stagePrev`, `#reviewStage`, `#noReviewer`, `#missionAsk`, `#capCheck`, `#countCall`, `#runAgent` with `once`, `#route`, `#pace`, `#settle`, `#prompt`, `#missionEnd`, `#missionNote`, `#withMissed`, `#historyList`, `handoffWriter`, `#autoWriter`, `control`), `server/notify.js`, `server/store.js` (`attentionOf`, `#metaOf`), `server/index.js` (the 409 body), `server/providers/mock.js`, `public/js/views/mission.js` (`GoalCard`, `MissionGate`, `ReviewTable`, `MissionLog`), `public/js/views/session.js`, `public/js/chat-tools.js` (`hideReview`), `test/mission-review.test.js`, `test/fake-cli/fake-claude.js`
 

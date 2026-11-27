@@ -263,8 +263,10 @@ export function stageModel(input = {}) {
     else if (hold.reason === 'error') ask = { kind: 'error', icon: 'warn', cls: 'err', title: t('오류'), short: t('"{label}" 단계에서 멈춤', { label }), target: 'gate', station: i };
     else if (hold.reason === 'mission') {
       const k = hold.kind;
-      const title = k === 'notes' ? t('추가 지시 반영') : k === 'blocked' ? t('막힘') : k === 'limit' ? t('카드 되풀이 상한') : t('목표 판정');
+      // split: 교차 검수의 판정 카드(결정 0032). 문 자리는 판정과 같이 검수 역 뒤
+      const title = k === 'notes' ? t('추가 지시 반영') : k === 'blocked' ? t('막힘') : k === 'limit' ? t('카드 되풀이 상한') : k === 'split' ? t('판정 카드') : t('목표 판정');
       const base = k === 'notes' ? t('반영 안 한 추가 지시 {n}개', { n: Number(hold.notes) || 0 })
+        : k === 'split' ? t('엇갈린 기준 {n}개', { n: (hold.items || []).filter((x) => x.split).length })
         : k === 'blocked' ? (hold.blocked || []).map((b) => b.name).filter(Boolean).join(', ')
           : k === 'limit' ? (hold.cards || []).map((c) => c.id).join(', ')
             : t('남은 기준 {n}개', { n: (hold.left || []).length });

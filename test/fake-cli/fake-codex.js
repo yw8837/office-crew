@@ -42,6 +42,19 @@ process.stdin.on('end', async () => {
     fs.writeFileSync(`${dir}/${shot}`, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64'));
     out({ type: 'item.completed', item: call('mcp_2', 'browser_take_screenshot', {}, 'completed', { content: [{ type: 'text', text: `### Result\nTook the viewport screenshot and saved it as ${shot}\n${page}` }] }) });
   }
+  // 교차 검수(결정 0032): 목표 줄에 CODEXREVIEW 가 있는 기준 판정 차례("[기준 판정 — ")면 프롬프트의 일회용 값과 기준 id 로 판정 블록을 쓴다(모두 통과).
+  // 목표 줄에 REDFAILEV(REDFAILEV1 이면 1회차만)도 있고 레드팀 차례면 c1 불합격(확인할 수 있는 근거). 신호어가 없으면 예전처럼 보통 답(다른 시험의 이어받은 판정이 그대로 깨지게)
+  const goalLine = input.match(/^목표: (.*)$/m)?.[1] || '';
+  if (input.includes('[기준 판정 — ') && goalLine.includes('CODEXREVIEW')) {
+    const nonce = [...input.matchAll(/"nonce":"([0-9a-f]{16})"/g)].at(-1)?.[1] || '';
+    const ids = [...input.matchAll(/^- (c\d+): /gm)].map((x) => x[1]);
+    const round = Number(input.match(/\[기준 판정 — (\d+)번째 검수\]/)?.[1] || 1);
+    const red = input.includes('레드팀 검수자') && (goalLine.includes('REDFAILEV1') ? round === 1 : goalLine.includes('REDFAILEV'));
+    const results = ids.map((id) => (red && id === 'c1' ? { id, verdict: 'fail', evidence: '가짜 codex: src/app.js:3 에서 깨짐' } : { id, verdict: 'pass', evidence: `가짜 codex 확인: ${id}` }));
+    out({ type: 'item.completed', item: { id: 'item_r', type: 'agent_message', text: `판정했어.\n\n\`\`\`oc-review\n${JSON.stringify({ nonce, results })}\n\`\`\`` } });
+    out({ type: 'turn.completed', usage: { input_tokens: 1000, cached_input_tokens: 400, output_tokens: 7, reasoning_output_tokens: 0 } });
+    process.exit(0);
+  }
   out({ type: 'item.started', item: { id: 'item_1', type: 'command_execution', command: 'ls', aggregated_output: '', status: 'in_progress' } });
   if (input.includes('HANGNOW')) await new Promise((r) => setTimeout(r, 120000)); // 출력 없이 멈춘 CLI 흉내
   await new Promise((r) => setTimeout(r, input.includes('SLOW') ? 1500 : 30));

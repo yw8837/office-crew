@@ -3,7 +3,7 @@
 // 에이전트가 쓴 글(기준의 근거, 회의 결론의 결정·남은 이견)은 따로 표시를 달고 길이 상한까지만. 바뀐 파일 목록은 오케스트레이터가 git 으로 채운다.
 // 글 판(reportText)은 사용자가 "기억에 넣기"를 누를 때 프로젝트 기억에 넣는 글이다: 코드가 모은 사실과 기준별 결과만(회의 결론·조사 노트는 넣지 않는다)
 import { tr } from './i18n.js';
-import { verdictWord, answerRows, durationWords, unverifiedLines, failWords, raisedWords, forkLines } from '../public/js/report-lines.js'; // 화면과 같은 글줄
+import { verdictWord, answerRows, durationWords, unverifiedLines, failWords, raisedWords, forkLines, crossWords } from '../public/js/report-lines.js'; // 화면과 같은 글줄
 import { answerKind, weighted } from '../public/js/usage-numbers.js'; // 답의 종류는 세션의 "어디에 썼는지"와 같은 함수(결정 0026)
 import { redact } from './memory.js'; // 실행 기록 내보내기의 비밀 가리기는 기억과 같은 함수(결정 0030)
 import { isQuotaError, isTransientError } from './failover.js';
@@ -38,8 +38,8 @@ export function buildReport({ m, messages = [], runs = [], now = Date.now(), nam
     if (x.role !== 'agent' || !ids.has(x.runId)) continue;
     // 이 목표의 실행에서 고른 답이라 표시 없는 답은 일 단계. 팀 초안·인수인계 메모는 목표 실행에 생기지 않는다(생겨도 일 단계로 센다)
     const k = answerKind(x, { goal: true });
-    // 갈래 요약·진행자 답(결정 0031)은 있을 때만 칸을 만든다(옛 보고·그런 답이 없는 보고의 모양은 그대로)
-    const key = k in answers || k === 'fork' || k === 'lead' ? k : 'work';
+    // 교차 검수의 둘째 검수(결정 0032)·갈래 요약·진행자 답(결정 0031)은 있을 때만 칸을 만든다(옛 보고·그런 답이 없는 보고의 모양은 그대로)
+    const key = k in answers || k === 'cross' || k === 'fork' || k === 'lead' ? k : 'work';
     answers[key] = (answers[key] || 0) + 1;
     if (x.status !== 'done') answerFails++;
   }
@@ -56,6 +56,15 @@ export function buildReport({ m, messages = [], runs = [], now = Date.now(), nam
   // 회의 결론(결정 0025의 구조): 회의마다(준비 회의, 팀 회의 단계 번호) 가장 최근 결론의 결정과 남은 이견만
   const meet = new Map();
   for (const x of m.meetings || []) meet.set(x.prep ? 'prep' : `s${x.stageIndex}`, x);
+  // 교차 검수(결정 0032): 검수자 둘, 회차 기록(crossLog)에서 센 엇갈림·사용자가 정한 것·한 명만 검수한 회차, 마지막 판정의 보류·한 명만 본 기준. 켜지 않은 목표는 null
+  const xl = m.cross?.secondId ? m.crossLog || [] : [];
+  const picks = { fix: 0, fold: 0, hold: 0 };
+  for (const r of xl) for (const p of Object.values(r.picks || {})) if (p in picks) picks[p]++;
+  const cross = m.cross?.secondId ? {
+    a: String(nameOf(m.reviewerId) || m.reviewerId || ''), b: String(nameOf(m.cross.secondId) || m.cross.secondId), rounds: xl.length, single: xl.filter((r) => r.single).length,
+    splits: xl.reduce((n, r) => n + (r.splits || []).length, 0), picks,
+    held: (m.criteria || []).filter((c) => c.user?.pick === 'hold').map((c) => c.id), one: (m.criteria || []).filter((c) => c.one).map((c) => c.id),
+  } : null;
   return {
     end: m.status, goal: m.goal || '',
     from: m.confirmedAt || m.createdAt || now, to: now,
@@ -77,6 +86,7 @@ export function buildReport({ m, messages = [], runs = [], now = Date.now(), nam
     fails, routes: log.filter((x) => x.kind === 'route').length,
     // 윗등급에게 넘긴 카드(결정 0027): 카드 기록(raised)에서 카드마다 처음 담당 → 넘겨받은 담당들(이름)
     raised: (m.cards || []).filter((c) => c.raised?.length).map((c) => ({ id: c.id, chain: [c.raised[0].from, ...c.raised.map((r) => r.to)].map((id) => String(nameOf(id) || id)) })),
+    cross,
     logCut: log[0]?.kind === 'skip' ? Number(log[0].n) || 0 : 0,
     meetings: [...meet.values()].map((x) => ({ ...(x.prep ? { prep: true } : { stageIndex: x.stageIndex, label: String(lastWork?.stages?.[x.stageIndex]?.label || '') }), msgId: x.msgId, decision: x.decision || '', dissent: [...(x.dissent || [])] })),
     // 두 갈래(결정 0031): 회의마다 사용자가 고른 안과 버린 안(입장 글은 에이전트가 쓴 것), 팀에 맡긴 것. 있을 때만
@@ -146,7 +156,7 @@ export function exportRun({ s, m, nameOf = (id) => id, body = false, secrets = [
       id: m.id, status: m.status, goal: m.goal || '', work: m.work || 'stages', createdAt: m.createdAt || 0, confirmedAt: m.confirmedAt || 0, editedByUser: !!m.editedByUser,
       criteria: (m.criteria || []).map((c) => ({ id: c.id, text: c.text, status: c.status || 'open', evidence: c.evidence || '', ...(c.check ? { check: c.check } : {}) })),
       outOfScope: [...(m.outOfScope || [])], userDecides: [...(m.userDecides || [])], mustKeep: [...(m.mustKeep || [])],
-      lead: who(m.leadId), reviewer: who(m.reviewerId), dropped: [...(m.dropped || [])], prep: m.prep || null,
+      lead: who(m.leadId), reviewer: who(m.reviewerId), reviewer2: who(m.cross?.secondId), dropped: [...(m.dropped || [])], prep: m.prep || null, // reviewer2: 교차 검수의 둘째 검수자(결정 0032)
       calls: m.calls || null, estimate: m.estimate || null, round: m.round || 0, returns: m.returns || 0, returnCap: m.returnCap ?? null,
       ...(body ? { request: m.request || '' } : {}),
     },
@@ -159,6 +169,9 @@ export function exportRun({ s, m, nameOf = (id) => id, body = false, secrets = [
     })),
     log: (m.log || []).map((x) => ({ at: x.at, kind: x.kind, ...(body || !userText(x) ? { text: x.text } : { textOmitted: true }), ...(x.msgId ? { msgId: x.msgId } : {}), ...(x.fail ? { fail: x.fail } : {}), ...(x.by ? { by: x.by } : {}), ...(x.agentKind ? { agentKind: x.agentKind } : {}), ...(x.n ? { n: x.n } : {}) })),
     meetings: (m.meetings || []).map((x) => ({ ...x })), decided: (m.decided || []).map((x) => ({ ...x })),
+    // 교차 검수(결정 0032): 회차마다 두 검수자·판정 수·엇갈린 기준·한 명만 본 기준·판정 카드에서 사용자가 정한 것, 지금 열린 판정 카드(있으면. 근거는 에이전트가 쓴 글)
+    crossLog: (m.crossLog || []).map((x) => ({ ...x, ...(x.a ? { a: who(x.a) } : {}), ...(x.b ? { b: who(x.b) } : {}) })),
+    ...(m.split ? { splitOpen: { round: m.split.round, items: (m.split.cross?.items || []).map((x) => ({ id: x.id, split: !!x.split, a: x.a, b: x.b })) } } : {}),
     calls: answers.map((x) => ({
       msgId: x.id, runId: x.runId || null, stageIndex: x.stageIndex ?? null, stage: x.stageLabel || '', agent: who(x.agentId),
       provider: x.provider || '', model: x.model || '', effort: x.effort || '', kind: answerKind(x, { goal: true }), status: x.status,
@@ -204,6 +217,8 @@ export function reportText(r, { missionId = '' } = {}) {
   if (up) lines.push(up);
   const fk = forkLines(tr, r.forks);
   if (fk.length) lines.push(`${tr('두 갈래(입장은 에이전트가 씀)')}:`, ...fk.map((x) => `- ${x}`));
+  const cw = crossWords(tr, r.cross); // 교차 검수(결정 0032)
+  if (cw.length) lines.push(`${tr('교차 검수')}:`, ...cw.map((x) => `- ${x}`));
   if (r.files?.list?.length) lines.push(`${tr('바뀐 파일(git)')}: ${r.files.list.slice(0, 20).join(', ')}${r.files.list.length > 20 || r.files.more ? ` ${tr('…(그 밖에 {n}개)', { n: r.files.list.length - Math.min(20, r.files.list.length) + (r.files.more || 0) })}` : ''}`);
   const text = [...lines.join('\n')];
   return text.length > REPORT_TEXT_MAX ? text.slice(0, REPORT_TEXT_MAX).join('') : text.join('');

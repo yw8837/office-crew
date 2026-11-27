@@ -20,7 +20,7 @@ Keep a record under about 100 lines. When a decision changes, add a dated "Revis
 | [0012](0012-claude-usage-counts-the-whole-tree.md) | Claude usage counts sub-agents and is not counted twice in a continued conversation | Accepted |
 | [0013](0013-agents-keep-role-notes.md) | Agents keep short role notes, and only what the user accepts goes into their work | Accepted (revised by 0023) |
 | [0014](0014-goal-mode-confirmed-goal-card.md) | Goal mode turns a request into a goal card the user confirms, and only the confirmed values become instructions | Accepted |
-| [0015](0015-goal-mode-fresh-review.md) | Goal mode checks each confirmed criterion with a fresh reviewer, returns the work once, then asks | Accepted (revised by 0026) |
+| [0015](0015-goal-mode-fresh-review.md) | Goal mode checks each confirmed criterion with a fresh reviewer, returns the work once, then asks | Replaced by 0032 |
 | [0016](0016-goal-mode-continue-a-cut-goal.md) | A goal cut off by closing the app continues from where it stopped, only when the user asks | Accepted |
 | [0017](0017-goal-mode-research-and-meeting-first.md) | Goal mode researches and holds a meeting before the work, every turn in a new conversation | Accepted (revised by 0026; see also 0031: two options after a goal meeting) |
 | [0018](0018-goal-mode-task-cards.md) | Goal mode can split the work into task cards the lead plans and the code orders | Accepted (see 0027, 0030 and 0031 for later changes) |
@@ -37,3 +37,4 @@ Keep a record under about 100 lines. When a decision changes, add a dated "Revis
 | [0029](0029-browser-tool-as-a-built-in-connector.md) | The "Use a web browser" switch is a built-in Playwright MCP connector, and the browser tab shows the screenshots from its output folder | Accepted |
 | [0030](0030-goal-run-records-retry-and-flow-map.md) | Goal mode remembers repeated failures, retries a temporary outage once, exports a run as one file and draws a read-only flow map | Accepted |
 | [0031](0031-two-options-and-asking-the-lead.md) | A goal meeting split between two options lets the user pick from one-page summaries, and a task card can ask the lead, who can ask the user or request a small meeting | Accepted |
+| [0032](0032-goal-mode-criteria-check-and-cross-review.md) | Goal mode checks each confirmed criterion with a fresh reviewer, can add a second red-team reviewer whose verdict the code merges, returns the work, then asks (replaces 0015) | Accepted |
